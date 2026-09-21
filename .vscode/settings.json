@@ -1,0 +1,13 @@
+{
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+  "tailwindCSS.experimental.classRegex": [
+    ["ui:\\s*{([^)]*)\\s*}", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["/\\*ui\\*/\\s*{([^;]*)}", ":\\s*[\"'`]([^\"'`]*).*?[\"'`]"]
+  ],
+  "tailwindCSS.classAttributes": ["class", "className", "ui"],
+  "terminal.integrated.env.windows": {
+    "PATH": "C:\\Program Files\\PostgreSQL\\16\\bin;C:\\laragon\\bin\\php\\php-8.4.22-Win32-vs17-x64;C:\\laragon\\bin\\composer;${env:PATH}"
+  }
+}

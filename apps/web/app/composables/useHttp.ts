@@ -1,0 +1,12 @@
+import type { $Fetch } from 'nitropack/types';
+import type { HttpUseFetchOptions } from '~~';
+
+export function useHttp<T>(
+  url: string | (() => string),
+  options?: HttpUseFetchOptions<T>,
+) {
+  return useFetch<T>(url, {
+    ...options,
+    $fetch: $http as $Fetch
+  } as any);
+}

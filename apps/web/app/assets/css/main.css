@@ -1,0 +1,161 @@
+@import "tailwindcss" theme(static);
+@import "@nuxt/ui";
+
+:root {
+  --ui-radius: 0.25rem;
+}
+
+@layer base {
+  #__nuxt {
+    @apply min-h-screen flex flex-col;
+  }
+
+  button, a, [role="button"] {
+    @apply transition-colors;
+  }
+
+  input[type="checkbox"], input[type="radio"] {
+    @apply transition-all;
+  }
+
+  /* ==========================================================================
+     Minimalist & Modern Scrollbar
+     - Thin 6px profile with transparent track
+     - Subtle semi-transparent pill thumb
+     - Seamless contrast adaptation for Light & Dark mode
+     - Firefox & WebKit cross-browser support
+     ========================================================================== */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.35) transparent;
+  }
+
+  .dark * {
+    scrollbar-color: rgba(156, 163, 175, 0.22) transparent;
+  }
+
+  /* WebKit (Chrome, Edge, Safari, Opera) */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.35);
+    border-radius: 9999px;
+    transition: background-color 0.15s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(107, 114, 128, 0.65);
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    background-color: rgba(75, 85, 99, 0.85);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Dark mode overrides for WebKit */
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.22);
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 163, 175, 0.45);
+  }
+
+  .dark ::-webkit-scrollbar-thumb:active {
+    background-color: rgba(209, 213, 219, 0.7);
+  }
+}
+
+/* Scrollbar utility classes */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.2) transparent;
+}
+.scrollbar-subtle::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.scrollbar-subtle::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.2);
+  border-radius: 9999px;
+}
+.scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.5);
+}
+
+/* ==========================================================================
+   GIS Workspace Splitter & Panel Transitions
+   - Snappy cubic-bezier interpolation for panel flex-grow
+   - Disabled during handle drag for 100% responsive mouse tracking
+   - Cross-fade & micro-animations for panel contents
+   ========================================================================== */
+.panel-smooth-transition {
+  transition: flex 0.2s cubic-bezier(0.2, 0, 0, 1), height 0.2s cubic-bezier(0.2, 0, 0, 1), width 0.2s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.panel-fade-enter-active,
+.panel-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.panel-fade-enter-from,
+.panel-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+.panel-subtle-fade-enter-active,
+.panel-subtle-fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.panel-subtle-fade-enter-from,
+.panel-subtle-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.panel-body-fade-enter-active,
+.panel-body-fade-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.panel-body-fade-enter-from,
+.panel-body-fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.tab-fade-enter-active,
+.tab-fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.tab-fade-enter-from {
+  opacity: 0;
+  transform: translateX(6px);
+}
+
+.tab-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-6px);
+}
+

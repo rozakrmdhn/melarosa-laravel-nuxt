@@ -14,49 +14,67 @@ interface PermissionsResponse {
 const toast = useToast();
 const { data, status, refresh, error } = useHttp<PermissionsResponse>("admin/permissions");
 const loading = computed(() => status.value === "pending");
+const { can } = usePermission();
 
-useSeoMeta({
-  title: "Permissions Management",
+definePageMeta({
+  middleware: ["auth", "permission"],
+  permission: "permissions-view",
 });
 
-// Search filter
+const canCreate = computed(() => can('permissions-create') || can('permissions-manage'));
+const canUpdate = computed(() => can('permissions-update') || can('permissions-manage'));
+const canDelete = computed(() => can('permissions-delete') || can('permissions-manage'));
+const hasAnyAction = computed(() => canUpdate.value || canDelete.value);
+
+useSeoMeta({
+  title: "Hak Akses | User Management",
+});
+
+// ─── Search & Pagination State ──────────────────────────────────────────────
 const search = ref("");
+const page = ref(1);
+const perPage = ref(15);
+
 const filteredPermissions = computed(() => {
   const all = data.value?.permissions ?? [];
   if (!search.value.trim()) return all;
-  const q = search.value.toLowerCase();
+  const q = search.value.toLowerCase().trim();
   return all.filter((p) => p.name.toLowerCase().includes(q));
 });
 
-// Create Modal state
-const isModalOpen = ref(false);
-const submitting = ref(false);
-const formState = reactive({
-  name: "",
+const paginatedPermissions = computed(() => {
+  const start = (page.value - 1) * perPage.value;
+  return filteredPermissions.value.slice(start, start + perPage.value);
 });
 
-// Delete Modal state
-const isDeleteModalOpen = ref(false);
-const permissionToDelete = ref<Permission | null>(null);
-const deleting = ref(false);
+const totalPages = computed(() => Math.ceil(filteredPermissions.value.length / perPage.value) || 1);
+
+watch(search, () => {
+  page.value = 1;
+});
+
+// ─── Create Permission Modal State ──────────────────────────────────────────
+const isCreateModalOpen = ref(false);
+const creating = ref(false);
+const createName = ref("");
+const createError = ref("");
 
 function openCreateModal() {
-  formState.name = "";
-  isModalOpen.value = true;
+  createName.value = "";
+  createError.value = "";
+  isCreateModalOpen.value = true;
 }
 
 async function handleCreatePermission() {
-  const trimmed = formState.name.trim().toLowerCase();
+  createError.value = "";
+  const trimmed = createName.value.trim().toLowerCase();
+
   if (!trimmed) {
-    toast.add({
-      icon: "i-heroicons-exclamation-circle",
-      title: "Permission name is required.",
-      color: "error",
-    });
+    createError.value = "Nama hak akses wajib diisi.";
     return;
   }
 
-  submitting.value = true;
+  creating.value = true;
   try {
     const res = await $http<{ ok: boolean; message: string }>("admin/permissions", {
       method: "POST",
@@ -65,25 +83,101 @@ async function handleCreatePermission() {
 
     if (res?.ok) {
       toast.add({
-        icon: "i-heroicons-check-circle",
-        title: res.message || "Permission created successfully.",
+        icon: "i-lucide-check-circle",
+        title: "Berhasil",
+        description: res.message || "Hak akses baru berhasil ditambahkan.",
         color: "success",
       });
-      isModalOpen.value = false;
+      isCreateModalOpen.value = false;
       await refresh();
     }
   } catch (err: any) {
-    const msg =
-      err?.response?._data?.message || "Failed to create permission.";
+    const apiErrors = err?.data?.errors || err?.response?._data?.errors;
+    if (apiErrors?.name) {
+      createError.value = Array.isArray(apiErrors.name) ? apiErrors.name[0] : String(apiErrors.name);
+    } else {
+      const msg = err?.data?.message || err?.response?._data?.message || "Gagal menambahkan hak akses.";
+      createError.value = msg;
+    }
     toast.add({
-      icon: "i-heroicons-exclamation-circle",
-      title: msg,
+      icon: "i-lucide-alert-circle",
+      title: "Gagal Menambahkan",
+      description: createError.value,
       color: "error",
     });
   } finally {
-    submitting.value = false;
+    creating.value = false;
   }
 }
+
+// ─── Edit Permission Modal State ────────────────────────────────────────────
+const isEditModalOpen = ref(false);
+const updating = ref(false);
+const editingPermission = ref<Permission | null>(null);
+const editName = ref("");
+const editError = ref("");
+
+function openEditModal(perm: Permission) {
+  editingPermission.value = perm;
+  editName.value = perm.name;
+  editError.value = "";
+  isEditModalOpen.value = true;
+}
+
+async function handleUpdatePermission() {
+  if (!editingPermission.value) return;
+  editError.value = "";
+  const trimmed = editName.value.trim().toLowerCase();
+
+  if (!trimmed) {
+    editError.value = "Nama hak akses wajib diisi.";
+    return;
+  }
+
+  updating.value = true;
+  try {
+    const res = await $http<{ ok: boolean; message: string }>(
+      `admin/permissions/${editingPermission.value.id}`,
+      {
+        method: "PUT",
+        body: { name: trimmed },
+      }
+    );
+
+    if (res?.ok) {
+      toast.add({
+        icon: "i-lucide-check-circle",
+        title: "Berhasil",
+        description: res.message || "Hak akses berhasil diperbarui.",
+        color: "success",
+      });
+      isEditModalOpen.value = false;
+      editingPermission.value = null;
+      await refresh();
+    }
+  } catch (err: any) {
+    const apiErrors = err?.data?.errors || err?.response?._data?.errors;
+    if (apiErrors?.name) {
+      editError.value = Array.isArray(apiErrors.name) ? apiErrors.name[0] : String(apiErrors.name);
+    } else {
+      const msg = err?.data?.message || err?.response?._data?.message || "Gagal memperbarui hak akses.";
+      editError.value = msg;
+    }
+    toast.add({
+      icon: "i-lucide-alert-circle",
+      title: "Gagal Update",
+      description: editError.value,
+      color: "error",
+    });
+  } finally {
+    updating.value = false;
+  }
+}
+
+// ─── Delete Permission Modal State ──────────────────────────────────────────
+const isDeleteModalOpen = ref(false);
+const permissionToDelete = ref<Permission | null>(null);
+const deleting = ref(false);
 
 function confirmDelete(perm: Permission) {
   permissionToDelete.value = perm;
@@ -104,8 +198,9 @@ async function handleDeletePermission() {
 
     if (res?.ok) {
       toast.add({
-        icon: "i-heroicons-check-circle",
-        title: res.message || "Permission deleted successfully.",
+        icon: "i-lucide-check-circle",
+        title: "Berhasil",
+        description: res.message || "Hak akses berhasil dihapus.",
         color: "success",
       });
       isDeleteModalOpen.value = false;
@@ -113,11 +208,11 @@ async function handleDeletePermission() {
       await refresh();
     }
   } catch (err: any) {
-    const msg =
-      err?.response?._data?.message || "Failed to delete permission.";
+    const msg = err?.data?.message || err?.response?._data?.message || "Gagal menghapus hak akses.";
     toast.add({
-      icon: "i-heroicons-exclamation-circle",
-      title: msg,
+      icon: "i-lucide-alert-circle",
+      title: "Gagal Menghapus",
+      description: msg,
       color: "error",
     });
   } finally {
@@ -125,51 +220,55 @@ async function handleDeletePermission() {
   }
 }
 
-const columns = [
+// ─── Table Columns ──────────────────────────────────────────────────────────
+const columns = computed(() => [
   {
     accessorKey: "name",
-    header: "Permission Name",
+    header: "Nama Hak Akses (Identifier)",
   },
   {
     accessorKey: "roles_count",
-    header: "Assigned to Roles",
+    header: "Terhubung ke Role",
     class: "w-44 text-center",
   },
-  {
+  ...(hasAnyAction.value ? [{
     id: "actions",
-    header: "Actions",
+    header: "Aksi",
     class: "w-28 text-right",
-  },
-];
+  }] : []),
+]);
 </script>
 
 <template>
   <div class="space-y-4">
-    <!-- Action Header -->
+    <!-- Header Page & Action Toolbar -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div>
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-          System Permissions
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+          <UIcon name="i-lucide-key" class="size-5 text-emerald-600 dark:text-emerald-400" />
+          <span>Hak Akses (Permissions)</span>
         </h2>
         <p class="text-xs text-gray-500 dark:text-gray-400">
-          List of discrete privileges available across application modules.
+          Daftar kunci hak akses granular yang dapat diberikan kepada grup peran pengguna.
         </p>
       </div>
 
       <div class="flex items-center gap-2">
         <UInput
           v-model="search"
-          icon="i-heroicons-magnifying-glass"
-          placeholder="Search permissions..."
+          icon="i-lucide-search"
+          placeholder="Cari hak akses..."
           size="sm"
-          class="w-48 sm:w-64"
+          class="w-52 sm:w-64"
         />
 
         <UButton
-          label="New Permission"
-          icon="i-heroicons-plus"
+          v-if="canCreate"
+          label="Tambah Hak Akses"
+          icon="i-lucide-plus"
           color="primary"
           size="sm"
+          variant="solid"
           @click="openCreateModal"
         />
       </div>
@@ -181,19 +280,19 @@ const columns = [
       class="p-4 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 flex items-center justify-between"
     >
       <div class="flex items-center gap-2 text-sm">
-        <UIcon name="i-heroicons-exclamation-triangle" class="w-5 h-5 flex-shrink-0" />
-        <span>Failed to load permissions. Please check backend connection.</span>
+        <UIcon name="i-lucide-alert-triangle" class="size-5 shrink-0" />
+        <span>Gagal memuat daftar hak akses. Silakan periksa koneksi backend.</span>
       </div>
       <UButton
-        label="Retry"
+        label="Coba Lagi"
         size="xs"
         color="error"
         variant="subtle"
-        @click="refresh"
+        @click="() => refresh()"
       />
     </div>
 
-    <!-- Permissions Table -->
+    <!-- Permissions Table Card -->
     <UCard
       :ui="{
         root: 'bg-white dark:bg-[#0b0f19] border border-gray-200/70 dark:border-white/[0.08] ring-0 rounded-lg overflow-hidden shadow-none',
@@ -201,15 +300,17 @@ const columns = [
       }"
     >
       <UTable
-        :data="filteredPermissions"
+        :data="paginatedPermissions"
         :columns="columns"
         :loading="loading"
         loading-color="primary"
       >
         <!-- Permission Name Cell -->
         <template #name-cell="{ row }">
-          <div class="flex items-center gap-2 font-mono text-xs">
-            <UIcon name="i-heroicons-key" class="w-4 h-4 text-emerald-500/70 dark:text-emerald-400/80" />
+          <div class="flex items-center gap-2 font-mono text-xs py-1.5">
+            <div class="size-6 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
+              <UIcon name="i-lucide-key" class="size-3.5" />
+            </div>
             <span class="text-gray-900 dark:text-white font-medium">
               {{ row.original.name }}
             </span>
@@ -218,55 +319,101 @@ const columns = [
 
         <!-- Roles Count Cell -->
         <template #roles_count-cell="{ row }">
-          <div class="text-center font-medium text-sm text-gray-600 dark:text-gray-300">
-            {{ row.original.roles_count ?? 0 }} roles
+          <div class="text-center font-mono text-xs">
+            <UBadge
+              v-if="row.original.roles_count && row.original.roles_count > 0"
+              :label="`${row.original.roles_count} role`"
+              color="primary"
+              variant="soft"
+              size="xs"
+              class="text-[11px]"
+            />
+            <span v-else class="text-gray-400 dark:text-gray-500 text-[11px] italic">
+              Belum digunakan
+            </span>
           </div>
         </template>
 
         <!-- Actions Cell -->
         <template #actions-cell="{ row }">
-          <div class="flex items-center justify-end">
-            <UButton
-              icon="i-heroicons-trash"
-              size="xs"
-              color="error"
-              variant="ghost"
-              aria-label="Delete permission"
-              @click="confirmDelete(row.original)"
-            />
+          <div class="flex items-center justify-end gap-1">
+            <!-- Edit Button -->
+            <UTooltip v-if="canUpdate" text="Edit Hak Akses">
+              <UButton
+                icon="i-lucide-pencil"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                class="hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
+                @click="openEditModal(row.original)"
+              />
+            </UTooltip>
+
+            <!-- Delete Button -->
+            <UTooltip v-if="canDelete" text="Hapus Hak Akses">
+              <UButton
+                icon="i-lucide-trash-2"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                class="hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                @click="confirmDelete(row.original)"
+              />
+            </UTooltip>
           </div>
         </template>
 
         <!-- Empty State -->
         <template #empty>
           <div class="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
-            <UIcon name="i-heroicons-key" class="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p class="font-medium">No permissions found</p>
-            <p class="text-xs mt-1">Create permissions to assign them to roles.</p>
+            <UIcon name="i-lucide-key" class="size-8 mx-auto mb-2 opacity-40" />
+            <p class="font-medium text-gray-700 dark:text-gray-300">Tidak ada hak akses ditemukan</p>
+            <p class="text-xs mt-1 text-gray-400">Buat hak akses baru untuk ditugaskan ke grup peran.</p>
           </div>
         </template>
       </UTable>
+
+      <!-- Pagination & Counter Footer -->
+      <template v-if="filteredPermissions.length > 0" #footer>
+        <div class="flex flex-col sm:flex-row items-center justify-between px-4 py-3 gap-2">
+          <span class="text-xs text-gray-500 dark:text-gray-400">
+            Menampilkan {{ paginatedPermissions.length }} dari total {{ filteredPermissions.length }} hak akses
+          </span>
+          <UPagination
+            v-if="totalPages > 1"
+            v-model:page="page"
+            :total="filteredPermissions.length"
+            :items-per-page="perPage"
+            size="xs"
+          />
+        </div>
+      </template>
     </UCard>
 
-    <!-- Create Permission Modal -->
+    <!-- ═══ MODAL: TAMBAH HAK AKSES ════════════════════════════════════════════ -->
     <UModal
-      v-model:open="isModalOpen"
-      title="Create New Permission"
-      description="Define a granular capability key (e.g. posts.publish, orders.refund)."
-      :ui="{ content: 'dark:bg-[#0b0f19] dark:border-white/[0.08]' }"
+      v-model:open="isCreateModalOpen"
+      title="Tambah Hak Akses Baru"
+      description="Tentukan kunci hak akses granular (contoh: users.create, dataset.export)."
+      :ui="{ content: 'dark:bg-[#0b0f19] dark:border-white/[0.08] max-w-md' }"
     >
       <template #body>
-        <form class="space-y-4" @submit.prevent="handleCreatePermission">
-          <UFormField label="Permission Identifier" required>
+        <form class="space-y-3.5" @submit.prevent="handleCreatePermission">
+          <UFormField
+            label="Kunci Identifier Hak Akses"
+            required
+            :error="createError"
+            size="sm"
+          >
             <UInput
-              v-model="formState.name"
-              placeholder="e.g. reports.export, users.ban"
-              class="w-full font-mono text-sm"
+              v-model="createName"
+              placeholder="Contoh: jalan-desa.edit, users.create"
+              class="w-full font-mono text-xs"
               autofocus
             />
             <template #help>
-              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Format: module.action (lowercase with dots or hyphens)
+              <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                Format: <code class="font-mono text-emerald-600 dark:text-emerald-400">modul.aksi</code> (huruf kecil, dapat menggunakan titik, strip, atau garis bawah).
               </p>
             </template>
           </UFormField>
@@ -276,45 +423,109 @@ const columns = [
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton
-            label="Cancel"
+            label="Batal"
             color="neutral"
             variant="ghost"
-            @click="isModalOpen = false"
+            @click="isCreateModalOpen = false"
           />
           <UButton
-            label="Create Permission"
+            label="Simpan Hak Akses"
             color="primary"
-            :loading="submitting"
+            variant="solid"
+            :loading="creating"
             @click="handleCreatePermission"
           />
         </div>
       </template>
     </UModal>
 
-    <!-- Delete Confirmation Modal -->
+    <!-- ═══ MODAL: EDIT HAK AKSES ══════════════════════════════════════════════ -->
     <UModal
-      v-model:open="isDeleteModalOpen"
-      title="Delete Permission"
-      description="Are you sure you want to delete this permission? It will be removed from all roles."
-      :ui="{ content: 'dark:bg-[#0b0f19] dark:border-white/[0.08]' }"
+      v-model:open="isEditModalOpen"
+      title="Edit Hak Akses"
+      description="Perbarui nama kunci identifier hak akses sistem."
+      :ui="{ content: 'dark:bg-[#0b0f19] dark:border-white/[0.08] max-w-md' }"
     >
       <template #body>
-        <p class="text-sm text-gray-600 dark:text-gray-300">
-          You are about to delete permission <code class="font-mono text-xs bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">{{ permissionToDelete?.name }}</code>.
-        </p>
+        <form class="space-y-3.5" @submit.prevent="handleUpdatePermission">
+          <UFormField
+            label="Kunci Identifier Hak Akses"
+            required
+            :error="editError"
+            size="sm"
+          >
+            <UInput
+              v-model="editName"
+              placeholder="Contoh: jalan-desa.edit"
+              class="w-full font-mono text-xs"
+              autofocus
+            />
+            <template #help>
+              <p class="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                Catatan: Mengubah nama identifier akan memengaruhi verifikasi izin pada seluruh role yang menggunakannya.
+              </p>
+            </template>
+          </UFormField>
+        </form>
       </template>
 
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton
-            label="Cancel"
+            label="Batal"
+            color="neutral"
+            variant="ghost"
+            @click="isEditModalOpen = false"
+          />
+          <UButton
+            label="Simpan Perubahan"
+            color="primary"
+            variant="solid"
+            :loading="updating"
+            @click="handleUpdatePermission"
+          />
+        </div>
+      </template>
+    </UModal>
+
+    <!-- ═══ MODAL: KONFIRMASI HAPUS HAK AKSES ══════════════════════════════════ -->
+    <UModal
+      v-model:open="isDeleteModalOpen"
+      title="Hapus Hak Akses"
+      description="Tindakan ini akan menghapus hak akses secara permanen dari sistem."
+      :ui="{ content: 'dark:bg-[#0b0f19] dark:border-white/[0.08] max-w-md' }"
+    >
+      <template #body>
+        <div class="space-y-3">
+          <div class="p-3 bg-red-50 dark:bg-red-950/30 rounded-md border border-red-200 dark:border-red-900/50 flex items-start gap-2.5 text-xs text-red-700 dark:text-red-300">
+            <UIcon name="i-lucide-alert-triangle" class="size-4 shrink-0 mt-0.5" />
+            <p>
+              Apakah Anda yakin ingin menghapus hak akses <code class="font-mono font-semibold">{{ permissionToDelete?.name }}</code>?
+            </p>
+          </div>
+
+          <div
+            v-if="permissionToDelete?.roles_count && permissionToDelete.roles_count > 0"
+            class="p-2.5 bg-amber-50 dark:bg-amber-950/30 rounded-md border border-amber-200 dark:border-amber-900/50 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2"
+          >
+            <UIcon name="i-lucide-info" class="size-4 shrink-0" />
+            <span>Hak akses ini saat ini terhubung ke <strong>{{ permissionToDelete.roles_count }} role</strong> dan akan otomatis dicabut.</span>
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton
+            label="Batal"
             color="neutral"
             variant="ghost"
             @click="isDeleteModalOpen = false"
           />
           <UButton
-            label="Delete Permission"
+            label="Hapus Permanen"
             color="error"
+            variant="solid"
             :loading="deleting"
             @click="handleDeletePermission"
           />

@@ -1,5 +1,13 @@
 import { defineStore } from 'pinia'
 
+export interface NavItem {
+  label: string;
+  icon: string;
+  to?: string;
+  exact?: boolean;
+  children?: NavItem[];
+}
+
 export type User = {
   uuid: string;
   name: string;
@@ -10,6 +18,7 @@ export type User = {
   roles: string[];
   permissions: string[];
   providers: string[];
+  navigation?: NavItem[];
 }
 
 export const useAuthStore = defineStore('auth', () => {

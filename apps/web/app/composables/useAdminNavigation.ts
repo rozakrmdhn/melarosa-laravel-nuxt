@@ -1,4 +1,5 @@
 import type { NavigationMenuItem } from "@nuxt/ui";
+import type { NavItem } from "~/stores/auth";
 
 export interface RouteHeaderMeta {
   title: string;
@@ -11,104 +12,45 @@ export interface AdminBreadcrumbItem {
   to?: string;
 }
 
-export interface AdminNavItemDef {
-  label: string;
-  icon: string;
-  to?: string;
-  exact?: boolean;
-  children?: AdminNavItemDef[];
-}
-
-export const routeHeaders: Record<string, RouteHeaderMeta> = {
-  "/admin": { title: "Dashboard", icon: "i-lucide-inbox" },
-  "/admin/roles": { title: "Roles Management", icon: "i-lucide-square-dot" },
-  "/admin/permissions": { title: "Permissions Management", icon: "i-lucide-square-activity" },
-  "/admin/users": { title: "User Access", icon: "i-lucide-users" },
-  "/admin/dataset/wilayah-kecamatan": { title: "Wilayah Kecamatan", icon: "i-lucide-map" },
-  "/admin/dataset/wilayah-desa": { title: "Wilayah Desa", icon: "i-lucide-map-pin" },
-  "/admin/dataset/jalan-poros-desa": { title: "Jalan Poros Desa", icon: "i-lucide-route" },
-  "/admin/account": { title: "Account Settings", icon: "i-lucide-settings" },
-  "/admin/account/general": { title: "Account Profile", icon: "i-lucide-user" },
-  "/admin/account/devices": { title: "Connected Devices", icon: "i-lucide-smartphone" },
-};
-
-export const adminNavTree: AdminNavItemDef[] = [
-  {
-    label: "Dashboard",
-    icon: "i-lucide-inbox",
-    to: "/admin",
-    exact: true,
-  },
-  {
-    label: "Roles",
-    icon: "i-lucide-square-dot",
-    to: "/admin/roles",
-  },
-  {
-    label: "Permissions",
-    icon: "i-lucide-square-activity",
-    to: "/admin/permissions",
-  },
-  {
-    label: "User Access",
-    icon: "i-lucide-users",
-    to: "/admin/users",
-  },
-  {
-    label: "Dataset",
-    icon: "i-lucide-map",
-    to: "/admin/dataset/wilayah-kecamatan",
-    children: [
-      {
-        label: "Wilayah Kecamatan",
-        icon: "i-lucide-map",
-        to: "/admin/dataset/wilayah-kecamatan",
-      },
-      {
-        label: "Wilayah Desa",
-        icon: "i-lucide-map-pin",
-        to: "/admin/dataset/wilayah-desa",
-      },
-      {
-        label: "Jalan Poros Desa",
-        icon: "i-lucide-route",
-        to: "/admin/dataset/jalan-poros-desa",
-      },
-    ],
-  },
-  {
-    label: "Settings",
-    icon: "i-lucide-settings",
-    to: "/admin/account/general",
-    children: [
-      {
-        label: "Account Profile",
-        icon: "i-lucide-user",
-        to: "/admin/account/general",
-      },
-      {
-        label: "Connected Devices",
-        icon: "i-lucide-smartphone",
-        to: "/admin/account/devices",
-      },
-      {
-        label: "Public Site",
-        icon: "i-lucide-external-link",
-        to: "/",
-      },
-    ],
-  },
-];
+export type AdminNavItemDef = NavItem;
 
 export function useAdminNavigation() {
   const route = useRoute();
+  const auth = useAuthStore();
+
+  // Dynamic navigation tree sourced directly from the authenticated user
+  const navTree = computed<AdminNavItemDef[]>(() => auth.user?.navigation ?? []);
+
+  // Map of path to header metadata built dynamically from the navigation tree
+  const flatHeaderMap = computed<Record<string, RouteHeaderMeta>>(() => {
+    const map: Record<string, RouteHeaderMeta> = {};
+
+    function walk(items: AdminNavItemDef[]) {
+      for (const item of items) {
+        if (item.to) {
+          map[item.to.replace(/\/$/, "")] = {
+            title: item.label,
+            icon: item.icon,
+          };
+        }
+        if (item.children) {
+          walk(item.children);
+        }
+      }
+    }
+
+    walk(navTree.value);
+    return map;
+  });
 
   const currentHeader = computed<RouteHeaderMeta>(() => {
     const path = route.path.replace(/\/$/, "");
-    if (routeHeaders[path]) return routeHeaders[path];
+    const headers = flatHeaderMap.value;
 
-    for (const [key, val] of Object.entries(routeHeaders)) {
-      if (key !== "/admin" && path.startsWith(key)) {
+    if (headers[path]) return headers[path];
+
+    for (const [key, val] of Object.entries(headers)) {
+      if (key !== "/admin" && key !== "/" && path.startsWith(key)) {
         return val;
       }
     }
@@ -127,9 +69,10 @@ export function useAdminNavigation() {
 
   const breadcrumbs = computed<AdminBreadcrumbItem[]>(() => {
     const path = route.path.replace(/\/$/, "") || "/admin";
+    const tree = navTree.value;
 
-    // 1. Check nested children in sidebar navigation
-    for (const group of adminNavTree) {
+    // 1. Check nested children in navigation tree
+    for (const group of tree) {
       if (group.children && group.children.length > 0) {
         const matchedChild = group.children.find(
           (c) => c.to === path || (c.to && c.to !== "/admin" && c.to !== "/" && path.startsWith(c.to))
@@ -174,7 +117,7 @@ export function useAdminNavigation() {
     }
 
     // 2. Check top-level items without children
-    for (const item of adminNavTree) {
+    for (const item of tree) {
       if (!item.children || item.children.length === 0) {
         if (
           item.to === path ||
@@ -223,29 +166,35 @@ export function useAdminNavigation() {
   function getNavItems(state: "collapsed" | "expanded"): NavigationMenuItem[] {
     const isCollapsed = state === "collapsed";
 
-    return adminNavTree.map((item) => ({
-      label: item.label,
-      icon: item.icon,
-      to: isCollapsed ? item.to : (item.children?.length ? undefined : item.to),
-      exact: item.exact,
-      defaultOpen: true,
-      tooltip: isCollapsed ? { text: item.label, content: { side: "right" } } : undefined,
-      children: !isCollapsed && item.children
-        ? item.children.map((child) => ({
-            label: child.label,
-            icon: child.icon,
-            to: child.to,
-          }))
-        : [],
-    }));
+    return navTree.value.map((item) => {
+      const visibleChildren = item.children ?? [];
+
+      return {
+        label: item.label,
+        icon: item.icon,
+        to: isCollapsed
+          ? item.to
+          : (visibleChildren.length ? undefined : item.to),
+        exact: item.exact,
+        defaultOpen: true,
+        tooltip: isCollapsed ? { text: item.label, content: { side: "right" } } : undefined,
+        children: !isCollapsed
+          ? visibleChildren.map((child) => ({
+              label: child.label,
+              icon: child.icon,
+              to: child.to,
+            }))
+          : [],
+      };
+    });
   }
 
   return {
-    routeHeaders,
-    adminNavTree,
+    navTree,
+    adminNavTree: navTree,
+    routeHeaders: flatHeaderMap,
     currentHeader,
     breadcrumbs,
     getNavItems,
   };
 }
-

@@ -12,9 +12,14 @@ class PermissionController extends Controller
     /**
      * Display a listing of all permissions.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
+        $search = $request->query('search');
+
         $permissions = Permission::withCount('roles')
+            ->when($search, function ($query, $search) {
+                $query->where('name', 'like', "%{$search}%");
+            })
             ->orderBy('name')
             ->get();
 
@@ -38,7 +43,9 @@ class PermissionController extends Controller
                 'unique:permissions,name',
             ],
         ], [
-            'name.regex' => 'The permission name should only contain letters, numbers, dots, dashes, and underscores.',
+            'name.required' => 'Nama hak akses wajib diisi.',
+            'name.unique' => 'Nama hak akses sudah digunakan.',
+            'name.regex' => 'Nama hak akses hanya boleh berisi huruf, angka, titik (.), strip (-), dan garis bawah (_).',
         ]);
 
         $permission = Permission::create([
@@ -48,9 +55,39 @@ class PermissionController extends Controller
 
         return response()->json([
             'ok' => true,
-            'message' => 'Permission created successfully.',
+            'message' => 'Hak akses berhasil ditambahkan.',
             'permission' => $permission->loadCount('roles'),
         ], 201);
+    }
+
+    /**
+     * Update the specified permission in storage.
+     */
+    public function update(Request $request, Permission $permission): JsonResponse
+    {
+        $validated = $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                'regex:/^[a-zA-Z0-9_\.\-]+$/',
+                'unique:permissions,name,' . $permission->id,
+            ],
+        ], [
+            'name.required' => 'Nama hak akses wajib diisi.',
+            'name.unique' => 'Nama hak akses sudah digunakan.',
+            'name.regex' => 'Nama hak akses hanya boleh berisi huruf, angka, titik (.), strip (-), dan garis bawah (_).',
+        ]);
+
+        $permission->update([
+            'name' => strtolower(trim($validated['name'])),
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Hak akses berhasil diperbarui.',
+            'permission' => $permission->loadCount('roles'),
+        ]);
     }
 
     /**
@@ -62,7 +99,7 @@ class PermissionController extends Controller
 
         return response()->json([
             'ok' => true,
-            'message' => 'Permission deleted successfully.',
+            'message' => 'Hak akses berhasil dihapus.',
         ]);
     }
 }

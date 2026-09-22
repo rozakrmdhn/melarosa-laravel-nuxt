@@ -2,7 +2,11 @@
 import "ol/ol.css";
 
 definePageMeta({
-  middleware: ["auth", "role-admin"],
+  middleware: ["auth", "permission"],
+  permission: [
+    "batas-desa.view",
+    "batas-desa.manage"
+  ],
   fullBleed: true,
 });
 
@@ -44,6 +48,13 @@ interface KecamatanSeriesItem {
 
 const colorMode = useColorMode();
 const toast = useToast();
+const { can } = usePermission();
+
+const canView = computed(() => can("batas-desa.view") || can("batas-desa.manage"));
+const canCreate = computed(() => can("batas-desa.create") || can("batas-desa.manage"));
+const canEdit = computed(() => can("batas-desa.edit") || can("batas-desa.manage"));
+const canDelete = computed(() => can("batas-desa.delete") || can("batas-desa.manage"));
+const hasAnyMutateAction = computed(() => canEdit.value || canDelete.value);
 
 // View Mode: 'map' | 'table'
 const viewMode = ref<"map" | "table">("map");
@@ -664,6 +675,7 @@ const formState = reactive({
 });
 
 function openCreateModal() {
+  if (!canCreate.value) return;
   isEditing.value = false;
   formState.id = null;
   formState.nama_desa = "";
@@ -692,6 +704,7 @@ function openCreateModal() {
 }
 
 function openEditModal(feat: any) {
+  if (!canEdit.value) return;
   isEditing.value = true;
   formState.id = feat.id;
   formState.nama_desa = feat.properties?.nama_desa || feat.nama_desa || "";
@@ -705,6 +718,9 @@ function openEditModal(feat: any) {
 }
 
 async function handleSaveForm() {
+  if (!isEditing.value && !canCreate.value) return;
+  if (isEditing.value && !canEdit.value) return;
+
   if (!formState.nama_desa.trim()) {
     toast.add({ title: "Validasi Gagal", description: "Nama desa wajib diisi.", color: "error" });
     return;
@@ -767,12 +783,13 @@ const featureToDelete = ref<any | null>(null);
 const deleting = ref(false);
 
 function confirmDelete(feat: any) {
+  if (!canDelete.value) return;
   featureToDelete.value = feat;
   isDeleteModalOpen.value = true;
 }
 
 async function handleDelete() {
-  if (!featureToDelete.value) return;
+  if (!canDelete.value || !featureToDelete.value) return;
   deleting.value = true;
 
   try {
@@ -1036,6 +1053,7 @@ onUnmounted(() => {
 
           <!-- Tambah Desa -->
           <UButton
+            v-if="canCreate"
             icon="i-lucide-plus"
             label="Tambah"
             size="xs"
@@ -1206,8 +1224,9 @@ onUnmounted(() => {
           </div>
 
           <!-- Inspector Action Buttons -->
-          <div class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
+          <div v-if="hasAnyMutateAction" class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
             <UButton
+              v-if="canEdit"
               icon="i-lucide-pencil"
               label="Edit Desa"
               size="xs"
@@ -1217,6 +1236,7 @@ onUnmounted(() => {
               @click="openEditModal(selectedFeature)"
             />
             <UButton
+              v-if="canDelete"
               icon="i-lucide-trash-2"
               size="xs"
               color="error"
@@ -1279,10 +1299,11 @@ onUnmounted(() => {
             color="neutral"
             variant="outline"
             :loading="loading"
-            @click="refreshTable"
+            @click="() => refreshTable()"
           />
 
           <UButton
+            v-if="canCreate"
             icon="i-lucide-plus"
             label="Tambah Desa"
             size="xs"
@@ -1308,12 +1329,12 @@ onUnmounted(() => {
                 <th class="px-4 py-3">Luas Wilayah</th>
                 <th class="px-4 py-3">Pimpinan & Jabatan</th>
                 <th class="px-4 py-3">NIP / Pangkat</th>
-                <th class="px-4 py-3 text-right">Aksi</th>
+                <th v-if="hasAnyMutateAction" class="px-4 py-3 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200/70 dark:divide-white/[0.08] text-gray-800 dark:text-gray-200">
               <tr v-if="formattedTableFeatures.length === 0">
-                <td colspan="6" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-xs">
+                <td :colspan="hasAnyMutateAction ? 6 : 5" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-xs">
                   Tidak ada data batas wilayah desa yang cocok.
                 </td>
               </tr>
@@ -1347,7 +1368,7 @@ onUnmounted(() => {
                     {{ feat.pangkat_gol }}
                   </div>
                 </td>
-                <td class="px-4 py-3 text-right">
+                <td v-if="hasAnyMutateAction" class="px-4 py-3 text-right">
                   <div class="flex items-center justify-end gap-1.5">
                     <UButton
                       icon="i-lucide-map"
@@ -1358,6 +1379,7 @@ onUnmounted(() => {
                       @click="zoomToFeature(feat.raw)"
                     />
                     <UButton
+                      v-if="canEdit"
                       icon="i-lucide-pencil"
                       size="xs"
                       color="neutral"
@@ -1366,6 +1388,7 @@ onUnmounted(() => {
                       @click="openEditModal(feat.raw)"
                     />
                     <UButton
+                      v-if="canDelete"
                       icon="i-lucide-trash-2"
                       size="xs"
                       color="error"
@@ -1479,6 +1502,7 @@ onUnmounted(() => {
             @click="isFormModalOpen = false"
           />
           <UButton
+            v-if="isEditing ? canEdit : canCreate"
             :label="isEditing ? 'Perbarui Desa' : 'Simpan Desa'"
             color="primary"
             :loading="submitting"
@@ -1504,6 +1528,7 @@ onUnmounted(() => {
             @click="isDeleteModalOpen = false"
           />
           <UButton
+            v-if="canDelete"
             label="Hapus Permanen"
             color="error"
             :loading="deleting"

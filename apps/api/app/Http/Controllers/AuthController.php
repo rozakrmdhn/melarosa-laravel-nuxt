@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Helpers\Utils;
 use App\Models\User;
 use App\Models\UserProvider;
+use App\Services\AdminNavigationService;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
@@ -161,7 +162,7 @@ class AuthController extends Controller
     /**
      * Get authenticated user details
      */
-    public function user(Request $request): JsonResponse
+    public function user(Request $request, AdminNavigationService $navigationService): JsonResponse
     {
         $user = $request->user();
 
@@ -174,6 +175,7 @@ class AuthController extends Controller
                 'roles' => $user->roles()->select('name')->pluck('name'),
                 'permissions' => $user->getAllPermissions()->pluck('name'),
                 'providers' => $user->userProviders()->select('name')->pluck('name'),
+                'navigation' => $navigationService->getFilteredMenu($user),
             ],
         ]);
     }

@@ -20,7 +20,8 @@ import BottomPanel from "~/components/dataset/jalan-poros-desa/BottomPanel.vue";
 import MobileBottomSheet from "~/components/dataset/jalan-poros-desa/MobileBottomSheet.vue";
 
 definePageMeta({
-  middleware: ["auth", "role-admin"],
+  middleware: ["auth", "permission"],
+  permission: ["jalan-poros-desa-view", "jalan-poros-desa.manage", "dataset.jalan-poros-desa.view"],
   fullBleed: true,
   key: (route) => route.path,
 });
@@ -112,6 +113,7 @@ function refreshAllVectorTiles() {
 const layerVisible = ref(true);
 const layerOpacity = ref(1);
 const mouseCoords = ref("");
+const clickedCoordinate = ref<[number, number] | null>(null);
 
 // ─── Custom Symbology State ───────────────────────────────────────────────────
 
@@ -383,8 +385,6 @@ const rightPanelSlotData = shallowRef<{
   resize: (size: number) => void;
 } | null>(null);
 
-const rightPanelActiveTab = ref<"info" | "filter">("info");
-
 function syncRightPanelActions(
   collapsed: boolean,
   collapse: () => void,
@@ -395,10 +395,7 @@ function syncRightPanelActions(
   return "";
 }
 
-function expandRightPanel(tab?: "info" | "filter") {
-  if (tab) {
-    rightPanelActiveTab.value = tab;
-  }
+function expandRightPanel() {
   if (rightPanelSlotData.value) {
     if (rightPanelSlotData.value.collapsed) {
       rightPanelSlotData.value.resize(SIDE_PANEL_WIDTH);
@@ -440,9 +437,8 @@ function collapseRightPanel() {
 
 watch(selectedFeature, (feat) => {
   if (feat) {
-    rightPanelActiveTab.value = "info";
     nextTick(() => {
-      expandRightPanel("info");
+      expandRightPanel();
     });
   } else {
     nextTick(() => {
@@ -926,14 +922,21 @@ async function openEdit(feat: any) {
     mobileDrawerOpen.value = false;
   }
 
-  // 4. Masuk ke mode edit geometri di kanvas peta
+  // 4. Masuk ke mode edit geometri di kanvas peta aktif
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 1024;
   if (isValidGeometry(geom)) {
-    mapCanvasRef.value?.startEditingGeometry(geom, formState.id);
-    mobileMapCanvasRef.value?.startEditingGeometry(geom, formState.id);
+    if (isMobile) {
+      mobileMapCanvasRef.value?.startEditingGeometry(geom, formState.id);
+    } else {
+      mapCanvasRef.value?.startEditingGeometry(geom, formState.id);
+    }
     addLog("INFO", `Mode edit spasial aktif untuk ruas: ${formState.nama_ruas}`);
   } else {
-    mapCanvasRef.value?.startDrawing();
-    mobileMapCanvasRef.value?.startDrawing();
+    if (isMobile) {
+      mobileMapCanvasRef.value?.startDrawing();
+    } else {
+      mapCanvasRef.value?.startDrawing();
+    }
     addLog("INFO", `Mode gambar baru untuk ruas: ${formState.nama_ruas}`);
   }
 }
@@ -991,6 +994,10 @@ async function handleSave() {
     mobileMapCanvasRef.value?.stopDrawing(false);
     mobileMapCanvasRef.value?.clearDraw();
     await handleRefreshAll();
+    if (geom && isValidGeometry(geom)) {
+      mapCanvasRef.value?.zoomToGeometry?.(geom);
+      mobileMapCanvasRef.value?.zoomToGeometry?.(geom);
+    }
   } catch (err: any) {
     const msg = err?.data?.message || "Terjadi kesalahan saat menyimpan data.";
     toast.add({ title: "Gagal Menyimpan", description: msg, color: "error" });
@@ -1147,7 +1154,7 @@ async function handleConfirmSplit() {
 </script>
 
 <template>
-  <div class="flex flex-col w-full h-[calc(100vh-3.5rem)] overflow-hidden bg-white dark:bg-[#0b0f19] text-gray-900 dark:text-gray-100 font-[Inter,sans-serif] select-none">
+  <div class="flex flex-col w-full h-[calc(100vh-3.5rem)] overflow-hidden bg-white dark:bg-[#0b0f19] text-gray-900 dark:text-gray-100 font-[Inter,sans-serif]">
 
     <!-- ═══ TOPBAR (Clean Solid Admin Header) ════════════════════════════════ -->
     <header class="flex items-center justify-between h-11 px-3 sm:px-4 border-b border-gray-200 dark:border-gray-800 shrink-0 z-30 bg-white dark:bg-[#0b0f19]">
@@ -1269,10 +1276,22 @@ async function handleConfirmSplit() {
                   v-model:layer-visible="layerVisible"
                   v-model:layer-opacity="layerOpacity"
                   v-model:symbology="layerSymbology"
+                  v-model:kecamatan-filter="tableKecamatan"
+                  v-model:desa-filter="tableDesa"
+                  v-model:kondisi-filter="tableKondisi"
+                  v-model:perkerasan-filter="tablePerkerasan"
+                  :kecamatan-options="kecamatanOptions"
+                  :desa-options="desaOptions"
+                  :kondisi-options="kondisiOptions"
+                  :perkerasan-options="perkerasanOptions"
+                  :total-ruas="summaryData?.total_ruas || tableTotal"
+                  :total-panjang-km="summaryData?.total_panjang_km"
                   :kondisi-stats="kondisiStats"
                   :loading="loading"
                   @update:collapsed="(c) => c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand())"
                   @zoom-to-layer="fitAllBounds"
+                  @reset-filters="resetFilters"
+                  @apply-filter="fitAllBounds"
                 />
               </template>
 
@@ -1287,6 +1306,7 @@ async function handleConfirmSplit() {
                     :layer-visible="layerVisible"
                     :layer-opacity="layerOpacity"
                     :symbology="layerSymbology"
+                    :clicked-coordinate="clickedCoordinate"
                     :kecamatan-filter="tableKecamatan"
                     :desa-filter="tableDesa"
                     :kondisi-filter="tableKondisi"
@@ -1297,36 +1317,26 @@ async function handleConfirmSplit() {
                     @log="addLog"
                     @draw-saved="handleDrawSaved"
                     @split-point-selected="handleSplitPointSelected"
+                    @map-click="(coord) => clickedCoordinate = coord"
                   />
                 </div>
               </template>
 
-              <!-- Panel Kanan: Properties & Filter -->
+              <!-- Panel Kanan: Properties / Feature Inspector -->
               <template #right="{ item, collapsed, collapse, expand, resize }">
                 <span :class="syncRightPanelActions(collapsed, collapse, expand, resize)" class="hidden" />
                 <RightPanel
                   :collapsed="collapsed"
                   :collapsible="true"
                   :selected-feature="selectedFeature"
+                  :clicked-coordinate="clickedCoordinate"
                   :loading="loading"
-                  v-model:active-tab="rightPanelActiveTab"
-                  v-model:kecamatan-filter="tableKecamatan"
-                  v-model:desa-filter="tableDesa"
-                  v-model:kondisi-filter="tableKondisi"
-                  v-model:perkerasan-filter="tablePerkerasan"
-                  :kecamatan-options="kecamatanOptions"
-                  :desa-options="desaOptions"
-                  :kondisi-options="kondisiOptions"
-                  :perkerasan-options="perkerasanOptions"
                   @update:collapsed="(c) => c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand())"
-                  @expand-to-tab="(tab) => { rightPanelActiveTab = tab; resize ? resize(SIDE_PANEL_WIDTH) : expand(); }"
                   @zoom-to-feature="handleZoomToFeature"
                   @edit-feature="openEdit"
                   @split-feature="handleStartSplit"
                   @delete-feature="confirmDelete"
                   @view-in-table="handleViewInTable"
-                  @reset-filters="resetFilters"
-                  @apply-filter="fitAllBounds"
                 />
               </template>
             </USplitter>
@@ -1373,6 +1383,7 @@ async function handleConfirmSplit() {
           :layer-visible="layerVisible"
           :layer-opacity="layerOpacity"
           :symbology="layerSymbology"
+          :clicked-coordinate="clickedCoordinate"
           :kecamatan-filter="tableKecamatan"
           :desa-filter="tableDesa"
           :kondisi-filter="tableKondisi"
@@ -1383,6 +1394,7 @@ async function handleConfirmSplit() {
           @log="addLog"
           @draw-saved="handleDrawSaved"
           @split-point-selected="handleSplitPointSelected"
+          @map-click="(coord) => clickedCoordinate = coord"
         />
       </div>
 
@@ -1662,12 +1674,25 @@ async function handleConfirmSplit() {
         <LeftPanel
           v-if="mobileDrawerTab === 'layer'"
           :is-mobile-drawer="true"
+          default-tool="none"
           v-model:layer-visible="layerVisible"
           v-model:layer-opacity="layerOpacity"
           v-model:symbology="layerSymbology"
+          v-model:kecamatan-filter="tableKecamatan"
+          v-model:desa-filter="tableDesa"
+          v-model:kondisi-filter="tableKondisi"
+          v-model:perkerasan-filter="tablePerkerasan"
+          :kecamatan-options="kecamatanOptions"
+          :desa-options="desaOptions"
+          :kondisi-options="kondisiOptions"
+          :perkerasan-options="perkerasanOptions"
+          :total-ruas="summaryData?.total_ruas || tableTotal"
+          :total-panjang-km="summaryData?.total_panjang_km"
           :kondisi-stats="kondisiStats"
           :loading="loading"
           @zoom-to-layer="mapCanvasRef?.fitBounds(); mobileMapCanvasRef?.fitBounds()"
+          @reset-filters="resetFilters"
+          @apply-filter="fitAllBounds"
         />
 
         <!-- Table Tab -->
@@ -1699,32 +1724,23 @@ async function handleConfirmSplit() {
         <RightPanel
           v-else-if="mobileDrawerTab === 'inspector'"
           :is-mobile-drawer="true"
-          active-tab="info"
           :selected-feature="selectedFeature"
+          :clicked-coordinate="clickedCoordinate"
           :loading="loading"
-          v-model:kecamatan-filter="tableKecamatan"
-          v-model:desa-filter="tableDesa"
-          v-model:kondisi-filter="tableKondisi"
-          v-model:perkerasan-filter="tablePerkerasan"
-          :kecamatan-options="kecamatanOptions"
-          :desa-options="desaOptions"
-          :kondisi-options="kondisiOptions"
-          :perkerasan-options="perkerasanOptions"
           @zoom-to-feature="(feat) => { handleZoomToFeature(feat); mobileDrawerOpen = false; }"
           @edit-feature="(feat) => { openEdit(feat); mobileDrawerOpen = false; }"
           @delete-feature="(feat) => { confirmDelete(feat); mobileDrawerOpen = false; }"
           @view-in-table="(feat) => { if (feat) handleViewInTable(feat); mobileDrawerTab = 'table'; refreshTable(); }"
-          @reset-filters="resetFilters"
-          @apply-filter="mobileMapCanvasRef?.fitBounds(); mapCanvasRef?.fitBounds(); refreshTable()"
         />
 
-        <!-- Filter Tab -->
-        <RightPanel
+        <!-- Filter Tab (Dedicated Layer Filter) -->
+        <LeftPanel
           v-else-if="mobileDrawerTab === 'filter'"
           :is-mobile-drawer="true"
-          active-tab="filter"
-          :selected-feature="selectedFeature"
-          :loading="loading"
+          default-tool="filter"
+          v-model:layer-visible="layerVisible"
+          v-model:layer-opacity="layerOpacity"
+          v-model:symbology="layerSymbology"
           v-model:kecamatan-filter="tableKecamatan"
           v-model:desa-filter="tableDesa"
           v-model:kondisi-filter="tableKondisi"
@@ -1733,12 +1749,13 @@ async function handleConfirmSplit() {
           :desa-options="desaOptions"
           :kondisi-options="kondisiOptions"
           :perkerasan-options="perkerasanOptions"
-          @zoom-to-feature="(feat) => { handleZoomToFeature(feat); mobileDrawerOpen = false; }"
-          @edit-feature="(feat) => { openEdit(feat); mobileDrawerOpen = false; }"
-          @delete-feature="(feat) => { confirmDelete(feat); mobileDrawerOpen = false; }"
-          @view-in-table="mobileDrawerTab = 'table'; refreshTable()"
+          :total-ruas="summaryData?.total_ruas || tableTotal"
+          :total-panjang-km="summaryData?.total_panjang_km"
+          :kondisi-stats="kondisiStats"
+          :loading="loading"
+          @zoom-to-layer="mapCanvasRef?.fitBounds(); mobileMapCanvasRef?.fitBounds()"
           @reset-filters="resetFilters"
-          @apply-filter="mobileMapCanvasRef?.fitBounds(); mapCanvasRef?.fitBounds(); refreshTable()"
+          @apply-filter="fitAllBounds"
         />
       </div>
     </MobileBottomSheet>

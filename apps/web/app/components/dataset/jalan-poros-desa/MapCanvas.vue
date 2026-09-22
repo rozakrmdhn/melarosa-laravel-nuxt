@@ -17,6 +17,7 @@ const props = withDefaults(
     kondisiFilter?: string | null;
     perkerasanFilter?: string | null;
     symbology?: LayerSymbology;
+    clickedCoordinate?: [number, number] | null;
   }>(),
   {
     selectedFeature: null,
@@ -29,6 +30,7 @@ const props = withDefaults(
     kondisiFilter: null,
     perkerasanFilter: null,
     symbology: () => ({ ...DEFAULT_SYMBOLOGY }),
+    clickedCoordinate: null,
   }
 );
 
@@ -42,12 +44,15 @@ const emit = defineEmits<{
   (e: "drawSaved", payload: { geojson: any; lengthMeters: number }): void;
   (e: "drawCanceled"): void;
   (e: "splitPointSelected", payload: { road: any; coordinate: [number, number] }): void;
+  (e: "mapClick", coordinate: [number, number]): void;
 }>();
 
 const colorMode = useColorMode();
 const mapContainer = ref<HTMLElement | null>(null);
 const scaleLineTarget = ref<HTMLElement | null>(null);
 const tooltipEl = ref<HTMLElement | null>(null);
+const pulseEl = ref<HTMLElement | null>(null);
+const isPulseVisible = ref(false);
 const mapLoaded = ref(false);
 const isMvtLoading = ref(false);
 let activeTileCount = 0;
@@ -144,6 +149,7 @@ let tileLayer: any = null;
 let vectorTileLayer: any = null;
 let vectorTileSource: any = null;
 let tooltipOverlay: any = null;
+let pulseOverlay: any = null;
 let olModules: any = null;
 
 function getBasemapSource(type: BasemapType) {
@@ -366,11 +372,29 @@ function zoomOut() {
   view.animate({ zoom: (view.getZoom() || 10) - 1, duration: 200 });
 }
 
+function fitGeometryToCenter(geometryOrExtent: any, duration = 600, callback?: () => void) {
+  if (!mapInstance || !olModules || !geometryOrExtent) return;
+  mapInstance.updateSize();
+  const size = mapInstance.getSize();
+  if (!size || size[0] <= 0 || size[1] <= 0) return;
+
+  const extent = Array.isArray(geometryOrExtent) && geometryOrExtent.length === 4
+    ? geometryOrExtent
+    : geometryOrExtent?.getExtent?.();
+
+  if (!extent || !extent.every((n: number) => !isNaN(n) && isFinite(n))) return;
+
+  mapInstance.getView().fit(extent, {
+    size,
+    padding: [90, 90, 90, 90],
+    maxZoom: 17,
+    duration,
+    callback,
+  });
+}
+
 function zoomToGeometry(geometry: any) {
   if (!mapInstance || !olModules || !geometry) return false;
-  const size = mapInstance.getSize();
-  if (!size || size[0] <= 0 || size[1] <= 0) return false;
-
   try {
     const geojsonFormat = new olModules.GeoJSON();
     const geom = geojsonFormat.readGeometry(geometry, {
@@ -379,11 +403,7 @@ function zoomToGeometry(geometry: any) {
     });
     const extent = geom.getExtent();
     if (extent && extent.every((n: number) => !isNaN(n) && isFinite(n))) {
-      mapInstance.getView().fit(extent, {
-        padding: [80, 80, 80, 80],
-        maxZoom: 17,
-        duration: 700,
-      });
+      fitGeometryToCenter(extent, 600);
       return true;
     }
   } catch {
@@ -625,6 +645,14 @@ async function initMap() {
       });
     }
 
+    if (pulseEl.value) {
+      pulseOverlay = new Overlay({
+        element: pulseEl.value,
+        positioning: "center-center",
+        stopEvent: false,
+      });
+    }
+
     const scaleLineControl = new ScaleLine({
       target: scaleLineTarget.value || undefined,
       units: "metric",
@@ -641,7 +669,10 @@ async function initMap() {
         minZoom: 7,
         maxZoom: 20,
       }),
-      overlays: tooltipOverlay ? [tooltipOverlay] : [],
+      overlays: [
+        ...(tooltipOverlay ? [tooltipOverlay] : []),
+        ...(pulseOverlay ? [pulseOverlay] : []),
+      ],
       controls: [scaleLineControl],
     });
 
@@ -754,7 +785,21 @@ async function initMap() {
 
     // Click select
     mapInstance.on("click", (e: any) => {
-      if (!props.layerVisible || isDrawing.value) return;
+      if (isDrawing.value) return;
+
+      if (e.coordinate && pulseOverlay) {
+        pulseOverlay.setPosition(e.coordinate);
+        isPulseVisible.value = true;
+      }
+
+      if (olModules?.toLonLat && e.coordinate) {
+        const lonLat = olModules.toLonLat(e.coordinate);
+        if (lonLat && lonLat.length >= 2) {
+          emit("mapClick", [lonLat[0], lonLat[1]]);
+        }
+      }
+
+      if (!props.layerVisible) return;
       const pixel = mapInstance.getEventPixel(e.originalEvent);
       let clicked: any = null;
       mapInstance.forEachFeatureAtPixel(
@@ -846,6 +891,19 @@ watch(
   (opacity) => {
     if (vectorTileLayer) {
       vectorTileLayer.setOpacity(opacity);
+    }
+  }
+);
+
+watch(
+  () => props.clickedCoordinate,
+  (val) => {
+    if (!val) {
+      if (pulseOverlay) pulseOverlay.setPosition(undefined);
+      isPulseVisible.value = false;
+    } else if (pulseOverlay && olModules?.fromLonLat) {
+      pulseOverlay.setPosition(olModules.fromLonLat(val));
+      isPulseVisible.value = true;
     }
   }
 );
@@ -998,7 +1056,13 @@ async function loadSnapFeatures() {
       emit("log", "INFO", `Snapping aktif ke ${olFeatures.length} ruas jalan sekitar.`);
     }
   } catch (err: any) {
-    if (err?.name === "AbortError") return;
+    if (
+      err?.name === "AbortError" ||
+      err?.cause?.name === "AbortError" ||
+      (typeof err?.message === "string" && err.message.toLowerCase().includes("abort"))
+    ) {
+      return;
+    }
     console.error("Gagal memuat snap features:", err);
   } finally {
     isSnapLoading.value = false;
@@ -1181,6 +1245,8 @@ function startDrawing() {
         geom.un("change", activeGeomListener);
         activeGeomListener = null;
       }
+      // Posisikan geometri tepat di tengah map canvas setelah selesai menggambar
+      fitGeometryToCenter(geom, 600);
     }
     if (drawInteraction && mapInstance) {
       mapInstance.removeInteraction(drawInteraction);
@@ -1383,12 +1449,9 @@ function startEditingGeometry(geomData: any, id?: string | number) {
     drawnPointCount.value = countPts();
     drawnLengthMeters.value = Math.round(sphere.getLength(olGeom));
 
-    // Smoothly zoom/fit to the road segment
-    const extent = olGeom.getExtent();
-    mapInstance.getView().fit(extent, {
-      padding: [100, 100, 100, 100],
-      maxZoom: 17,
-      duration: 600,
+    // Smoothly zoom/fit to the road segment at center of map canvas
+    fitGeometryToCenter(olGeom, 600, () => {
+      loadSnapFeatures();
     });
 
     // Attach Modify interaction
@@ -1419,7 +1482,6 @@ function startEditingGeometry(geomData: any, id?: string | number) {
     mapInstance.addInteraction(modifyInteraction);
     updateSnapInteractions();
     mapInstance.on("moveend", onMapMoveEndDuringDraw);
-    loadSnapFeatures();
     emit("log", "INFO", `Mode edit geometri aktif (${drawnPointCount.value} titik, ${drawnLengthMeters.value} m). Geser titik koordinat untuk mengubah bentuk garis.`);
   } catch (err: any) {
     emit("log", "ERROR", `Gagal memuat geometri untuk diedit: ${err?.message}`);
@@ -1500,6 +1562,9 @@ function confirmDraw() {
     : coords.length;
 
   if (totalPoints < 2) return;
+
+  // Pastikan geometri berada tepat di tengah map canvas saat dikonfirmasi
+  fitGeometryToCenter(geom, 400);
 
   const geojsonFormat = new olModules.GeoJSON();
   const geojsonObj = geojsonFormat.writeGeometryObject(geom, {
@@ -1713,30 +1778,102 @@ defineExpose({
 
           <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
 
-          <!-- Snapping Toggle -->
-          <UTooltip :text="isSnappingEnabled ? 'Snapping Aktif: Magnet Ruas & Titik' : 'Snapping Nonaktif (Klik untuk Aktifkan)'">
-            <UButton
-              icon="i-lucide-magnet"
-              size="xs"
-              :color="isSnappingEnabled ? 'primary' : 'neutral'"
-              :variant="isSnappingEnabled ? 'solid' : 'ghost'"
+          <!-- Snapping Toggle Row with Status Indicator to the Right -->
+          <div class="relative flex items-center">
+            <UTooltip :text="isSnappingEnabled ? 'Snapping Aktif: Magnet Ruas & Titik' : 'Snapping Nonaktif (Klik untuk Aktifkan)'">
+              <UButton
+                icon="i-lucide-magnet"
+                size="xs"
+                :color="isSnappingEnabled ? 'primary' : 'neutral'"
+                :variant="isSnappingEnabled ? 'solid' : 'ghost'"
+                @click="toggleSnapping"
+              />
+            </UTooltip>
+
+            <!-- Indikator Snapping Aktif / Non Aktif di samping kanan toggle -->
+            <div
+              class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-medium select-none whitespace-nowrap shadow-xs transition-all cursor-pointer"
+              :class="isSnappingEnabled
+                ? 'bg-emerald-50/95 dark:bg-emerald-950/80 border-emerald-200 dark:border-emerald-800/80 text-emerald-700 dark:text-emerald-300'
+                : 'bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400'"
+              :title="isSnappingEnabled ? 'Klik untuk menonaktifkan snapping' : 'Klik untuk mengaktifkan snapping'"
               @click="toggleSnapping"
-            />
-          </UTooltip>
+            >
+              <span
+                class="size-1.5 rounded-full shrink-0"
+                :class="isSnappingEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400 dark:bg-gray-500'"
+              />
+              <span>{{ isSnappingEnabled ? 'Aktif' : 'Non Aktif' }}</span>
+              <span
+                v-if="isSnappingEnabled && isSnapLoading"
+                class="flex items-center gap-0.5 text-[9px] text-emerald-600/70"
+              >
+                <UIcon name="i-lucide-loader-2" class="size-2 animate-spin" />
+              </span>
+              <span
+                v-else-if="isSnappingEnabled && snapRoadCount > 0"
+                class="text-[9px] font-mono text-emerald-600/80 dark:text-emerald-400/80"
+              >
+                ({{ snapRoadCount }})
+              </span>
+            </div>
+          </div>
 
           <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
 
-          <!-- 5. Simpan -->
-          <UTooltip text="Simpan Garis (Buka Form)">
-            <UButton
-              icon="i-lucide-check"
-              size="xs"
-              color="primary"
-              variant="solid"
-              :disabled="!canSave"
-              @click="confirmDraw"
-            />
-          </UTooltip>
+          <!-- 5. Simpan Row with Length & Vertex Calculation Indicator to the Right -->
+          <div class="relative flex items-center">
+            <UTooltip text="Simpan Garis (Buka Form)">
+              <UButton
+                icon="i-lucide-check"
+                size="xs"
+                color="primary"
+                variant="solid"
+                :disabled="!canSave"
+                @click="confirmDraw"
+              />
+            </UTooltip>
+
+            <!-- Indikator Kalkulasi Panjang & Vertex disamping kanan tombol simpan -->
+            <Transition
+              enter-active-class="transition-all duration-200 ease-out"
+              enter-from-class="opacity-0 translate-x-1"
+              enter-to-class="opacity-100 translate-x-0"
+              leave-active-class="transition-all duration-150 ease-in"
+              leave-from-class="opacity-100 translate-x-0"
+              leave-to-class="opacity-0 translate-x-1"
+            >
+              <div
+                v-if="drawnPointCount > 0"
+                class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] select-none whitespace-nowrap shadow-xs backdrop-blur-xs bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800"
+              >
+                <!-- Panjang (Meter) -->
+                <div class="flex items-center gap-1 font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                  <UIcon name="i-lucide-route" class="size-3 shrink-0" />
+                  <span>{{ drawnLengthMeters.toLocaleString('id-ID') }} m</span>
+                </div>
+
+                <div class="w-px h-3 bg-gray-200 dark:bg-gray-800 shrink-0" />
+
+                <!-- Titik / Vertex -->
+                <div class="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-mono">
+                  <span>{{ drawnPointCount }} vertex</span>
+                  <span
+                    v-if="isEditingExisting"
+                    class="text-[9px] font-sans font-medium text-amber-500"
+                  >
+                    (Edit)
+                  </span>
+                  <span
+                    v-else-if="hasCompletedLine"
+                    class="text-[9px] font-sans font-medium text-emerald-500"
+                  >
+                    (Selesai)
+                  </span>
+                </div>
+              </div>
+            </Transition>
+          </div>
 
           <!-- 6. Batal / Tutup -->
           <UTooltip text="Batal & Tutup Draw">
@@ -1749,39 +1886,6 @@ defineExpose({
               @click="stopDrawing(true)"
             />
           </UTooltip>
-        </div>
-
-        <!-- Live Measurement & Snapping Status Badge Card -->
-        <div
-          v-if="drawnPointCount > 0 || isDrawing"
-          class="flex flex-col gap-0.5 px-2 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm text-[11px] font-mono select-none min-w-[125px]"
-        >
-          <div v-if="drawnPointCount > 0" class="flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400">
-            <UIcon name="i-lucide-route" class="size-3.5 shrink-0" />
-            <span>{{ drawnLengthMeters.toLocaleString('id-ID') }} m</span>
-          </div>
-          <div v-if="drawnPointCount > 0" class="text-[10px] text-gray-500 dark:text-gray-400 flex items-center justify-between gap-1">
-            <span>{{ drawnPointCount }} titik</span>
-            <span v-if="isEditingExisting" class="text-amber-500 font-sans text-[9px] font-medium">Edit Garis</span>
-            <span v-else-if="hasCompletedLine" class="text-emerald-500 font-sans text-[9px] font-medium">Selesai</span>
-            <span v-else class="text-blue-500 font-sans text-[9px]">Gambar</span>
-          </div>
-
-          <!-- Snapping Indicator -->
-          <div class="text-[9px] font-sans flex items-center gap-1 pt-0.5 border-t border-gray-100 dark:border-gray-800/80">
-            <UIcon
-              name="i-lucide-magnet"
-              class="size-2.5 shrink-0"
-              :class="isSnappingEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'"
-            />
-            <span v-if="!isSnappingEnabled" class="text-gray-400">Snap Nonaktif</span>
-            <span v-else-if="isSnapLoading" class="text-gray-500 flex items-center gap-1">
-              <UIcon name="i-lucide-loader-2" class="size-2 animate-spin" /> Memuat snap...
-            </span>
-            <span v-else class="text-emerald-600 dark:text-emerald-400 font-medium">
-              Snap Aktif ({{ snapRoadCount }} ruas)
-            </span>
-          </div>
         </div>
       </div>
     </Transition>
@@ -1833,6 +1937,19 @@ defineExpose({
           <span class="size-2 rounded-full bg-emerald-500 dark:bg-emerald-400 ring-2 ring-white dark:ring-[#070b14] shadow-sm" />
         </div>
       </div>
+    </div>
+
+    <!-- Clicked Coordinate Pulse Marker Overlay -->
+    <div
+      ref="pulseEl"
+      class="pointer-events-none z-20 flex items-center justify-center size-8"
+      :class="isPulseVisible ? 'block' : 'hidden'"
+    >
+      <span class="absolute size-8 rounded-full bg-emerald-500/40 animate-ping" />
+      <span class="absolute size-5 rounded-full bg-emerald-500/25" />
+      <span class="relative size-3.5 rounded-full bg-emerald-600 ring-2 ring-white dark:ring-gray-950 shadow-md flex items-center justify-center">
+        <span class="size-1 rounded-full bg-white" />
+      </span>
     </div>
 
     <!-- Floating Navigation Controls (Top Right, Clean Solid) -->

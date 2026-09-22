@@ -1,5 +1,11 @@
 <script lang="ts" setup>
+definePageMeta({
+  middleware: ["auth", "permission"],
+  permission: "dashboard.view",
+});
+
 const auth = useAuthStore();
+const { can } = usePermission();
 
 useSeoMeta({
   title: "Admin Dashboard",
@@ -29,53 +35,65 @@ const totalRoles = computed(() => rolesData.value?.roles?.length ?? 0);
 const totalPermissions = computed(() => rolesData.value?.permissions?.length ?? 0);
 const totalUsers = computed(() => usersData.value?.users?.total ?? 0);
 
-const stats = computed(() => [
-  {
-    title: "Total Roles",
-    value: totalRoles.value,
-    icon: "i-heroicons-shield-check",
-    to: "/admin/roles",
-    description: "Configured access roles",
-  },
-  {
-    title: "Permissions",
-    value: totalPermissions.value,
-    icon: "i-heroicons-key",
-    to: "/admin/permissions",
-    description: "Discrete system capabilities",
-  },
-  {
-    title: "User Accounts",
-    value: totalUsers.value,
-    icon: "i-heroicons-users",
-    to: "/admin/users",
-    description: "Registered members",
-  },
-]);
+const stats = computed(() => {
+  const all = [
+    {
+      title: "Total Roles",
+      value: totalRoles.value,
+      icon: "i-heroicons-shield-check",
+      to: "/admin/roles",
+      description: "Configured access roles",
+      permission: "roles.view",
+    },
+    {
+      title: "Permissions",
+      value: totalPermissions.value,
+      icon: "i-heroicons-key",
+      to: "/admin/permissions",
+      description: "Discrete system capabilities",
+      permission: "permissions-view",
+    },
+    {
+      title: "User Accounts",
+      value: totalUsers.value,
+      icon: "i-heroicons-users",
+      to: "/admin/users",
+      description: "Registered members",
+      permission: "users-view",
+    },
+  ];
+  return all.filter((item) => can(item.permission));
+});
 
-const quickLinks = [
-  {
-    title: "Role Configuration",
-    description: "Create new roles, customize permission bundles, or manage role assignments.",
-    icon: "i-heroicons-shield-check",
-    to: "/admin/roles",
-    cta: "Manage Roles",
-  },
-  {
-    title: "System Permissions",
-    description: "Define granular capability tokens required for route and action authorization.",
-    icon: "i-heroicons-key",
-    to: "/admin/permissions",
-    cta: "View Permissions",
-  },
-  {
-    title: "User Access Control",
-    description: "Inspect registered user accounts and grant or revoke security privileges.",
-    icon: "i-heroicons-users",
-    to: "/admin/users",
-    cta: "Assign User Roles",
-  },
-];
+const quickLinks = computed(() => {
+  const all = [
+    {
+      title: "Role Configuration",
+      description: "Create new roles, customize permission bundles, or manage role assignments.",
+      icon: "i-heroicons-shield-check",
+      to: "/admin/roles",
+      cta: "Manage Roles",
+      permission: "roles.view",
+    },
+    {
+      title: "System Permissions",
+      description: "Define granular capability tokens required for route and action authorization.",
+      icon: "i-heroicons-key",
+      to: "/admin/permissions",
+      cta: "View Permissions",
+      permission: "permissions-view",
+    },
+    {
+      title: "User Access Control",
+      description: "Inspect registered user accounts and grant or revoke security privileges.",
+      icon: "i-heroicons-users",
+      to: "/admin/users",
+      cta: "Assign User Roles",
+      permission: "users-view",
+    },
+  ];
+  return all.filter((item) => can(item.permission));
+});
 </script>
 
 <template>

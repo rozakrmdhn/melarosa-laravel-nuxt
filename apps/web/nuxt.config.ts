@@ -2,6 +2,10 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-05-04',
 
+  experimental: {
+    appManifest: false,
+  },
+
   vite: {
     server: {
       allowedHosts: ["localhost", "127.0.0.1"],

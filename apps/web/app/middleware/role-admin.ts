@@ -1,7 +1,9 @@
 export default defineNuxtRouteMiddleware((to, from) => {
   const auth = useAuthStore()
 
-  if (!auth.logged || !auth.hasRole('admin')) {
+  const hasAccess = auth.hasRole('admin') || (auth.user?.permissions?.length ?? 0) > 0
+
+  if (!auth.logged || !hasAccess) {
     const toast = useToast()
 
     toast.add({

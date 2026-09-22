@@ -114,7 +114,7 @@ function getKondisiBadgeColor(kondisi: string | null | undefined): "success" | "
 <template>
   <div
     :class="[
-      'flex flex-col select-none overflow-hidden w-full h-full',
+      'flex flex-col overflow-hidden w-full h-full',
       isMobileDrawer
         ? 'bg-white dark:bg-[#0b0f19]'
         : 'bg-white dark:bg-[#0b0f19]'
@@ -122,7 +122,7 @@ function getKondisiBadgeColor(kondisi: string | null | undefined): "success" | "
   >
     <!-- Header Strip (Sticky Controls Area) -->
     <div
-      class="shrink-0 z-20 bg-white dark:bg-[#0b0f19] border-b border-gray-200 dark:border-gray-800"
+      class="shrink-0 z-20 bg-white dark:bg-[#0b0f19] border-b border-gray-200 dark:border-gray-800 select-none"
       :class="isMobileDrawer ? 'p-3 space-y-2' : 'flex items-center h-10 px-3 gap-2'"
     >
       <!-- Desktop Layout: Single Compact Row -->

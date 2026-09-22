@@ -2,7 +2,11 @@
 import "ol/ol.css";
 
 definePageMeta({
-  middleware: ["auth", "role-admin"],
+  middleware: ["auth", "permission"],
+  permission: [
+    "batas-kecamatan.view",
+    "batas-kecamatan.manage"
+  ],
   fullBleed: true,
 });
 
@@ -38,11 +42,18 @@ interface KecamatanSeriesItem {
   nama_jabatan: string | null;
   jumlah_desa: number;
   luas_hektar: number;
-  bbox: [number, number, number, number]; // [minX, minY, maxX, maxY]
+  bbox: [number, number, number, number];
 }
 
 const colorMode = useColorMode();
 const toast = useToast();
+const { can } = usePermission();
+
+const canView = computed(() => can("batas-kecamatan.view") || can("batas-kecamatan.manage"));
+const canCreate = computed(() => can("batas-kecamatan.create") || can("batas-kecamatan.manage"));
+const canEdit = computed(() => can("batas-kecamatan.edit") || can("batas-kecamatan.manage"));
+const canDelete = computed(() => can("batas-kecamatan.delete") || can("batas-kecamatan.manage"));
+const hasAnyMutateAction = computed(() => canEdit.value || canDelete.value);
 
 // View Mode: 'map' | 'table'
 const viewMode = ref<"map" | "table">("map");
@@ -641,6 +652,7 @@ const formState = reactive({
 });
 
 function openCreateModal() {
+  if (!canCreate.value) return;
   isEditing.value = false;
   formState.id = null;
   formState.nama_kecamatan = "";
@@ -668,6 +680,7 @@ function openCreateModal() {
 }
 
 function openEditModal(feat: any) {
+  if (!canEdit.value) return;
   isEditing.value = true;
   formState.id = feat.id;
   formState.nama_kecamatan = feat.properties?.nama_kecamatan || feat.nama_kecamatan || "";
@@ -680,6 +693,9 @@ function openEditModal(feat: any) {
 }
 
 async function handleSaveForm() {
+  if (isEditing.value && !canEdit.value) return;
+  if (!isEditing.value && !canCreate.value) return;
+
   if (!formState.nama_kecamatan.trim()) {
     toast.add({ title: "Validasi Gagal", description: "Nama kecamatan wajib diisi.", color: "error" });
     return;
@@ -741,12 +757,13 @@ const featureToDelete = ref<any | null>(null);
 const deleting = ref(false);
 
 function confirmDelete(feat: any) {
+  if (!canDelete.value) return;
   featureToDelete.value = feat;
   isDeleteModalOpen.value = true;
 }
 
 async function handleDelete() {
-  if (!featureToDelete.value) return;
+  if (!canDelete.value || !featureToDelete.value) return;
   deleting.value = true;
 
   try {
@@ -1010,6 +1027,7 @@ onUnmounted(() => {
 
           <!-- Tambah Kecamatan -->
           <UButton
+            v-if="canCreate"
             icon="i-lucide-plus"
             label="Tambah"
             size="xs"
@@ -1180,8 +1198,12 @@ onUnmounted(() => {
           </div>
 
           <!-- Inspector Action Buttons -->
-          <div class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
+          <div
+            v-if="hasAnyMutateAction"
+            class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]"
+          >
             <UButton
+              v-if="canEdit"
               icon="i-lucide-pencil"
               label="Edit Kecamatan"
               size="xs"
@@ -1191,6 +1213,7 @@ onUnmounted(() => {
               @click="openEditModal(selectedFeature)"
             />
             <UButton
+              v-if="canDelete"
               icon="i-lucide-trash-2"
               size="xs"
               color="error"
@@ -1238,10 +1261,11 @@ onUnmounted(() => {
             color="neutral"
             variant="outline"
             :loading="loading"
-            @click="refreshTable"
+            @click="() => refreshTable()"
           />
 
           <UButton
+            v-if="canCreate"
             icon="i-lucide-plus"
             label="Tambah Kecamatan"
             size="xs"
@@ -1319,6 +1343,7 @@ onUnmounted(() => {
                       @click="zoomToFeature(feat.raw)"
                     />
                     <UButton
+                      v-if="canEdit"
                       icon="i-lucide-pencil"
                       size="xs"
                       color="neutral"
@@ -1327,6 +1352,7 @@ onUnmounted(() => {
                       @click="openEditModal(feat.raw)"
                     />
                     <UButton
+                      v-if="canDelete"
                       icon="i-lucide-trash-2"
                       size="xs"
                       color="error"
@@ -1422,6 +1448,7 @@ onUnmounted(() => {
             @click="isFormModalOpen = false"
           />
           <UButton
+            v-if="isEditing ? canEdit : canCreate"
             :label="isEditing ? 'Perbarui Kecamatan' : 'Simpan Kecamatan'"
             color="primary"
             :loading="submitting"
@@ -1447,6 +1474,7 @@ onUnmounted(() => {
             @click="isDeleteModalOpen = false"
           />
           <UButton
+            v-if="canDelete"
             label="Hapus Permanen"
             color="error"
             :loading="deleting"

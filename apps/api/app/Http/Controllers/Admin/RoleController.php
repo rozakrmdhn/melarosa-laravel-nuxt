@@ -51,7 +51,7 @@ class RoleController extends Controller
 
         return response()->json([
             'ok' => true,
-            'message' => 'Role created successfully.',
+            'message' => 'Akses grup berhasil dibuat.',
             'role' => $role->load('permissions')->loadCount('users'),
         ], 201);
     }
@@ -71,7 +71,7 @@ class RoleController extends Controller
         if ($role->name === 'admin' && $validated['name'] !== 'admin') {
             return response()->json([
                 'ok' => false,
-                'message' => 'The system admin role name cannot be changed.',
+                'message' => 'Nama akses grup sistem (admin) tidak dapat diubah.',
             ], 422);
         }
 
@@ -83,7 +83,7 @@ class RoleController extends Controller
 
         return response()->json([
             'ok' => true,
-            'message' => 'Role updated successfully.',
+            'message' => 'Akses grup berhasil diperbarui.',
             'role' => $role->load('permissions')->loadCount('users'),
         ]);
     }
@@ -96,14 +96,14 @@ class RoleController extends Controller
         if ($role->name === 'admin') {
             return response()->json([
                 'ok' => false,
-                'message' => 'The default admin role cannot be deleted.',
+                'message' => 'Akses grup sistem (admin) tidak dapat dihapus.',
             ], 422);
         }
 
         if ($role->users()->count() > 0) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Cannot delete role with assigned users. Please reassign the users first.',
+                'message' => 'Tidak dapat menghapus akses grup yang masih memiliki pengguna terdaftar. Silakan pindahkan pengguna terlebih dahulu.',
             ], 422);
         }
 
@@ -111,7 +111,8 @@ class RoleController extends Controller
 
         return response()->json([
             'ok' => true,
-            'message' => 'Role deleted successfully.',
+            'message' => 'Akses grup berhasil dihapus.',
         ]);
     }
 }
+

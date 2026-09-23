@@ -17,7 +17,10 @@ class JalanPorosDesaController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        // Use a base query without heavy geometry for table format; withGeoJson() is only needed for GeoJSON export
+        $this->authorize('viewAny', JalanPorosDesa::class);
+        $user = $request->user();
+
+        // Read/get operations allow viewing all road data; filters are applied via request parameters
         $query = JalanPorosDesa::query();
 
         // Text search: nama_ruas, desa, kecamatan
@@ -80,10 +83,9 @@ class JalanPorosDesaController extends Controller
         $format = $request->query('format', 'geojson');
 
         if ($format === 'options') {
-            $kecamatanList = DB::table('bataswilayah_kecamatan')
+            $kecamatanQuery = DB::table('bataswilayah_kecamatan')
                 ->select('id', 'nama_kecamatan as nama')
-                ->orderBy('nama')
-                ->get();
+                ->orderBy('nama');
 
             $desaQuery = DB::table('bataswilayah_desa')
                 ->select('id', 'id_kecamatan', 'nama_desa as nama')
@@ -95,6 +97,7 @@ class JalanPorosDesaController extends Controller
                 $desaQuery->where('id_kecamatan', (int) $request->query('kecamatan'));
             }
 
+            $kecamatanList = $kecamatanQuery->get();
             $desaList = $desaQuery->get();
 
             $kondisiList = DB::table('jalan_porosdesa')
@@ -211,7 +214,9 @@ class JalanPorosDesaController extends Controller
                 'jalan_porosdesa.lebar',
                 'jalan_porosdesa.perkerasan',
                 'jalan_porosdesa.kondisi',
+                'jalan_porosdesa.status_awal',
                 'jalan_porosdesa.status_eksisting',
+                'jalan_porosdesa.sumber_data',
                 'jalan_porosdesa.id_desa',
                 'jalan_porosdesa.id_kecamatan',
                 DB::raw('ROUND((ST_Length(jalan_porosdesa.geom::geography))::numeric, 2) as panjang_meter'),
@@ -255,6 +260,8 @@ class JalanPorosDesaController extends Controller
             ], 404);
         }
 
+        $this->authorize('view', $ruas);
+
         return response()->json([
             'ok'      => true,
             'data'    => $ruas,
@@ -267,6 +274,9 @@ class JalanPorosDesaController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $this->authorize('create', JalanPorosDesa::class);
+        $user = $request->user();
+
         $validated = $request->validate([
             'kode_ruas'        => ['nullable', 'integer'],
             'nama_ruas'        => ['required', 'string', 'max:255'],
@@ -331,6 +341,17 @@ class JalanPorosDesaController extends Controller
         $ruas->status_awal      = $validated['status_awal'] ?? null;
         $ruas->status_eksisting = $validated['status_eksisting'] ?? null;
         $ruas->sumber_data      = $validated['sumber_data'] ?? null;
+
+        // Kunci wilayah otomatis sesuai akun pengguna yang dibatasi
+        if ($user && !$user->hasRole('admin')) {
+            if ($user->id_desa) {
+                $validated['id_desa'] = $user->id_desa;
+                $validated['id_kecamatan'] = $user->id_kecamatan;
+            } elseif ($user->id_kecamatan) {
+                $validated['id_kecamatan'] = $user->id_kecamatan;
+            }
+        }
+
         $ruas->id_desa          = $validated['id_desa'] ?? null;
         $ruas->id_kecamatan     = $validated['id_kecamatan'] ?? null;
         $pdo = DB::getPdo();
@@ -360,6 +381,9 @@ class JalanPorosDesaController extends Controller
                 'message' => 'Data jalan poros desa tidak ditemukan.',
             ], 404);
         }
+
+        $this->authorize('update', $ruas);
+        $user = $request->user();
 
         $validated = $request->validate([
             'kode_ruas'        => ['nullable', 'integer'],
@@ -436,6 +460,8 @@ class JalanPorosDesaController extends Controller
             ], 404);
         }
 
+        $this->authorize('delete', $ruas);
+
         $ruas->delete();
 
         return response()->json([
@@ -445,18 +471,122 @@ class JalanPorosDesaController extends Controller
     }
 
     /**
+     * Return TileJSON metadata for QGIS and other GIS clients.
+     */
+    public function tilejson(Request $request): JsonResponse
+    {
+        $baseUrl = $request->getSchemeAndHttpHost();
+        $tileUrl = "{$baseUrl}/api/v1/dataset/mvt/jalan-poros-desa/{z}/{x}/{y}.pbf";
+
+        return response()->json([
+            'tilejson'    => '3.0.0',
+            'name'        => 'jalan_poros_desa',
+            'description' => 'MVT Layer Jalan Poros Desa',
+            'version'     => '1.0.0',
+            'scheme'      => 'xyz',
+            'tiles'       => [$tileUrl],
+            'minzoom'     => 8,
+            'maxzoom'     => 20,
+            'bounds'      => [111.445, -7.452, 112.164, -6.981],
+            'center'      => [111.804, -7.216, 12],
+            'vector_layers' => [
+                [
+                    'id'          => 'jalan_poros_desa',
+                    'description' => 'Jalan Poros Desa Layer',
+                    'minzoom'     => 8,
+                    'maxzoom'     => 20,
+                    'fields'      => [
+                        'id'               => 'String',
+                        'kode_ruas'        => 'Number',
+                        'nama_ruas'        => 'String',
+                        'desa'             => 'String',
+                        'kecamatan'        => 'String',
+                        'panjang'          => 'Number',
+                        'lebar'            => 'Number',
+                        'perkerasan'       => 'String',
+                        'kondisi'          => 'String',
+                        'status_awal'      => 'String',
+                        'status_eksisting' => 'String',
+                        'sumber_data'      => 'String',
+                        'id_desa'          => 'Number',
+                        'id_kecamatan'     => 'Number',
+                    ],
+                ],
+            ],
+        ], 200, [
+            'Access-Control-Allow-Origin' => '*',
+            'Cache-Control'               => 'public, max-age=86400',
+        ]);
+    }
+
+    /**
      * Generate Mapbox Vector Tile (MVT) for jalan poros desa dataset.
      */
     public function mvt(Request $request, int $z, int $x, int $y)
     {
-        $maxTile = (1 << $z) - 1;
-        if ($z < 0 || $z > 22 || $x < 0 || $x > $maxTile || $y < 0 || $y > $maxTile) {
-            return response('', 204)->header('Content-Type', 'application/x-protobuf');
+        // 1. Auto-detect & fix parameter order if client requested {x}/{y}/{z} instead of {z}/{x}/{y}
+        if ($z > 22 && $y <= 22) {
+            $origZ = $z;
+            $origX = $x;
+            $origY = $y;
+            $z = $origY;
+            $x = $origZ;
+            $y = $origX;
         }
 
-        $whereConditions = ["j.geom && ST_Transform(bounds.geom_3857, 4326)"];
+        // 2. Support TMS if requested (QGIS TMS inverted Y)
+        if ($request->boolean('tms') || $request->query('scheme') === 'tms') {
+            $y = (1 << $z) - 1 - $y;
+        }
+
+        // 3. Basic coordinate validation
+        $maxTile = (1 << $z) - 1;
+        if ($z < 0 || $z > 22 || $x < 0 || $x > $maxTile || $y < 0 || $y > $maxTile) {
+            return response('', 204)
+                ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*');
+        }
+
+        // 4. Low zoom rejection: data lokal kabupaten tidak relevan pada z < 8 (skala benua/dunia).
+        // Return 204 seketika untuk mencegah QGIS timeout akibat memindai seluruh data pada z=0..7.
+        if ($z < 8) {
+            return response('', 204)
+                ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Cache-Control', 'public, max-age=86400');
+        }
+
+        // 5. Fast Mathematical Bounding Box Rejection (Bojonegoro / Jatim: 111.0° - 112.5° E, -7.8° - -6.8° S)
+        $n = pow(2, $z);
+        $tileLonMin = $x / $n * 360.0 - 180.0;
+        $tileLonMax = ($x + 1) / $n * 360.0 - 180.0;
+        $tileLatMin = rad2deg(atan(sinh(M_PI * (1 - 2 * ($y + 1) / $n))));
+        $tileLatMax = rad2deg(atan(sinh(M_PI * (1 - 2 * $y / $n))));
+
+        if ($tileLonMax < 111.0 || $tileLonMin > 112.5 || $tileLatMax < -7.8 || $tileLatMin > -6.8) {
+            return response('', 204)
+                ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Cache-Control', 'public, max-age=86400');
+        }
+
+        // 6. Query Filters
+        $whereConditions = [];
         $bindings        = [$z, $x, $y];
         $isFiltered      = false;
+
+        $user = $request->user();
+        if ($user && !$user->hasRole('admin')) {
+            if ($user->id_desa) {
+                $whereConditions[] = "j.id_desa = ?";
+                $bindings[]        = (int) $user->id_desa;
+                $isFiltered        = true;
+            } elseif ($user->id_kecamatan) {
+                $whereConditions[] = "j.id_kecamatan = ?";
+                $bindings[]        = (int) $user->id_kecamatan;
+                $isFiltered        = true;
+            }
+        }
 
         // Kecamatan filter (supports ID or Name)
         if ($request->filled('kecamatan')) {
@@ -516,11 +646,16 @@ class JalanPorosDesaController extends Controller
             $isFiltered        = true;
         }
 
-        $whereSql = implode(' AND ', $whereConditions);
+        $extraWhereSql = count($whereConditions) > 0 ? ' AND ' . implode(' AND ', $whereConditions) : '';
 
+        // 7. Optimized PostGIS MVT Query
+        // Menghitung geom_4326 sekali saja di bounds CTE untuk index scan cepat
         $sql = "
             WITH bounds AS (
-                SELECT ST_TileEnvelope(?, ?, ?) AS geom_3857
+                SELECT 
+                    env AS geom_3857,
+                    ST_Transform(env, 4326) AS geom_4326
+                FROM (SELECT ST_TileEnvelope(?, ?, ?) AS env) t
             ),
             mvt_geom AS (
                 SELECT
@@ -530,6 +665,7 @@ class JalanPorosDesaController extends Controller
                     j.desa,
                     j.kecamatan,
                     j.panjang,
+                    ROUND((ST_Length(j.geom::geography))::numeric, 2) as panjang_meter,
                     j.lebar,
                     j.perkerasan,
                     j.kondisi,
@@ -538,8 +674,6 @@ class JalanPorosDesaController extends Controller
                     j.sumber_data,
                     j.id_desa,
                     j.id_kecamatan,
-                    ROUND((ST_Length(j.geom::geography))::numeric, 2) as panjang_meter,
-                    ST_AsGeoJSON(ST_PointOnSurface(j.geom)) as centroid,
                     ST_AsMVTGeom(
                         ST_Transform(j.geom, 3857),
                         bounds.geom_3857,
@@ -548,7 +682,7 @@ class JalanPorosDesaController extends Controller
                         true
                     ) AS geom
                 FROM jalan_porosdesa j, bounds
-                WHERE {$whereSql}
+                WHERE j.geom && bounds.geom_4326{$extraWhereSql}
             )
             SELECT ST_AsMVT(mvt_geom.*, 'jalan_poros_desa', 4096, 'geom') AS mvt
             FROM mvt_geom;
@@ -566,6 +700,7 @@ class JalanPorosDesaController extends Controller
         if (empty($content)) {
             return response('', 204)
                 ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*')
                 ->header('Cache-Control', $cacheControl);
         }
 
@@ -589,6 +724,8 @@ class JalanPorosDesaController extends Controller
                 'message' => 'Data jalan poros desa tidak ditemukan.',
             ], 404);
         }
+
+        $this->authorize('split', $ruas);
 
         $request->validate([
             'point'             => ['nullable', 'array'],

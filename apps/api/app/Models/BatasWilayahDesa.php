@@ -108,6 +108,28 @@ class BatasWilayahDesa extends Model
     }
 
     /**
+     * Scope query agar dibatasi sesuai wilayah user yang login.
+     */
+    public function scopeForUser($query, ?User $user = null)
+    {
+        if (!$user || $user->hasRole('admin')) {
+            return $query;
+        }
+
+        // Jika user dibatasi per desa spesifik
+        if ($user->id_desa) {
+            return $query->where('bataswilayah_desa.id', $user->id_desa);
+        }
+
+        // Jika user dibatasi per kecamatan
+        if ($user->id_kecamatan) {
+            return $query->where('bataswilayah_desa.id_kecamatan', $user->id_kecamatan);
+        }
+
+        return $query;
+    }
+
+    /**
      * Convert the model instance to a standard GeoJSON Feature array.
      */
     public function toGeoJsonFeature(): array

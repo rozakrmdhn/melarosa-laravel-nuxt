@@ -21,6 +21,9 @@ const props = withDefaults(
     desaFilter?: string | null;
     kondisiFilter?: string | null;
     perkerasanFilter?: string | null;
+    canEditRow?: (row: any) => boolean;
+    canSplitRow?: (row: any) => boolean;
+    canDeleteRow?: (row: any) => boolean;
   }>(),
   {
     collapsed: false,
@@ -41,6 +44,9 @@ const props = withDefaults(
     desaFilter: null,
     kondisiFilter: null,
     perkerasanFilter: null,
+    canEditRow: () => true,
+    canSplitRow: () => true,
+    canDeleteRow: () => true,
   }
 );
 
@@ -455,6 +461,7 @@ function getKondisiBadgeColor(kondisi: string | null | undefined): "success" | "
                 @click="emit('rowClick', row.original)"
               />
               <UButton
+                v-if="canEditRow ? canEditRow(row.original) : true"
                 icon="i-lucide-pencil"
                 size="xs"
                 color="neutral"
@@ -464,6 +471,7 @@ function getKondisiBadgeColor(kondisi: string | null | undefined): "success" | "
                 @click="emit('editRow', row.original)"
               />
               <UButton
+                v-if="canSplitRow ? canSplitRow(row.original) : true"
                 icon="i-lucide-scissors"
                 size="xs"
                 color="neutral"
@@ -473,6 +481,7 @@ function getKondisiBadgeColor(kondisi: string | null | undefined): "success" | "
                 @click="emit('splitRow', row.original)"
               />
               <UButton
+                v-if="canDeleteRow ? canDeleteRow(row.original) : true"
                 icon="i-lucide-trash-2"
                 size="xs"
                 color="error"

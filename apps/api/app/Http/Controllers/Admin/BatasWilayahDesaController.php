@@ -18,7 +18,10 @@ class BatasWilayahDesaController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = BatasWilayahDesa::query()->withGeoJson();
+        $this->authorize('viewAny', BatasWilayahDesa::class);
+
+        $user = $request->user();
+        $query = BatasWilayahDesa::query()->forUser($user)->withGeoJson();
 
         // 1. Text Search Filter (nama desa / pimpinan)
         if ($request->filled('search')) {
@@ -51,6 +54,18 @@ class BatasWilayahDesaController extends Controller
         $format = $request->query('format', 'geojson');
 
         if ($format === 'summary') {
+            $whereClause = "";
+            $bindings = [];
+            if ($user && !$user->hasRole('admin')) {
+                if ($user->id_desa) {
+                    $whereClause = "WHERE id = ?";
+                    $bindings = [$user->id_desa];
+                } elseif ($user->id_kecamatan) {
+                    $whereClause = "WHERE id_kecamatan = ?";
+                    $bindings = [$user->id_kecamatan];
+                }
+            }
+
             $stats = DB::selectOne("
                 SELECT 
                     COUNT(*) as total_desa,
@@ -60,7 +75,8 @@ class BatasWilayahDesaController extends Controller
                     ST_XMax(ST_Extent(geom)) as max_x,
                     ST_YMax(ST_Extent(geom)) as max_y
                 FROM bataswilayah_desa
-            ");
+                {$whereClause}
+            ", $bindings);
 
             return response()->json([
                 'ok' => true,
@@ -113,6 +129,8 @@ class BatasWilayahDesaController extends Controller
             ], 404);
         }
 
+        $this->authorize('view', $desa);
+
         return response()->json([
             'ok' => true,
             'data' => $desa,
@@ -125,6 +143,10 @@ class BatasWilayahDesaController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $this->authorize('create', BatasWilayahDesa::class);
+
+        $user = $request->user();
+
         $validated = $request->validate([
             'nama_desa' => ['required', 'string', 'max:255'],
             'id_kecamatan' => ['nullable', 'integer'],
@@ -134,6 +156,11 @@ class BatasWilayahDesaController extends Controller
             'pangkat_gol' => ['nullable', 'string', 'max:100'],
             'geometry' => ['required'], // GeoJSON geometry array or string
         ]);
+
+        // Jika user dibatasi per kecamatan dan bukan admin, paksa id_kecamatan milik user
+        if ($user && !$user->hasRole('admin') && $user->id_kecamatan) {
+            $validated['id_kecamatan'] = $user->id_kecamatan;
+        }
 
         $geoJsonString = is_string($validated['geometry'])
             ? $validated['geometry']
@@ -195,6 +222,10 @@ class BatasWilayahDesaController extends Controller
             ], 404);
         }
 
+        $this->authorize('update', $desa);
+
+        $user = $request->user();
+
         $validated = $request->validate([
             'nama_desa' => ['sometimes', 'required', 'string', 'max:255'],
             'id_kecamatan' => ['nullable', 'integer'],
@@ -204,6 +235,11 @@ class BatasWilayahDesaController extends Controller
             'pangkat_gol' => ['nullable', 'string', 'max:100'],
             'geometry' => ['nullable'], // Optional: only if edited on map
         ]);
+
+        // Cegah memindahkan desa ke kecamatan lain jika user dibatasi per kecamatan
+        if ($user && !$user->hasRole('admin') && $user->id_kecamatan) {
+            $validated['id_kecamatan'] = $user->id_kecamatan;
+        }
 
         if (isset($validated['nama_desa'])) $desa->nama_desa = $validated['nama_desa'];
         if (array_key_exists('id_kecamatan', $validated)) $desa->id_kecamatan = $validated['id_kecamatan'];
@@ -246,6 +282,8 @@ class BatasWilayahDesaController extends Controller
                 'message' => 'Data batas wilayah desa induk tidak ditemukan.',
             ], 404);
         }
+
+        $this->authorize('update', $desa);
 
         $validated = $request->validate([
             'parts' => ['required', 'array', 'min:2'],
@@ -314,6 +352,8 @@ class BatasWilayahDesaController extends Controller
             ], 404);
         }
 
+        $this->authorize('delete', $desa);
+
         $desa->delete();
 
         return response()->json([
@@ -323,28 +363,129 @@ class BatasWilayahDesaController extends Controller
     }
 
     /**
+     * Return TileJSON metadata for QGIS and other GIS clients.
+     */
+    public function tilejson(Request $request): JsonResponse
+    {
+        $baseUrl = $request->getSchemeAndHttpHost();
+        $tileUrl = "{$baseUrl}/api/v1/dataset/mvt/batas-wilayah-desa/{z}/{x}/{y}.pbf";
+
+        return response()->json([
+            'tilejson'    => '3.0.0',
+            'name'        => 'batas_desa',
+            'description' => 'MVT Layer Batas Wilayah Desa',
+            'version'     => '1.0.0',
+            'scheme'      => 'xyz',
+            'tiles'       => [$tileUrl],
+            'minzoom'     => 8,
+            'maxzoom'     => 20,
+            'bounds'      => [111.445, -7.452, 112.164, -6.981],
+            'center'      => [111.804, -7.216, 12],
+            'vector_layers' => [
+                [
+                    'id'          => 'batas_desa',
+                    'description' => 'Batas Wilayah Desa Layer',
+                    'minzoom'     => 8,
+                    'maxzoom'     => 20,
+                    'fields'      => [
+                        'id'            => 'Number',
+                        'id_kecamatan'  => 'Number',
+                        'nama_desa'     => 'String',
+                        'nama_pimpinan' => 'String',
+                        'nama_jabatan'  => 'String',
+                        'nip'           => 'String',
+                        'pangkat_gol'   => 'String',
+                    ],
+                ],
+            ],
+        ], 200, [
+            'Access-Control-Allow-Origin' => '*',
+            'Cache-Control'               => 'public, max-age=86400',
+        ]);
+    }
+
+    /**
      * Generate Mapbox Vector Tile (MVT) for batas wilayah desa dataset.
-     *
-     * @param Request $request
-     * @param int $z Level Zoom (0-22)
-     * @param int $x Tile X coordinate
-     * @param int $y Tile Y coordinate
-     * @return \Illuminate\Http\Response
      */
     public function mvt(Request $request, int $z, int $x, int $y)
     {
-        // 1. Basic coordinate validation
-        $maxTile = (1 << $z) - 1;
-        if ($z < 0 || $z > 22 || $x < 0 || $x > $maxTile || $y < 0 || $y > $maxTile) {
-            return response('', 204)->header('Content-Type', 'application/x-protobuf');
+        // 1. Auto-detect & fix parameter order if client requested {x}/{y}/{z} instead of {z}/{x}/{y}
+        if ($z > 22 && $y <= 22) {
+            $origZ = $z;
+            $origX = $x;
+            $origY = $y;
+            $z = $origY;
+            $x = $origZ;
+            $y = $origX;
         }
 
-        // 2. PostGIS MVT Query
-        // Uses ST_TileEnvelope for EPSG:3857 tile bounding box
-        // and ST_AsMVTGeom to clip and transform geometry to tile coordinates (extent: 4096)
+        // 2. Support TMS if requested (QGIS TMS inverted Y)
+        if ($request->boolean('tms') || $request->query('scheme') === 'tms') {
+            $y = (1 << $z) - 1 - $y;
+        }
+
+        // 3. Basic coordinate validation
+        $maxTile = (1 << $z) - 1;
+        if ($z < 0 || $z > 22 || $x < 0 || $x > $maxTile || $y < 0 || $y > $maxTile) {
+            return response('', 204)
+                ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*');
+        }
+
+        // 4. Low zoom rejection: data lokal kabupaten tidak relevan pada z < 8 (skala benua/dunia).
+        if ($z < 8) {
+            return response('', 204)
+                ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Cache-Control', 'public, max-age=86400');
+        }
+
+        // 5. Fast Mathematical Bounding Box Rejection (Bojonegoro / Jatim: 111.0° - 112.5° E, -7.8° - -6.8° S)
+        $n = pow(2, $z);
+        $tileLonMin = $x / $n * 360.0 - 180.0;
+        $tileLonMax = ($x + 1) / $n * 360.0 - 180.0;
+        $tileLatMin = rad2deg(atan(sinh(M_PI * (1 - 2 * ($y + 1) / $n))));
+        $tileLatMax = rad2deg(atan(sinh(M_PI * (1 - 2 * $y / $n))));
+
+        if ($tileLonMax < 111.0 || $tileLonMin > 112.5 || $tileLatMax < -7.8 || $tileLatMin > -6.8) {
+            return response('', 204)
+                ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Cache-Control', 'public, max-age=86400');
+        }
+
+        // 6. Build where conditions
+        $whereConditions = [];
+        $bindings = [$z, $x, $y];
+
+        $user = $request->user();
+        if ($user && !$user->hasRole('admin')) {
+            if ($user->id_desa) {
+                $whereConditions[] = "b.id = ?";
+                $bindings[] = (int) $user->id_desa;
+            } elseif ($user->id_kecamatan) {
+                $whereConditions[] = "b.id_kecamatan = ?";
+                $bindings[] = (int) $user->id_kecamatan;
+            }
+        } else {
+            if ($request->filled('id_desa')) {
+                $whereConditions[] = "b.id = ?";
+                $bindings[] = (int) $request->query('id_desa');
+            } elseif ($request->filled('id_kecamatan')) {
+                $whereConditions[] = "b.id_kecamatan = ?";
+                $bindings[] = (int) $request->query('id_kecamatan');
+            }
+        }
+
+        $extraWhereSql = count($whereConditions) > 0 ? ' AND ' . implode(' AND ', $whereConditions) : '';
+
+        // 7. PostGIS MVT Query
         $sql = "
             WITH bounds AS (
-                SELECT ST_TileEnvelope(?, ?, ?) AS geom_3857
+                SELECT 
+                    env AS geom_3857,
+                    ST_Transform(env, 4326) AS geom_4326
+                FROM (SELECT ST_TileEnvelope(?, ?, ?) AS env) t
             ),
             mvt_geom AS (
                 SELECT 
@@ -355,8 +496,6 @@ class BatasWilayahDesaController extends Controller
                     b.nama_jabatan,
                     b.nip,
                     b.pangkat_gol,
-                    ROUND((ST_Area(b.geom::geography) / 10000)::numeric, 2) as luas_hektar,
-                    ROUND((ST_Perimeter(b.geom::geography))::numeric, 2) as keliling_meter,
                     ST_AsMVTGeom(
                         ST_Transform(b.geom, 3857),
                         bounds.geom_3857,
@@ -365,19 +504,20 @@ class BatasWilayahDesaController extends Controller
                         true
                     ) AS geom
                 FROM bataswilayah_desa b, bounds
-                WHERE b.geom && ST_Transform(bounds.geom_3857, 4326)
+                WHERE b.geom && bounds.geom_4326{$extraWhereSql}
             )
             SELECT ST_AsMVT(mvt_geom.*, 'batas_desa', 4096, 'geom') AS mvt
             FROM mvt_geom;
         ";
 
-        $row = DB::selectOne($sql, [$z, $x, $y]);
+        $row = DB::selectOne($sql, $bindings);
         $raw = $row->mvt ?? null;
         $content = is_resource($raw) ? stream_get_contents($raw) : $raw;
 
         if (empty($content)) {
             return response('', 204)
                 ->header('Content-Type', 'application/x-protobuf')
+                ->header('Access-Control-Allow-Origin', '*')
                 ->header('Cache-Control', 'public, max-age=86400');
         }
 

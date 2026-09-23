@@ -139,6 +139,18 @@ class AuthController extends Controller
             ]);
         }
 
+        // Cek status keaktifan akun user
+        if (!Auth::user()->status) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->json([
+                'ok' => false,
+                'message' => 'Akun Anda dinonaktifkan. Hubungi administrator.',
+            ], 403);
+        }
+
         $request->session()->regenerate();
 
         return response()->json(['ok' => true]);
@@ -165,6 +177,7 @@ class AuthController extends Controller
     public function user(Request $request, AdminNavigationService $navigationService): JsonResponse
     {
         $user = $request->user();
+        $user->loadMissing(['kecamatan:id,nama_kecamatan', 'desa:id,nama_desa']);
 
         return response()->json([
             'ok' => true,

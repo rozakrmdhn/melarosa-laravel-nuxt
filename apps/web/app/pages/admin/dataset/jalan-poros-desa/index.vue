@@ -18,10 +18,15 @@ import LeftPanel from "~/components/dataset/jalan-poros-desa/LeftPanel.vue";
 import RightPanel from "~/components/dataset/jalan-poros-desa/RightPanel.vue";
 import BottomPanel from "~/components/dataset/jalan-poros-desa/BottomPanel.vue";
 import MobileBottomSheet from "~/components/dataset/jalan-poros-desa/MobileBottomSheet.vue";
+import { usePermission } from "~/composables/usePermission";
+import { useAuthStore } from "~/stores/auth";
 
 definePageMeta({
   middleware: ["auth", "permission"],
-  permission: ["jalan-poros-desa-view", "jalan-poros-desa.manage", "dataset.jalan-poros-desa.view"],
+  permission: [
+    "jalan-poros-desa-view",
+    "jalan-poros-desa-manage",
+  ],
   fullBleed: true,
   key: (route) => route.path,
 });
@@ -30,11 +35,48 @@ useSeoMeta({
   title: "Jalan Poros Desa - GIS Editor Spasial",
 });
 
-// ─── Runtime Config & Toast ───────────────────────────────────────────────────
+// ─── Runtime Config, Auth, Permissions & Toast ─────────────────────────────────
 
 const config = useRuntimeConfig();
 const apiBase = config.public.apiBase || "http://localhost:9000";
 const toast = useToast();
+const auth = useAuthStore();
+const { can, isAdmin } = usePermission();
+
+// Group Permissions
+const canView = computed(() =>
+  can("jalan-poros-desa-view") ||
+  can("jalan-poros-desa-manage")
+);
+const canCreate = computed(() =>
+  can("jalan-poros-desa-create") ||
+  can("jalan-poros-desa-manage")
+);
+const canEdit = computed(() =>
+  can("jalan-poros-desa-update") ||
+  can("jalan-poros-desa-manage")
+);
+const canSplit = computed(() =>
+  can("jalan-poros-desa-split") ||
+  can("jalan-poros-desa-manage")
+);
+const canDelete = computed(() =>
+  can("jalan-poros-desa-delete") ||
+  can("jalan-poros-desa-manage")
+);
+
+// User Territory Context
+const userKecamatanId = computed(() =>
+  auth.user?.id_kecamatan != null ? Number(auth.user.id_kecamatan) : null
+);
+const userDesaId = computed(() =>
+  auth.user?.id_desa != null ? Number(auth.user.id_desa) : null
+);
+const isKecamatanRestricted = computed(() => !isAdmin() && !!userKecamatanId.value);
+const isDesaRestricted = computed(() => !isAdmin() && !!userDesaId.value);
+const isWilayahRestricted = computed(
+  () => !isAdmin() && (isKecamatanRestricted.value || isDesaRestricted.value)
+);
 
 // ─── Nuxt UI Splitter & Workspace Layout ──────────────────────────────────────
 
@@ -298,6 +340,138 @@ const desaOptions = computed<DesaOption[]>(
   () => filterOptionsResponse.value?.desa || []
 );
 
+const userKecamatanName = computed(() => {
+  if (!userKecamatanId.value) return null;
+  const match = kecamatanOptions.value.find((k) => k.id === userKecamatanId.value);
+  return match?.nama || (auth.user as any)?.kecamatan?.nama || null;
+});
+
+const userDesaName = computed(() => {
+  if (!userDesaId.value) return null;
+  const match = desaOptions.value.find((d) => d.id === userDesaId.value);
+  return match?.nama || (auth.user as any)?.desa?.nama || null;
+});
+
+// ─── Feature Authorization Helpers ────────────────────────────────────────────
+
+function canEditFeature(feature: any): boolean {
+  if (!canEdit.value || !feature) return false;
+  if (isAdmin()) return true;
+
+  const props = feature.properties || feature;
+  const fDesaId = props.id_desa != null ? Number(props.id_desa) : null;
+  const fKecId = props.id_kecamatan != null ? Number(props.id_kecamatan) : null;
+
+  if (isDesaRestricted.value) {
+    if (fDesaId && Number(userDesaId.value)) {
+      return fDesaId === Number(userDesaId.value);
+    }
+    if (props.desa && userDesaName.value) {
+      return props.desa.trim().toLowerCase() === userDesaName.value.trim().toLowerCase();
+    }
+    return false;
+  }
+
+  if (isKecamatanRestricted.value) {
+    if (fKecId && Number(userKecamatanId.value)) {
+      return fKecId === Number(userKecamatanId.value);
+    }
+    if (props.kecamatan && userKecamatanName.value) {
+      return props.kecamatan.trim().toLowerCase() === userKecamatanName.value.trim().toLowerCase();
+    }
+    return false;
+  }
+
+  return true;
+}
+
+function canDeleteFeature(feature: any): boolean {
+  if (!canDelete.value || !feature) return false;
+  if (isAdmin()) return true;
+
+  // Operator desa dilarang menghapus sesuai aturan
+  if (isDesaRestricted.value) return false;
+
+  const props = feature.properties || feature;
+  const fKecId = props.id_kecamatan != null ? Number(props.id_kecamatan) : null;
+
+  if (isKecamatanRestricted.value) {
+    if (fKecId && Number(userKecamatanId.value)) {
+      return fKecId === Number(userKecamatanId.value);
+    }
+    if (props.kecamatan && userKecamatanName.value) {
+      return props.kecamatan.trim().toLowerCase() === userKecamatanName.value.trim().toLowerCase();
+    }
+    return false;
+  }
+
+  return true;
+}
+
+function canSplitFeature(feature: any): boolean {
+  if (!canSplit.value || !feature) return false;
+  if (isAdmin()) return true;
+
+  const props = feature.properties || feature;
+  const fKecId = props.id_kecamatan != null ? Number(props.id_kecamatan) : null;
+  const fDesaId = props.id_desa != null ? Number(props.id_desa) : null;
+
+  if (isDesaRestricted.value) {
+    if (fDesaId && Number(userDesaId.value)) {
+      return fDesaId === Number(userDesaId.value);
+    }
+    if (props.desa && userDesaName.value) {
+      return props.desa.trim().toLowerCase() === userDesaName.value.trim().toLowerCase();
+    }
+    return false;
+  }
+
+  if (isKecamatanRestricted.value) {
+    if (fKecId && Number(userKecamatanId.value)) {
+      return fKecId === Number(userKecamatanId.value);
+    }
+    if (props.kecamatan && userKecamatanName.value) {
+      return props.kecamatan.trim().toLowerCase() === userKecamatanName.value.trim().toLowerCase();
+    }
+    return false;
+  }
+
+  return true;
+}
+
+// ─── Default initial filter kecamatan & desa ke wilayah kerja user ───────────
+
+let hasInitializedTerritoryFilter = false;
+
+watch(
+  [userKecamatanId, kecamatanOptions, userDesaId, desaOptions],
+  ([newKecId, kOptions, newDesaId, dOptions]) => {
+    if (hasInitializedTerritoryFilter) return;
+
+    let applied = false;
+    if (newKecId && kOptions.length > 0 && !tableKecamatan.value) {
+      const matchKec = kOptions.find((k) => k.id === newKecId);
+      if (matchKec) {
+        tableKecamatan.value = matchKec.nama;
+        applied = true;
+      }
+    }
+
+    if (newDesaId && dOptions.length > 0 && !tableDesa.value) {
+      const matchDesa = dOptions.find((d) => d.id === newDesaId);
+      if (matchDesa) {
+        tableDesa.value = matchDesa.nama;
+        applied = true;
+      }
+    }
+
+    if (applied || (kOptions.length > 0 && dOptions.length > 0)) {
+      hasInitializedTerritoryFilter = true;
+    }
+  },
+  { immediate: true }
+);
+
 // Fetch Spatial Summary (stats & bbox filtered)
 const { data: summaryData, status: summaryStatus, refresh: refreshSummary } = useHttp<SpatialSummary>(
   "admin/jalan-poros-desa",
@@ -470,48 +644,93 @@ function isValidGeometry(g: any): boolean {
   return false;
 }
 
-async function handleFeatureSelect(feat: SelectedFeature | null) {
-  selectedFeature.value = feat;
-  if (!feat?.id) return;
+function normalizeRuasProperties(source: any, fallbackId = ""): RuasProperties {
+  const p = source?.properties || source || {};
+  const id = String(p.id || source?.id || fallbackId || "");
 
-  // 1. Instantly enrich from loaded tableRows if present
-  const rowMatch = tableRows.value.find((r: any) => String(r.id) === String(feat.id));
-  if (rowMatch) {
-    selectedFeature.value = {
-      ...feat,
-      geometry: feat.geometry || (rowMatch.geojson ? JSON.parse(rowMatch.geojson) : null),
-      properties: {
-        ...feat.properties,
-        ...rowMatch,
-        centroid: rowMatch.centroid
-          ? (typeof rowMatch.centroid === "string" ? JSON.parse(rowMatch.centroid) : rowMatch.centroid)
-          : feat.properties.centroid,
-      },
-    };
-    if (isValidGeometry(selectedFeature.value.geometry)) {
-      return;
+  let centroid = p.centroid;
+  if (typeof centroid === "string") {
+    try {
+      centroid = JSON.parse(centroid);
+    } catch {
+      centroid = null;
     }
   }
 
-  // 2. Fetch from API endpoint to ensure 100% complete attributes and geometry for inspector and editing
+  // Parse panjang and panjang_meter consistently
+  const pMeter = p.panjang_meter != null && p.panjang_meter !== "" ? Number(p.panjang_meter) : null;
+  const pManual = p.panjang != null && p.panjang !== "" ? Number(p.panjang) : null;
+  const finalPanjangMeter = pMeter ?? pManual ?? 0;
+  const finalPanjang = pManual ?? pMeter ?? 0;
+
+  return {
+    id,
+    kode_ruas: p.kode_ruas != null && p.kode_ruas !== "" ? Number(p.kode_ruas) : null,
+    nama_ruas: p.nama_ruas || "-",
+    desa: p.desa || null,
+    kecamatan: p.kecamatan || null,
+    panjang: finalPanjang,
+    panjang_meter: finalPanjangMeter,
+    lebar: p.lebar != null && p.lebar !== "" ? Number(p.lebar) : null,
+    perkerasan: p.perkerasan || null,
+    kondisi: p.kondisi || null,
+    status_awal: p.status_awal || null,
+    status_eksisting: p.status_eksisting || null,
+    sumber_data: p.sumber_data || null,
+    id_desa: p.id_desa != null && p.id_desa !== "" ? Number(p.id_desa) : null,
+    id_kecamatan: p.id_kecamatan != null && p.id_kecamatan !== "" ? Number(p.id_kecamatan) : null,
+    centroid,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+  };
+}
+
+async function handleFeatureSelect(feat: SelectedFeature | null) {
+  if (!feat?.id) {
+    selectedFeature.value = null;
+    return;
+  }
+
+  const id = String(feat.id);
+  const rowMatch = tableRows.value.find((r: any) => String(r.id) === id);
+
+  let rawGeom = feat.geometry || null;
+  if (!rawGeom && rowMatch?.geojson) {
+    try {
+      rawGeom = typeof rowMatch.geojson === "string" ? JSON.parse(rowMatch.geojson) : rowMatch.geojson;
+    } catch {
+      // keep null
+    }
+  }
+
+  // 1. Immediately normalize from map click feature and matching table row
+  selectedFeature.value = {
+    id,
+    geometry: rawGeom,
+    properties: normalizeRuasProperties({
+      ...feat.properties,
+      ...(rowMatch || {}),
+    }, id),
+  };
+
+  // 2. Fetch full detail from API to guarantee 100% complete geometry and attributes
   try {
-    const res = await $http<any>(`admin/jalan-poros-desa/${feat.id}`);
-    if (res?.ok && res.data && selectedFeature.value?.id === feat.id) {
+    const res = await $http<any>(`admin/jalan-poros-desa/${id}`);
+    if (res?.ok && selectedFeature.value?.id === id) {
+      const apiProps = res.feature?.properties || res.data || {};
+      const fullGeom = res.feature?.geometry || (res.data?.geojson ? (typeof res.data.geojson === "string" ? JSON.parse(res.data.geojson) : res.data.geojson) : null);
+      
       selectedFeature.value = {
-        id: String(res.data.id),
-        geometry: res.feature?.geometry || (res.data.geojson ? JSON.parse(res.data.geojson) : null),
-        properties: {
-          ...feat.properties,
-          ...res.data,
-          panjang_meter: res.data.panjang_meter != null ? Number(res.data.panjang_meter) : feat.properties.panjang_meter,
-          centroid: res.data.centroid
-            ? (typeof res.data.centroid === "string" ? JSON.parse(res.data.centroid) : res.data.centroid)
-            : feat.properties.centroid,
-        },
+        id,
+        geometry: fullGeom || selectedFeature.value.geometry,
+        properties: normalizeRuasProperties({
+          ...selectedFeature.value.properties,
+          ...apiProps,
+        }, id),
       };
     }
   } catch {
-    // Keep MVT attributes if offline/request fails
+    // Keep normalized local/MVT attributes if request fails
   }
 }
 
@@ -519,15 +738,6 @@ async function handleZoomToFeature(feat: SelectedFeature | any) {
   if (!feat) return;
   const p = feat.properties || feat;
   const id = String(p.id || feat.id);
-
-  let centroid = p.centroid;
-  if (typeof centroid === "string") {
-    try {
-      centroid = JSON.parse(centroid);
-    } catch {
-      // keep as-is
-    }
-  }
 
   // Parse geometry if available
   let rawGeom = feat.geometry || null;
@@ -539,18 +749,14 @@ async function handleZoomToFeature(feat: SelectedFeature | any) {
     }
   }
 
-  // 1. Set selectedFeature state
+  // 1. Set normalized selectedFeature state immediately
   selectedFeature.value = {
     id,
     geometry: rawGeom,
-    properties: {
-      ...p,
-      id,
-      centroid,
-    } as RuasProperties,
+    properties: normalizeRuasProperties(p, id),
   };
 
-  addLog("INFO", `Zoom ke: ${p.nama_ruas || id}`);
+  addLog("INFO", `Zoom ke: ${selectedFeature.value.properties.nama_ruas}`);
 
   let didZoom = false;
 
@@ -561,49 +767,41 @@ async function handleZoomToFeature(feat: SelectedFeature | any) {
     didZoom = true;
   }
 
-  // 3. Fetch from API endpoint if geometry or attributes need enriching
-  if (!didZoom || !centroid || p.lebar === undefined) {
-    try {
-      const res = await $http<any>(`admin/jalan-poros-desa/${id}`);
-      if (res?.ok && res.data && selectedFeature.value?.id === id) {
-        const fullCentroid = res.data.centroid
-          ? (typeof res.data.centroid === "string" ? JSON.parse(res.data.centroid) : res.data.centroid)
-          : centroid;
-        const fullGeom = res.feature?.geometry || (res.data.geojson ? (typeof res.data.geojson === "string" ? JSON.parse(res.data.geojson) : res.data.geojson) : null);
+  // 3. Fetch from API to guarantee complete geometry & attributes
+  try {
+    const res = await $http<any>(`admin/jalan-poros-desa/${id}`);
+    if (res?.ok && selectedFeature.value?.id === id) {
+      const apiProps = res.feature?.properties || res.data || {};
+      const fullGeom = res.feature?.geometry || (res.data?.geojson ? (typeof res.data.geojson === "string" ? JSON.parse(res.data.geojson) : res.data.geojson) : null);
 
-        selectedFeature.value = {
-          id,
-          geometry: fullGeom || selectedFeature.value.geometry,
-          properties: {
-            ...selectedFeature.value.properties,
-            ...res.data,
-            panjang_meter: res.data.panjang_meter != null ? Number(res.data.panjang_meter) : selectedFeature.value.properties.panjang_meter,
-            centroid: fullCentroid,
-          },
-        };
+      selectedFeature.value = {
+        id,
+        geometry: fullGeom || selectedFeature.value.geometry,
+        properties: normalizeRuasProperties({
+          ...selectedFeature.value.properties,
+          ...apiProps,
+        }, id),
+      };
 
-        // ONLY trigger fitbound if we haven't already zoomed!
-        if (!didZoom) {
-          if (fullGeom && isValidGeometry(fullGeom)) {
-            mapCanvasRef.value?.zoomToGeometry?.(fullGeom);
-            mobileMapCanvasRef.value?.zoomToGeometry?.(fullGeom);
-            didZoom = true;
-          } else if (fullCentroid) {
-            mapCanvasRef.value?.zoomToCentroid(fullCentroid);
-            mobileMapCanvasRef.value?.zoomToCentroid(fullCentroid);
-            didZoom = true;
-          }
+      if (!didZoom) {
+        if (fullGeom && isValidGeometry(fullGeom)) {
+          mapCanvasRef.value?.zoomToGeometry?.(fullGeom);
+          mobileMapCanvasRef.value?.zoomToGeometry?.(fullGeom);
+          didZoom = true;
+        } else if (selectedFeature.value.properties.centroid) {
+          mapCanvasRef.value?.zoomToCentroid(selectedFeature.value.properties.centroid);
+          mobileMapCanvasRef.value?.zoomToCentroid(selectedFeature.value.properties.centroid);
+          didZoom = true;
         }
       }
-    } catch {
-      // ignore
     }
+  } catch {
+    // Keep normalized attributes if request fails
   }
 
-  // 4. Fallback: zoom to centroid only if no geometry was found and no zoom occurred yet
-  if (!didZoom && centroid) {
-    mapCanvasRef.value?.zoomToCentroid(centroid);
-    mobileMapCanvasRef.value?.zoomToCentroid(centroid);
+  if (!didZoom && selectedFeature.value.properties.centroid) {
+    mapCanvasRef.value?.zoomToCentroid(selectedFeature.value.properties.centroid);
+    mobileMapCanvasRef.value?.zoomToCentroid(selectedFeature.value.properties.centroid);
   }
 }
 
@@ -625,8 +823,18 @@ function handleViewInTable(feat?: SelectedFeature) {
 }
 
 function resetFilters() {
-  tableKecamatan.value = null;
-  tableDesa.value = null;
+  if (isKecamatanRestricted.value && userKecamatanName.value) {
+    tableKecamatan.value = userKecamatanName.value;
+  } else {
+    tableKecamatan.value = null;
+  }
+
+  if (isDesaRestricted.value && userDesaName.value) {
+    tableDesa.value = userDesaName.value;
+  } else {
+    tableDesa.value = null;
+  }
+
   tableKondisi.value = null;
   tablePerkerasan.value = null;
   tableSearch.value = "";
@@ -720,6 +928,8 @@ const formDesaItems = computed(() => {
 });
 
 function handleFormKecamatanChange(val: any) {
+  if (isKecamatanRestricted.value || isDesaRestricted.value) return;
+
   const selectedName = typeof val === "object" && val !== null ? (val.value || val.label || "") : (val ? String(val) : "");
   formState.kecamatan = selectedName;
 
@@ -744,6 +954,8 @@ function handleFormKecamatanChange(val: any) {
 }
 
 function handleFormDesaChange(val: any) {
+  if (isDesaRestricted.value) return;
+
   const selectedName = typeof val === "object" && val !== null ? (val.value || val.label || "") : (val ? String(val) : "");
   formState.desa = selectedName;
 
@@ -770,6 +982,15 @@ function handleFormDesaChange(val: any) {
 }
 
 function openCreate() {
+  if (!canCreate.value) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak memiliki wewenang untuk menambah data jalan poros desa.",
+      color: "error",
+    });
+    return;
+  }
+
   isEditing.value = false;
   if (mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
@@ -790,7 +1011,11 @@ function handleDrawSaved(payload: { geojson: any; lengthMeters: number }) {
     isEditing.value = false;
     let initKec = tableKecamatan.value || "";
     let initKecId: number | undefined;
-    if (initKec) {
+    if (isKecamatanRestricted.value && userKecamatanId.value) {
+      initKecId = userKecamatanId.value;
+      const matchKec = kecamatanOptions.value.find((k) => k.id === initKecId);
+      if (matchKec) initKec = matchKec.nama;
+    } else if (initKec) {
       const matchKec = kecamatanOptions.value.find((k) => k.nama.toLowerCase() === initKec.toLowerCase());
       if (matchKec) {
         initKec = matchKec.nama;
@@ -800,7 +1025,18 @@ function handleDrawSaved(payload: { geojson: any; lengthMeters: number }) {
 
     let initDesa = tableDesa.value || "";
     let initDesaId: number | undefined;
-    if (initDesa) {
+    if (isDesaRestricted.value && userDesaId.value) {
+      initDesaId = userDesaId.value;
+      const matchDesa = desaOptions.value.find((d) => d.id === initDesaId);
+      if (matchDesa) {
+        initDesa = matchDesa.nama;
+        if (!initKecId && matchDesa.id_kecamatan) {
+          initKecId = matchDesa.id_kecamatan;
+          const matchKec = kecamatanOptions.value.find((k) => k.id === matchDesa.id_kecamatan);
+          if (matchKec) initKec = matchKec.nama;
+        }
+      }
+    } else if (initDesa) {
       const matchDesa = desaOptions.value.find(
         (d) => (initKecId ? d.id_kecamatan === initKecId : true) && d.nama.toLowerCase() === initDesa.toLowerCase()
       );
@@ -838,6 +1074,15 @@ watch(isFormOpen, (isOpen, wasOpen) => {
 });
 
 async function openEdit(feat: any) {
+  if (!canEditFeature(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda hanya boleh mengedit ruas jalan di wilayah wewenang Anda.",
+      color: "error",
+    });
+    return;
+  }
+
   const p = feat.properties || feat;
   const id = String(p.id || feat.id || "");
   if (!id) return;
@@ -942,6 +1187,15 @@ async function openEdit(feat: any) {
 }
 
 async function handleSave() {
+  if (isEditing.value && !canEdit.value) {
+    toast.add({ title: "Akses Ditolak", description: "Anda tidak memiliki wewenang mengedit data.", color: "error" });
+    return;
+  }
+  if (!isEditing.value && !canCreate.value) {
+    toast.add({ title: "Akses Ditolak", description: "Anda tidak memiliki wewenang menambah data.", color: "error" });
+    return;
+  }
+
   if (!formState.nama_ruas.trim()) {
     toast.add({ title: "Validasi Gagal", description: "Nama ruas wajib diisi.", color: "error" });
     return;
@@ -956,6 +1210,16 @@ async function handleSave() {
       color: "error",
     });
     return;
+  }
+
+  // Kunci data wilayah sesuai wewenang user jika dibatasi
+  if (isKecamatanRestricted.value && userKecamatanId.value) {
+    formState.id_kecamatan = Number(userKecamatanId.value);
+    if (userKecamatanName.value) formState.kecamatan = userKecamatanName.value;
+  }
+  if (isDesaRestricted.value && userDesaId.value) {
+    formState.id_desa = Number(userDesaId.value);
+    if (userDesaName.value) formState.desa = userDesaName.value;
   }
 
   submitting.value = true;
@@ -1014,6 +1278,15 @@ const featureToDelete = ref<any | null>(null);
 const deleting = ref(false);
 
 function confirmDelete(feat: any) {
+  if (!canDeleteFeature(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak memiliki hak menghapus ruas jalan ini.",
+      color: "error",
+    });
+    return;
+  }
+
   featureToDelete.value = feat;
   isDeleteOpen.value = true;
 }
@@ -1056,6 +1329,15 @@ const splitPart2 = reactive({
 });
 
 async function handleStartSplit(feat: any) {
+  if (!canSplitFeature(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak diizinkan memotong ruas jalan ini.",
+      color: "error",
+    });
+    return;
+  }
+
   const p = feat.properties || feat;
   const id = String(p.id || feat.id || "");
   if (!id) return;
@@ -1184,6 +1466,24 @@ async function handleConfirmSplit() {
             size="xs"
             class="font-mono hidden sm:inline-flex"
           />
+          <UBadge
+            v-if="isDesaRestricted"
+            :label="userDesaName ? `Desa ${userDesaName}` : 'Tingkat Desa'"
+            color="warning"
+            variant="subtle"
+            size="xs"
+            icon="i-lucide-map-pin"
+            class="hidden md:inline-flex"
+          />
+          <UBadge
+            v-else-if="isKecamatanRestricted"
+            :label="userKecamatanName ? `Kec. ${userKecamatanName}` : 'Tingkat Kecamatan'"
+            color="info"
+            variant="subtle"
+            size="xs"
+            icon="i-lucide-map-pin"
+            class="hidden md:inline-flex"
+          />
         </div>
         <div v-else class="flex items-center gap-1 sm:gap-1.5">
           <USkeleton class="h-5 w-14 rounded" />
@@ -1218,6 +1518,7 @@ async function handleConfirmSplit() {
         </UTooltip>
 
         <UButton
+          v-if="canCreate"
           icon="i-lucide-plus"
           label="Tambah Data"
           size="xs"
@@ -1227,6 +1528,7 @@ async function handleConfirmSplit() {
           @click="openCreate"
         />
         <UButton
+          v-if="canCreate"
           icon="i-lucide-plus"
           size="xs"
           color="primary"
@@ -1331,6 +1633,9 @@ async function handleConfirmSplit() {
                   :selected-feature="selectedFeature"
                   :clicked-coordinate="clickedCoordinate"
                   :loading="loading"
+                  :can-edit="canEditFeature(selectedFeature)"
+                  :can-split="canSplitFeature(selectedFeature)"
+                  :can-delete="canDeleteFeature(selectedFeature)"
                   @update:collapsed="(c) => c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand())"
                   @zoom-to-feature="handleZoomToFeature"
                   @edit-feature="openEdit"
@@ -1361,6 +1666,9 @@ async function handleConfirmSplit() {
               :table-status="tableStatus"
               :console-logs="consoleLogs"
               :selected-feature-id="selectedFeature?.id"
+              :can-edit-row="canEditFeature"
+              :can-split-row="canSplitFeature"
+              :can-delete-row="canDeleteFeature"
               @update:collapsed="(c) => { c ? collapse() : (resize ? resize(280) : expand()); handleBottomPanelExpandChange(c); }"
               @reset-filters="resetFilters"
               @row-click="handleZoomToFeature"
@@ -1440,6 +1748,7 @@ async function handleConfirmSplit() {
 
           <div class="flex items-center gap-1">
             <UButton
+              v-if="canSplitFeature(selectedFeature)"
               icon="i-lucide-scissors"
               size="xs"
               color="neutral"
@@ -1448,6 +1757,7 @@ async function handleConfirmSplit() {
               @click="handleStartSplit(selectedFeature)"
             />
             <UButton
+              v-if="canEditFeature(selectedFeature)"
               icon="i-lucide-pencil"
               size="xs"
               color="neutral"
@@ -1470,7 +1780,8 @@ async function handleConfirmSplit() {
 
     <!-- ═══ MOBILE FLOATING BOTTOM DOCK (Touch-Friendly 44px min target) ══════ -->
     <nav
-      class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 px-1 py-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid grid-cols-5 items-center select-none"
+      class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 px-1 py-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid items-center select-none"
+      :class="canCreate ? 'grid-cols-5' : 'grid-cols-4'"
       aria-label="Navigasi Editor Mobile"
     >
       <!-- 1. Layer -->
@@ -1513,6 +1824,7 @@ async function handleConfirmSplit() {
 
       <!-- 3. Tambah (Center Action Button) -->
       <button
+        v-if="canCreate"
         type="button"
         class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors cursor-pointer group"
         @click="openCreate"
@@ -1713,9 +2025,13 @@ async function handleConfirmSplit() {
           :table-status="tableStatus"
           :console-logs="consoleLogs"
           :selected-feature-id="selectedFeature?.id"
+          :can-edit-row="canEditFeature"
+          :can-split-row="canSplitFeature"
+          :can-delete-row="canDeleteFeature"
           @reset-filters="resetFilters"
           @row-click="(row) => { handleZoomToFeature(row); mobileDrawerOpen = false; }"
           @edit-row="(row) => { openEdit(row); mobileDrawerOpen = false; }"
+          @split-row="(row) => { handleStartSplit(row); mobileDrawerOpen = false; }"
           @delete-row="(row) => { confirmDelete(row); mobileDrawerOpen = false; }"
           @clear-logs="consoleLogs = []"
         />
@@ -1727,8 +2043,12 @@ async function handleConfirmSplit() {
           :selected-feature="selectedFeature"
           :clicked-coordinate="clickedCoordinate"
           :loading="loading"
+          :can-edit="canEditFeature(selectedFeature)"
+          :can-split="canSplitFeature(selectedFeature)"
+          :can-delete="canDeleteFeature(selectedFeature)"
           @zoom-to-feature="(feat) => { handleZoomToFeature(feat); mobileDrawerOpen = false; }"
           @edit-feature="(feat) => { openEdit(feat); mobileDrawerOpen = false; }"
+          @split-feature="(feat) => { handleStartSplit(feat); mobileDrawerOpen = false; }"
           @delete-feature="(feat) => { confirmDelete(feat); mobileDrawerOpen = false; }"
           @view-in-table="(feat) => { if (feat) handleViewInTable(feat); mobileDrawerTab = 'table'; refreshTable(); }"
         />
@@ -1798,6 +2118,7 @@ async function handleConfirmSplit() {
                 value-key="value"
                 label-key="label"
                 placeholder="Pilih atau cari kecamatan..."
+                :disabled="isKecamatanRestricted || isDesaRestricted"
                 :ui="{ content: 'z-[100]' }"
                 size="sm"
                 class="w-full"
@@ -1815,6 +2136,7 @@ async function handleConfirmSplit() {
                 value-key="value"
                 label-key="label"
                 :placeholder="formSelectedKecamatanObj ? `Pilih desa di ${formSelectedKecamatanObj.nama}...` : 'Pilih atau cari desa...'"
+                :disabled="isDesaRestricted"
                 :ui="{ content: 'z-[100]' }"
                 size="sm"
                 class="w-full"

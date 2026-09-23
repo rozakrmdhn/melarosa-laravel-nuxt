@@ -9,10 +9,16 @@ export interface NavItem {
 }
 
 export type User = {
+  id?: number;
   uuid: string;
   name: string;
   email: string;
   avatar: string;
+  id_kecamatan?: number | null;
+  id_desa?: number | null;
+  status?: boolean;
+  kecamatan?: { id: number; nama_kecamatan: string } | null;
+  desa?: { id: number; nama_desa: string } | null;
   must_verify_email: boolean;
   has_password: boolean;
   roles: string[];

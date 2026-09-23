@@ -70,7 +70,9 @@ const groupMetaMap: Record<string, { label: string; icon: string }> = {
   roles: { label: "Akses Grup (Roles)", icon: "i-heroicons-shield-check" },
   permissions: { label: "Hak Akses (Permissions)", icon: "i-heroicons-key" },
   settings: { label: "Pengaturan Sistem", icon: "i-heroicons-cog-6-tooth" },
-  "batas-kecamatan": { label: "Batas Kecamatan", icon: "i-heroicons-map" },
+  "batas-kecamatan": { label: "Batas Wilayah Kecamatan", icon: "i-heroicons-map" },
+  "batas-desa": { label: "Batas Wilayah Desa", icon: "i-heroicons-map" },
+  "jalan-poros-desa": { label: "Jalan Poros Desa", icon: "i-heroicons-arrows-pointing-out" },
   dataset: { label: "Dataset Spasial", icon: "i-heroicons-circle-stack" },
 };
 
@@ -100,6 +102,7 @@ function getActionBadgeColor(action: string): "primary" | "secondary" | "success
   const act = action.toLowerCase();
   if (act.includes("create") || act.includes("tambah")) return "success";
   if (act.includes("edit") || act.includes("ubah") || act.includes("manage")) return "warning";
+  if (act.includes("split") || act.includes("potong") || act.includes("pecah")) return "secondary";
   if (act.includes("delete") || act.includes("hapus")) return "error";
   if (act.includes("view") || act.includes("access") || act.includes("lihat")) return "info";
   return "neutral";

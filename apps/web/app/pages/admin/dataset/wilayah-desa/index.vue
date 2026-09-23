@@ -4,8 +4,8 @@ import "ol/ol.css";
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: [
-    "batas-desa.view",
-    "batas-desa.manage"
+    "batas-desa-view",
+    "batas-desa-manage"
   ],
   fullBleed: true,
 });
@@ -48,13 +48,81 @@ interface KecamatanSeriesItem {
 
 const colorMode = useColorMode();
 const toast = useToast();
-const { can } = usePermission();
+const auth = useAuthStore();
+const { can, isAdmin } = usePermission();
 
 const canView = computed(() => can("batas-desa.view") || can("batas-desa.manage"));
 const canCreate = computed(() => can("batas-desa.create") || can("batas-desa.manage"));
 const canEdit = computed(() => can("batas-desa.edit") || can("batas-desa.manage"));
 const canDelete = computed(() => can("batas-desa.delete") || can("batas-desa.manage"));
 const hasAnyMutateAction = computed(() => canEdit.value || canDelete.value);
+
+const userKecamatanId = computed(() => auth.user?.id_kecamatan ?? null);
+const userDesaId = computed(() => auth.user?.id_desa ?? null);
+const isKecamatanRestricted = computed(() => !isAdmin() && !!userKecamatanId.value);
+const isDesaRestricted = computed(() => !isAdmin() && !!userDesaId.value);
+
+// Helper otorisasi aksi per wilayah desa / kecamatan
+function canEditFeature(feat: any): boolean {
+  if (!canEdit.value || !feat) return false;
+  if (isAdmin()) return true;
+
+  const featId = Number(feat?.id ?? feat?.properties?.id ?? feat?.raw?.id);
+  const featKecId = Number(
+    feat?.id_kecamatan ??
+    feat?.properties?.id_kecamatan ??
+    feat?.raw?.id_kecamatan ??
+    feat?.raw?.properties?.id_kecamatan
+  );
+
+  // Jika user dibatasi tingkat desa: HANYA desa miliknya yang boleh diedit
+  if (isDesaRestricted.value) {
+    return !!userDesaId.value && featId === Number(userDesaId.value);
+  }
+
+  // Jika user dibatasi tingkat kecamatan: HANYA desa dalam kecamatannya
+  if (isKecamatanRestricted.value) {
+    return !!userKecamatanId.value && featKecId === Number(userKecamatanId.value);
+  }
+
+  return true;
+}
+
+function canDeleteFeature(feat: any): boolean {
+  if (!canDelete.value || !feat) return false;
+  if (isAdmin()) return true;
+
+  // User tingkat desa tidak boleh menghapus desa
+  if (isDesaRestricted.value) return false;
+
+  const featKecId = Number(
+    feat?.id_kecamatan ??
+    feat?.properties?.id_kecamatan ??
+    feat?.raw?.id_kecamatan ??
+    feat?.raw?.properties?.id_kecamatan
+  );
+
+  // Jika user dibatasi tingkat kecamatan: HANYA desa dalam kecamatannya
+  if (isKecamatanRestricted.value) {
+    return !!userKecamatanId.value && featKecId === Number(userKecamatanId.value);
+  }
+
+  return true;
+}
+
+function hasFeatureMutateAction(feat: any): boolean {
+  return canEditFeature(feat) || canDeleteFeature(feat);
+}
+
+function focusUserDesa() {
+  if (!userDesaId.value) return;
+  const myDesa = formattedTableFeatures.value.find(
+    (f: any) => Number(f.id) === Number(userDesaId.value)
+  );
+  if (myDesa) {
+    zoomToFeature(myDesa.raw);
+  }
+}
 
 // View Mode: 'map' | 'table'
 const viewMode = ref<"map" | "table">("map");
@@ -113,6 +181,18 @@ function getKecamatanName(kecId: number | null | undefined): string {
 // 3. Tabular Data Fetching (Paginated & on-demand for Table View)
 const tableSearch = ref("");
 const tableKecamatanFilter = ref<number | null>(null);
+
+// Kunci filter kecamatan jika user dibatasi wilayah
+watch(
+  userKecamatanId,
+  (newVal) => {
+    if (newVal) {
+      selectedKecamatanId.value = newVal;
+      tableKecamatanFilter.value = newVal;
+    }
+  },
+  { immediate: true }
+);
 const { data: tableDataResponse, status: tableStatus, refresh: refreshTable } = useHttp<{
   ok: boolean;
   data: any[];
@@ -675,11 +755,11 @@ const formState = reactive({
 });
 
 function openCreateModal() {
-  if (!canCreate.value) return;
+  if (!canCreate.value || isDesaRestricted.value) return;
   isEditing.value = false;
   formState.id = null;
   formState.nama_desa = "";
-  formState.id_kecamatan = selectedKecamatanId.value || null;
+  formState.id_kecamatan = userKecamatanId.value || selectedKecamatanId.value || null;
   formState.nama_pimpinan = "";
   formState.nama_jabatan = "Kepala Desa";
   formState.nip = "";
@@ -704,22 +784,36 @@ function openCreateModal() {
 }
 
 function openEditModal(feat: any) {
-  if (!canEdit.value) return;
+  if (!canEditFeature(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda hanya memiliki wewenang untuk mengedit wilayah desa Anda sendiri.",
+      color: "error",
+    });
+    return;
+  }
   isEditing.value = true;
-  formState.id = feat.id;
+  formState.id = feat.id || feat.properties?.id;
   formState.nama_desa = feat.properties?.nama_desa || feat.nama_desa || "";
   formState.id_kecamatan = feat.properties?.id_kecamatan || feat.id_kecamatan || null;
   formState.nama_pimpinan = feat.properties?.nama_pimpinan || feat.nama_pimpinan || "";
   formState.nama_jabatan = feat.properties?.nama_jabatan || feat.nama_jabatan || "Kepala Desa";
   formState.nip = feat.properties?.nip || feat.nip || "";
   formState.pangkat_gol = feat.properties?.pangkat_gol || feat.pangkat_gol || "";
-  formState.geometry = JSON.stringify(feat.geometry || {}, null, 2);
+  formState.geometry = JSON.stringify(feat.geometry || feat.raw?.geometry || {}, null, 2);
   isFormModalOpen.value = true;
 }
 
 async function handleSaveForm() {
-  if (!isEditing.value && !canCreate.value) return;
-  if (isEditing.value && !canEdit.value) return;
+  if (!isEditing.value && (!canCreate.value || isDesaRestricted.value)) return;
+  if (isEditing.value && !canEditFeature({ id: formState.id, id_kecamatan: formState.id_kecamatan })) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak diizinkan mengubah wilayah desa ini.",
+      color: "error",
+    });
+    return;
+  }
 
   if (!formState.nama_desa.trim()) {
     toast.add({ title: "Validasi Gagal", description: "Nama desa wajib diisi.", color: "error" });
@@ -740,9 +834,13 @@ async function handleSaveForm() {
 
   submitting.value = true;
   try {
+    const kecId = isKecamatanRestricted.value
+      ? userKecamatanId.value
+      : (formState.id_kecamatan ? Number(formState.id_kecamatan) : null);
+
     const payload = {
       nama_desa: formState.nama_desa,
-      id_kecamatan: formState.id_kecamatan ? Number(formState.id_kecamatan) : null,
+      id_kecamatan: kecId,
       nama_pimpinan: formState.nama_pimpinan || null,
       nama_jabatan: formState.nama_jabatan || null,
       nip: formState.nip || null,
@@ -783,7 +881,14 @@ const featureToDelete = ref<any | null>(null);
 const deleting = ref(false);
 
 function confirmDelete(feat: any) {
-  if (!canDelete.value) return;
+  if (!canDeleteFeature(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak memiliki izin untuk menghapus wilayah desa ini.",
+      color: "error",
+    });
+    return;
+  }
   featureToDelete.value = feat;
   isDeleteModalOpen.value = true;
 }
@@ -910,7 +1015,7 @@ onUnmounted(() => {
               size="xs"
               color="neutral"
               variant="ghost"
-              :disabled="kecamatanList.length === 0"
+              :disabled="kecamatanList.length === 0 || isKecamatanRestricted"
               title="Kecamatan Sebelumnya (Map Series)"
               @click="prevKecamatan"
             />
@@ -929,7 +1034,7 @@ onUnmounted(() => {
               size="xs"
               color="neutral"
               variant="ghost"
-              :disabled="kecamatanList.length === 0"
+              :disabled="kecamatanList.length === 0 || isKecamatanRestricted"
               title="Kecamatan Berikutnya (Map Series)"
               @click="nextKecamatan"
             />
@@ -939,10 +1044,11 @@ onUnmounted(() => {
           <div class="w-44 sm:w-56">
             <select
               :value="selectedKecamatanId ?? ''"
-              class="w-full text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 transition-colors"
+              :disabled="isKecamatanRestricted"
+              class="w-full text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 transition-colors disabled:opacity-75 disabled:cursor-not-allowed"
               @change="(e: any) => selectKecamatan(e.target.value ? Number(e.target.value) : null)"
             >
-              <option value="">Semua Kecamatan (28)</option>
+              <option v-if="!isKecamatanRestricted" value="">Semua Kecamatan (28)</option>
               <option
                 v-for="kec in kecamatanList"
                 :key="kec.id"
@@ -953,9 +1059,9 @@ onUnmounted(() => {
             </select>
           </div>
 
-          <!-- Reset Button (Visible when filtered) -->
+          <!-- Reset Button (Visible when filtered and not restricted) -->
           <UButton
-            v-if="selectedKecamatanId !== null"
+            v-if="selectedKecamatanId !== null && !isKecamatanRestricted"
             icon="i-lucide-rotate-ccw"
             label="Reset"
             size="xs"
@@ -965,6 +1071,28 @@ onUnmounted(() => {
             title="Reset ke Seluruh Wilayah Bojonegoro"
             @click="resetToAllBojonegoro"
           />
+
+          <!-- Territory Badges for Restricted User -->
+          <UBadge
+            v-if="isKecamatanRestricted && auth.user?.kecamatan?.nama_kecamatan"
+            color="primary"
+            variant="subtle"
+            class="gap-1 px-2 py-1 text-[11px]"
+          >
+            <UIcon name="i-lucide-map-pin" class="w-3.5 h-3.5" />
+            Wilayah: Kec. {{ auth.user.kecamatan.nama_kecamatan }}
+          </UBadge>
+          <UBadge
+            v-if="isDesaRestricted && auth.user?.desa?.nama_desa"
+            color="info"
+            variant="subtle"
+            class="gap-1 px-2 py-1 text-[11px] cursor-pointer hover:opacity-85 transition-opacity"
+            title="Klik untuk fokus ke wilayah desa Anda di peta"
+            @click="focusUserDesa"
+          >
+            <UIcon name="i-lucide-home" class="w-3.5 h-3.5" />
+            Desa: {{ auth.user.desa.nama_desa }}
+          </UBadge>
 
           <!-- Active Kecamatan Stats Pill -->
           <div
@@ -1053,7 +1181,7 @@ onUnmounted(() => {
 
           <!-- Tambah Desa -->
           <UButton
-            v-if="canCreate"
+            v-if="canCreate && !isDesaRestricted"
             icon="i-lucide-plus"
             label="Tambah"
             size="xs"
@@ -1224,9 +1352,9 @@ onUnmounted(() => {
           </div>
 
           <!-- Inspector Action Buttons -->
-          <div v-if="hasAnyMutateAction" class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
+          <div v-if="hasFeatureMutateAction(selectedFeature)" class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
             <UButton
-              v-if="canEdit"
+              v-if="canEditFeature(selectedFeature)"
               icon="i-lucide-pencil"
               label="Edit Desa"
               size="xs"
@@ -1236,7 +1364,7 @@ onUnmounted(() => {
               @click="openEditModal(selectedFeature)"
             />
             <UButton
-              v-if="canDelete"
+              v-if="canDeleteFeature(selectedFeature)"
               icon="i-lucide-trash-2"
               size="xs"
               color="error"
@@ -1244,6 +1372,14 @@ onUnmounted(() => {
               title="Hapus Wilayah Desa"
               @click="confirmDelete(selectedFeature)"
             />
+          </div>
+          <!-- Info for restricted desa users when inspecting other villages -->
+          <div
+            v-else-if="isDesaRestricted"
+            class="pt-3 border-t border-gray-100 dark:border-white/[0.08] flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50/60 dark:bg-[#070b14]/40 p-2.5 rounded-xl border border-gray-200/60 dark:border-white/[0.04]"
+          >
+            <UIcon name="i-lucide-info" class="size-4 shrink-0 text-amber-500" />
+            <span>Mode baca: Fitur aksi hanya tersedia untuk wilayah desa Anda.</span>
           </div>
         </div>
       </Transition>
@@ -1266,6 +1402,24 @@ onUnmounted(() => {
           <h2 class="font-bold text-sm text-gray-900 dark:text-white">
             Daftar Wilayah Administrasi Desa
           </h2>
+          <UBadge
+            v-if="isKecamatanRestricted"
+            color="primary"
+            variant="subtle"
+            size="xs"
+            class="text-[10px]"
+          >
+            Wilayah: {{ auth.user?.kecamatan?.nama_kecamatan || `Kecamatan #${userKecamatanId}` }}
+          </UBadge>
+          <UBadge
+            v-if="isDesaRestricted"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            class="text-[10px]"
+          >
+            Desa: {{ auth.user?.desa?.nama_desa || `Desa #${userDesaId}` }}
+          </UBadge>
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
@@ -1281,9 +1435,10 @@ onUnmounted(() => {
           <!-- Filter Kecamatan Dropdown in Table -->
           <select
             v-model="tableKecamatanFilter"
-            class="text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden"
+            :disabled="isKecamatanRestricted"
+            class="text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden disabled:opacity-75 disabled:cursor-not-allowed"
           >
-            <option :value="null">Semua Kecamatan</option>
+            <option v-if="!isKecamatanRestricted" :value="null">Semua Kecamatan</option>
             <option
               v-for="kec in kecamatanList"
               :key="kec.id"
@@ -1303,7 +1458,7 @@ onUnmounted(() => {
           />
 
           <UButton
-            v-if="canCreate"
+            v-if="canCreate && !isDesaRestricted"
             icon="i-lucide-plus"
             label="Tambah Desa"
             size="xs"
@@ -1379,7 +1534,7 @@ onUnmounted(() => {
                       @click="zoomToFeature(feat.raw)"
                     />
                     <UButton
-                      v-if="canEdit"
+                      v-if="canEditFeature(feat)"
                       icon="i-lucide-pencil"
                       size="xs"
                       color="neutral"
@@ -1388,7 +1543,7 @@ onUnmounted(() => {
                       @click="openEditModal(feat.raw)"
                     />
                     <UButton
-                      v-if="canDelete"
+                      v-if="canDeleteFeature(feat)"
                       icon="i-lucide-trash-2"
                       size="xs"
                       color="error"
@@ -1396,6 +1551,12 @@ onUnmounted(() => {
                       title="Hapus Data"
                       @click="confirmDelete(feat.raw)"
                     />
+                    <span
+                      v-if="isDesaRestricted && !canEditFeature(feat)"
+                      class="text-[10px] text-gray-400 dark:text-gray-500 italic px-1"
+                    >
+                      Hanya baca
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -1427,9 +1588,10 @@ onUnmounted(() => {
             <UFormField label="Kecamatan" required>
               <select
                 v-model="formState.id_kecamatan"
-                class="w-full text-sm rounded-md border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                :disabled="isKecamatanRestricted"
+                class="w-full text-sm rounded-md border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 disabled:opacity-75 disabled:cursor-not-allowed"
               >
-                <option :value="null">-- Pilih Kecamatan --</option>
+                <option v-if="!isKecamatanRestricted" :value="null">-- Pilih Kecamatan --</option>
                 <option
                   v-for="kec in kecamatanList"
                   :key="kec.id"
@@ -1502,7 +1664,7 @@ onUnmounted(() => {
             @click="isFormModalOpen = false"
           />
           <UButton
-            v-if="isEditing ? canEdit : canCreate"
+            v-if="isEditing ? canEdit : (canCreate && !isDesaRestricted)"
             :label="isEditing ? 'Perbarui Desa' : 'Simpan Desa'"
             color="primary"
             :loading="submitting"
@@ -1528,7 +1690,7 @@ onUnmounted(() => {
             @click="isDeleteModalOpen = false"
           />
           <UButton
-            v-if="canDelete"
+            v-if="canDelete && !isDesaRestricted"
             label="Hapus Permanen"
             color="error"
             :loading="deleting"

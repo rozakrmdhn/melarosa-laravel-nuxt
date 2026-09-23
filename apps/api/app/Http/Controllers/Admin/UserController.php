@@ -13,14 +13,21 @@ use Spatie\Permission\Models\Role;
 class UserController extends Controller
 {
     /**
-     * Display a paginated listing of users with roles and search/filter.
+     * Display a paginated listing of users with roles, wilayah, and search/filter.
      */
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', User::class);
+
         $search = $request->query('search');
         $role = $request->query('role');
+        $actor = $request->user();
 
-        $users = User::with(['roles:id,name'])
+        $users = User::with([
+            'roles:id,name',
+            'kecamatan:id,nama_kecamatan',
+            'desa:id,nama_desa',
+        ])
             ->when($search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
@@ -30,7 +37,36 @@ class UserController extends Controller
             ->when($role, function ($query, $role) {
                 $query->role($role);
             })
-            ->select(['id', 'uuid', 'name', 'email', 'avatar', 'email_verified_at', 'created_at'])
+            // Filter status: ?status=1 (aktif), ?status=0 (nonaktif)
+            ->when($request->has('status') && $request->query('status') !== null && $request->query('status') !== '', function ($query) use ($request) {
+                $query->where('status', filter_var($request->query('status'), FILTER_VALIDATE_BOOLEAN));
+            })
+            // Filter wilayah jika actor bukan admin (pembatasan wilayah actor)
+            ->when(!$actor->hasRole('admin') && $actor->id_kecamatan, function ($query) use ($actor) {
+                $query->where('id_kecamatan', $actor->id_kecamatan);
+            })
+            ->when(!$actor->hasRole('admin') && $actor->id_desa, function ($query) use ($actor) {
+                $query->where('id_desa', $actor->id_desa);
+            })
+            // Filter query opsional untuk admin/user berwenang
+            ->when($request->filled('id_kecamatan'), function ($query) use ($request) {
+                $query->where('id_kecamatan', (int) $request->query('id_kecamatan'));
+            })
+            ->when($request->filled('id_desa'), function ($query) use ($request) {
+                $query->where('id_desa', (int) $request->query('id_desa'));
+            })
+            ->select([
+                'id',
+                'uuid',
+                'name',
+                'email',
+                'avatar',
+                'id_kecamatan',
+                'id_desa',
+                'status',
+                'email_verified_at',
+                'created_at',
+            ])
             ->latest()
             ->paginate($request->integer('per_page', 15));
 
@@ -44,16 +80,34 @@ class UserController extends Controller
     }
 
     /**
+     * Display the specified user.
+     */
+    public function show(Request $request, User $user): JsonResponse
+    {
+        $this->authorize('view', $user);
+
+        return response()->json([
+            'ok' => true,
+            'user' => $user->load(['roles:id,name', 'kecamatan:id,nama_kecamatan', 'desa:id,nama_desa']),
+        ]);
+    }
+
+    /**
      * Store a newly created user in storage.
      */
     public function store(Request $request): JsonResponse
     {
+        $this->authorize('create', User::class);
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', Password::defaults(), 'confirmed'],
             'roles' => ['required', 'array', 'min:1'],
             'roles.*' => ['string', 'exists:roles,name'],
+            'id_kecamatan' => ['nullable', 'integer', 'exists:bataswilayah_kecamatan,id'],
+            'id_desa' => ['nullable', 'integer', 'exists:bataswilayah_desa,id'],
+            'status' => ['nullable', 'boolean'],
         ], [
             'roles.required' => 'Pilih setidaknya satu role untuk pengguna.',
             'roles.min' => 'Pilih setidaknya satu role untuk pengguna.',
@@ -63,6 +117,9 @@ class UserController extends Controller
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            'id_kecamatan' => $validated['id_kecamatan'] ?? null,
+            'id_desa' => $validated['id_desa'] ?? null,
+            'status' => $validated['status'] ?? true,
         ]);
 
         // Tandai email sudah terverifikasi saat dibuat oleh admin
@@ -73,7 +130,7 @@ class UserController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Pengguna berhasil ditambahkan.',
-            'user' => $user->load(['roles:id,name']),
+            'user' => $user->load(['roles:id,name', 'kecamatan:id,nama_kecamatan', 'desa:id,nama_desa']),
         ], 201);
     }
 
@@ -82,12 +139,17 @@ class UserController extends Controller
      */
     public function update(Request $request, User $user): JsonResponse
     {
+        $this->authorize('update', $user);
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email,' . $user->id],
             'password' => ['nullable', 'string', Password::defaults(), 'confirmed'],
             'roles' => ['required', 'array', 'min:1'],
             'roles.*' => ['string', 'exists:roles,name'],
+            'id_kecamatan' => ['nullable', 'integer', 'exists:bataswilayah_kecamatan,id'],
+            'id_desa' => ['nullable', 'integer', 'exists:bataswilayah_desa,id'],
+            'status' => ['sometimes', 'boolean'],
         ], [
             'roles.required' => 'Pilih setidaknya satu role untuk pengguna.',
             'roles.min' => 'Pilih setidaknya satu role untuk pengguna.',
@@ -106,6 +168,18 @@ class UserController extends Controller
             'email' => $validated['email'],
         ];
 
+        if (array_key_exists('id_kecamatan', $validated)) {
+            $userData['id_kecamatan'] = $validated['id_kecamatan'];
+        }
+
+        if (array_key_exists('id_desa', $validated)) {
+            $userData['id_desa'] = $validated['id_desa'];
+        }
+
+        if (array_key_exists('status', $validated)) {
+            $userData['status'] = $validated['status'];
+        }
+
         if (!empty($validated['password'])) {
             $userData['password'] = Hash::make($validated['password']);
         }
@@ -116,7 +190,7 @@ class UserController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Data pengguna berhasil diperbarui.',
-            'user' => $user->load(['roles:id,name']),
+            'user' => $user->load(['roles:id,name', 'kecamatan:id,nama_kecamatan', 'desa:id,nama_desa']),
         ]);
     }
 
@@ -125,6 +199,8 @@ class UserController extends Controller
      */
     public function destroy(Request $request, User $user): JsonResponse
     {
+        $this->authorize('delete', $user);
+
         // Cegah menghapus akun sendiri
         if ($request->user()->id === $user->id) {
             return response()->json([
@@ -146,6 +222,8 @@ class UserController extends Controller
      */
     public function updateRoles(Request $request, User $user): JsonResponse
     {
+        $this->authorize('update', $user);
+
         $validated = $request->validate([
             'roles' => ['required', 'array', 'min:1'],
             'roles.*' => ['string', 'exists:roles,name'],
@@ -166,7 +244,7 @@ class UserController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Role pengguna berhasil diperbarui.',
-            'user' => $user->load(['roles:id,name']),
+            'user' => $user->load(['roles:id,name', 'kecamatan:id,nama_kecamatan', 'desa:id,nama_desa']),
         ]);
     }
 }

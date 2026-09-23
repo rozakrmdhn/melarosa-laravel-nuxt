@@ -5,6 +5,9 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use App\Models\User;
+use App\Models\BatasWilayahDesa;
+use App\Models\BatasWilayahKecamatan;
 
 class JalanPorosDesa extends Model
 {
@@ -46,6 +49,44 @@ class JalanPorosDesa extends Model
         'created_at'   => 'datetime',
         'updated_at'   => 'datetime',
     ];
+
+    /**
+     * Relasi ke data batas wilayah kecamatan
+     */
+    public function kecamatanModel()
+    {
+        return $this->belongsTo(BatasWilayahKecamatan::class, 'id_kecamatan');
+    }
+
+    /**
+     * Relasi ke data batas wilayah desa
+     */
+    public function desaModel()
+    {
+        return $this->belongsTo(BatasWilayahDesa::class, 'id_desa');
+    }
+
+    /**
+     * Scope query agar otomatis terfilter berdasarkan wilayah user yang login.
+     */
+    public function scopeForUser($query, ?User $user = null)
+    {
+        if (!$user || $user->hasRole('admin')) {
+            return $query;
+        }
+
+        // Jika user dibatasi tingkat desa
+        if ($user->id_desa) {
+            return $query->where('jalan_porosdesa.id_desa', $user->id_desa);
+        }
+
+        // Jika user dibatasi tingkat kecamatan
+        if ($user->id_kecamatan) {
+            return $query->where('jalan_porosdesa.id_kecamatan', $user->id_kecamatan);
+        }
+
+        return $query;
+    }
 
     /**
      * Scope to select fields with GeoJSON geometry and computed spatial metrics

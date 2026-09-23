@@ -4,8 +4,8 @@ import "ol/ol.css";
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: [
-    "batas-kecamatan.view",
-    "batas-kecamatan.manage"
+    "batas-kecamatan-view",
+    "batas-kecamatan-manage"
   ],
   fullBleed: true,
 });
@@ -47,13 +47,55 @@ interface KecamatanSeriesItem {
 
 const colorMode = useColorMode();
 const toast = useToast();
-const { can } = usePermission();
+const auth = useAuthStore();
+const { can, isAdmin } = usePermission();
 
 const canView = computed(() => can("batas-kecamatan.view") || can("batas-kecamatan.manage"));
 const canCreate = computed(() => can("batas-kecamatan.create") || can("batas-kecamatan.manage"));
 const canEdit = computed(() => can("batas-kecamatan.edit") || can("batas-kecamatan.manage"));
 const canDelete = computed(() => can("batas-kecamatan.delete") || can("batas-kecamatan.manage"));
 const hasAnyMutateAction = computed(() => canEdit.value || canDelete.value);
+
+const userKecamatanId = computed(() => auth.user?.id_kecamatan ?? null);
+const userDesaId = computed(() => auth.user?.id_desa ?? null);
+const isWilayahRestricted = computed(() => !isAdmin() && (!!userKecamatanId.value || !!userDesaId.value));
+
+// Helper otorisasi aksi per wilayah kecamatan
+function canEditKecamatan(feat: any): boolean {
+  if (!canEdit.value || !feat) return false;
+  if (isAdmin()) return true;
+
+  // Jika user dibatasi tingkat desa, tidak boleh mengedit data kecamatan
+  if (userDesaId.value) return false;
+
+  const featId = Number(feat?.id ?? feat?.properties?.id ?? feat?.raw?.id);
+
+  // Jika user dibatasi tingkat kecamatan: HANYA kecamatan miliknya yang boleh diedit
+  if (userKecamatanId.value) {
+    return featId === Number(userKecamatanId.value);
+  }
+
+  return true;
+}
+
+function canDeleteKecamatan(feat: any): boolean {
+  if (!canDelete.value || !feat) return false;
+  if (isAdmin()) return true;
+
+  // User tingkat kecamatan / desa tidak boleh menghapus kecamatan
+  if (isWilayahRestricted.value) return false;
+
+  return true;
+}
+
+function hasKecamatanMutateAction(feat: any): boolean {
+  return canEditKecamatan(feat) || canDeleteKecamatan(feat);
+}
+
+function focusUserKecamatan() {
+  if (!userKecamatanId.value) return;
+  selectKecamatan(userKecamatanId.value);
+}
 
 // View Mode: 'map' | 'table'
 const viewMode = ref<"map" | "table">("map");
@@ -92,6 +134,17 @@ const kecamatanList = computed(() => kecamatanResponse.value?.data || []);
 
 // Map Series Navigation State
 const selectedKecamatanId = ref<number | null>(null);
+
+// Kunci pemilihan kecamatan jika user dibatasi wilayah
+watch(
+  userKecamatanId,
+  (newVal) => {
+    if (newVal) {
+      selectedKecamatanId.value = newVal;
+    }
+  },
+  { immediate: true }
+);
 
 const selectedKecamatan = computed(() => {
   if (!selectedKecamatanId.value) return null;
@@ -680,21 +733,35 @@ function openCreateModal() {
 }
 
 function openEditModal(feat: any) {
-  if (!canEdit.value) return;
+  if (!canEditKecamatan(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda hanya memiliki wewenang untuk mengedit wilayah kecamatan Anda sendiri.",
+      color: "error",
+    });
+    return;
+  }
   isEditing.value = true;
-  formState.id = feat.id;
+  formState.id = feat.id || feat.properties?.id;
   formState.nama_kecamatan = feat.properties?.nama_kecamatan || feat.nama_kecamatan || "";
   formState.nama_pimpinan = feat.properties?.nama_pimpinan || feat.nama_pimpinan || "";
   formState.nama_jabatan = feat.properties?.nama_jabatan || feat.nama_jabatan || "Camat";
   formState.nip = feat.properties?.nip || feat.nip || "";
   formState.pangkat_gol = feat.properties?.pangkat_gol || feat.pangkat_gol || "";
-  formState.geometry = JSON.stringify(feat.geometry || {}, null, 2);
+  formState.geometry = JSON.stringify(feat.geometry || feat.raw?.geometry || {}, null, 2);
   isFormModalOpen.value = true;
 }
 
 async function handleSaveForm() {
-  if (isEditing.value && !canEdit.value) return;
-  if (!isEditing.value && !canCreate.value) return;
+  if (isEditing.value && !canEditKecamatan({ id: formState.id })) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak diizinkan mengubah wilayah kecamatan ini.",
+      color: "error",
+    });
+    return;
+  }
+  if (!isEditing.value && (!canCreate.value || isWilayahRestricted.value)) return;
 
   if (!formState.nama_kecamatan.trim()) {
     toast.add({ title: "Validasi Gagal", description: "Nama kecamatan wajib diisi.", color: "error" });
@@ -757,7 +824,14 @@ const featureToDelete = ref<any | null>(null);
 const deleting = ref(false);
 
 function confirmDelete(feat: any) {
-  if (!canDelete.value) return;
+  if (!canDeleteKecamatan(feat)) {
+    toast.add({
+      title: "Akses Ditolak",
+      description: "Anda tidak memiliki izin untuk menghapus wilayah kecamatan ini.",
+      color: "error",
+    });
+    return;
+  }
   featureToDelete.value = feat;
   isDeleteModalOpen.value = true;
 }
@@ -884,7 +958,7 @@ onUnmounted(() => {
               size="xs"
               color="neutral"
               variant="ghost"
-              :disabled="kecamatanList.length === 0"
+              :disabled="kecamatanList.length === 0 || isWilayahRestricted"
               title="Kecamatan Sebelumnya (Map Series)"
               @click="prevKecamatan"
             />
@@ -903,7 +977,7 @@ onUnmounted(() => {
               size="xs"
               color="neutral"
               variant="ghost"
-              :disabled="kecamatanList.length === 0"
+              :disabled="kecamatanList.length === 0 || isWilayahRestricted"
               title="Kecamatan Berikutnya (Map Series)"
               @click="nextKecamatan"
             />
@@ -913,10 +987,11 @@ onUnmounted(() => {
           <div class="w-44 sm:w-56">
             <select
               :value="selectedKecamatanId ?? ''"
-              class="w-full text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 transition-colors"
+              :disabled="isWilayahRestricted"
+              class="w-full text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 transition-colors disabled:opacity-75 disabled:cursor-not-allowed"
               @change="(e: any) => selectKecamatan(e.target.value ? Number(e.target.value) : null)"
             >
-              <option value="">Semua Kecamatan (28)</option>
+              <option v-if="!isWilayahRestricted" value="">Semua Kecamatan (28)</option>
               <option
                 v-for="kec in kecamatanList"
                 :key="kec.id"
@@ -927,9 +1002,9 @@ onUnmounted(() => {
             </select>
           </div>
 
-          <!-- Reset Button (Visible when filtered) -->
+          <!-- Reset Button (Visible when filtered and not restricted) -->
           <UButton
-            v-if="selectedKecamatanId !== null"
+            v-if="selectedKecamatanId !== null && !isWilayahRestricted"
             icon="i-lucide-rotate-ccw"
             label="Reset"
             size="xs"
@@ -939,6 +1014,19 @@ onUnmounted(() => {
             title="Reset ke Seluruh Wilayah Bojonegoro"
             @click="resetToAllBojonegoro"
           />
+
+          <!-- Territory Badge for Restricted User -->
+          <UBadge
+            v-if="isWilayahRestricted && auth.user?.kecamatan?.nama_kecamatan"
+            color="primary"
+            variant="subtle"
+            class="gap-1 px-2 py-1 text-[11px] cursor-pointer hover:opacity-85 transition-opacity"
+            title="Klik untuk fokus ke wilayah kecamatan Anda di peta"
+            @click="focusUserKecamatan"
+          >
+            <UIcon name="i-lucide-map-pin" class="w-3.5 h-3.5" />
+            Wilayah: Kec. {{ auth.user.kecamatan.nama_kecamatan }}
+          </UBadge>
 
           <!-- Active Kecamatan Stats Pill -->
           <div
@@ -1027,7 +1115,7 @@ onUnmounted(() => {
 
           <!-- Tambah Kecamatan -->
           <UButton
-            v-if="canCreate"
+            v-if="canCreate && !isWilayahRestricted"
             icon="i-lucide-plus"
             label="Tambah"
             size="xs"
@@ -1199,11 +1287,11 @@ onUnmounted(() => {
 
           <!-- Inspector Action Buttons -->
           <div
-            v-if="hasAnyMutateAction"
+            v-if="hasKecamatanMutateAction(selectedFeature)"
             class="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]"
           >
             <UButton
-              v-if="canEdit"
+              v-if="canEditKecamatan(selectedFeature)"
               icon="i-lucide-pencil"
               label="Edit Kecamatan"
               size="xs"
@@ -1213,7 +1301,7 @@ onUnmounted(() => {
               @click="openEditModal(selectedFeature)"
             />
             <UButton
-              v-if="canDelete"
+              v-if="canDeleteKecamatan(selectedFeature)"
               icon="i-lucide-trash-2"
               size="xs"
               color="error"
@@ -1221,6 +1309,14 @@ onUnmounted(() => {
               title="Hapus Wilayah Kecamatan"
               @click="confirmDelete(selectedFeature)"
             />
+          </div>
+          <!-- Info for restricted users when inspecting other kecamatan -->
+          <div
+            v-else-if="isWilayahRestricted"
+            class="pt-3 border-t border-gray-100 dark:border-white/[0.08] flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50/60 dark:bg-[#070b14]/40 p-2.5 rounded-xl border border-gray-200/60 dark:border-white/[0.04]"
+          >
+            <UIcon name="i-lucide-info" class="size-4 shrink-0 text-amber-500" />
+            <span>Mode baca: Fitur aksi hanya tersedia untuk wilayah kecamatan Anda.</span>
           </div>
         </div>
       </Transition>
@@ -1240,9 +1336,20 @@ onUnmounted(() => {
             @click="viewMode = 'map'"
           />
           <div class="h-4 w-px bg-gray-200 dark:bg-white/[0.08] hidden sm:block" />
-          <h2 class="font-bold text-sm text-gray-900 dark:text-white">
-            Daftar Wilayah Administrasi Kecamatan
-          </h2>
+          <div class="flex items-center gap-2">
+            <h2 class="font-bold text-sm text-gray-900 dark:text-white">
+              Daftar Wilayah Administrasi Kecamatan
+            </h2>
+            <UBadge
+              v-if="isWilayahRestricted && auth.user?.kecamatan?.nama_kecamatan"
+              color="primary"
+              variant="subtle"
+              class="gap-1 text-[11px]"
+            >
+              <UIcon name="i-lucide-map-pin" class="w-3 h-3" />
+              Wilayah: Kec. {{ auth.user.kecamatan.nama_kecamatan }}
+            </UBadge>
+          </div>
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
@@ -1265,7 +1372,7 @@ onUnmounted(() => {
           />
 
           <UButton
-            v-if="canCreate"
+            v-if="canCreate && !isWilayahRestricted"
             icon="i-lucide-plus"
             label="Tambah Kecamatan"
             size="xs"
@@ -1343,7 +1450,7 @@ onUnmounted(() => {
                       @click="zoomToFeature(feat.raw)"
                     />
                     <UButton
-                      v-if="canEdit"
+                      v-if="canEditKecamatan(feat)"
                       icon="i-lucide-pencil"
                       size="xs"
                       color="neutral"
@@ -1352,7 +1459,7 @@ onUnmounted(() => {
                       @click="openEditModal(feat.raw)"
                     />
                     <UButton
-                      v-if="canDelete"
+                      v-if="canDeleteKecamatan(feat)"
                       icon="i-lucide-trash-2"
                       size="xs"
                       color="error"
@@ -1360,6 +1467,12 @@ onUnmounted(() => {
                       title="Hapus Data"
                       @click="confirmDelete(feat.raw)"
                     />
+                    <span
+                      v-if="isWilayahRestricted && !canEditKecamatan(feat)"
+                      class="text-[10px] text-gray-400 dark:text-gray-500 italic px-1"
+                    >
+                      Hanya baca
+                    </span>
                   </div>
                 </td>
               </tr>

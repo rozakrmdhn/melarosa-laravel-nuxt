@@ -10,6 +10,9 @@ const props = withDefaults(
     isMobileDrawer?: boolean;
     collapsible?: boolean;
     clickedCoordinate?: [number, number] | null;
+    canEdit?: boolean;
+    canSplit?: boolean;
+    canDelete?: boolean;
   }>(),
   {
     collapsed: false,
@@ -19,6 +22,9 @@ const props = withDefaults(
     isMobileDrawer: false,
     collapsible: true,
     clickedCoordinate: null,
+    canEdit: true,
+    canSplit: true,
+    canDelete: true,
   }
 );
 
@@ -171,6 +177,7 @@ const emit = defineEmits<{
               @click="emit('zoomToFeature', selectedFeature)"
             />
             <UButton
+              v-if="canEdit"
               icon="i-lucide-pencil"
               label="Edit"
               size="xs"
@@ -180,6 +187,7 @@ const emit = defineEmits<{
               @click="emit('editFeature', selectedFeature)"
             />
             <UButton
+              v-if="canSplit"
               icon="i-lucide-scissors"
               size="xs"
               color="neutral"
@@ -189,6 +197,7 @@ const emit = defineEmits<{
               @click="emit('splitFeature', selectedFeature)"
             />
             <UButton
+              v-if="canDelete"
               icon="i-lucide-trash-2"
               size="xs"
               color="error"
@@ -208,6 +217,15 @@ const emit = defineEmits<{
             />
           </div>
 
+          <!-- Info banner if feature cannot be edited or deleted by user -->
+          <div
+            v-if="!canEdit && !canSplit && !canDelete"
+            class="text-[11px] text-gray-500 dark:text-gray-400 italic p-2 bg-gray-50 dark:bg-gray-900/40 rounded-lg border border-gray-100 dark:border-gray-800/80 flex items-center gap-1.5"
+          >
+            <UIcon name="i-lucide-info" class="size-3.5 text-amber-500 shrink-0" />
+            <span>Mode baca: Ruas jalan ini di luar wewenang wilayah Anda.</span>
+          </div>
+
           <!-- Detail Properties List -->
           <div class="rounded-lg bg-gray-50 dark:bg-gray-900/40 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800/60 border border-gray-100 dark:border-gray-800/80">
             <div
@@ -216,8 +234,8 @@ const emit = defineEmits<{
                 ['Kode Ruas', selectedFeature.properties.kode_ruas],
                 ['Desa', selectedFeature.properties.desa],
                 ['Kecamatan', selectedFeature.properties.kecamatan],
-                ['Panjang', (selectedFeature.properties.panjang_meter ?? selectedFeature.properties.panjang) != null ? `${Number(selectedFeature.properties.panjang_meter ?? selectedFeature.properties.panjang).toLocaleString('id-ID', { maximumFractionDigits: 2 })} m` : '-'],
-                ['Lebar', selectedFeature.properties.lebar != null ? `${selectedFeature.properties.lebar} m` : '-'],
+                ['Panjang', (Number(selectedFeature.properties.panjang_meter || selectedFeature.properties.panjang) > 0) ? `${Number(selectedFeature.properties.panjang_meter || selectedFeature.properties.panjang).toLocaleString('id-ID', { maximumFractionDigits: 1 })} m` : '-'],
+                ['Lebar', (Number(selectedFeature.properties.lebar) > 0) ? `${Number(selectedFeature.properties.lebar).toLocaleString('id-ID', { maximumFractionDigits: 1 })} m` : '-'],
                 ['Perkerasan', selectedFeature.properties.perkerasan],
                 ['Kondisi', selectedFeature.properties.kondisi],
                 ['Status Awal', selectedFeature.properties.status_awal],

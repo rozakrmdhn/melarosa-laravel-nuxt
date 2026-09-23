@@ -53,11 +53,12 @@ const liveTranslateY = computed(() => {
   return raw;
 });
 
+const currentTranslateY = computed(() => Math.max(0, liveTranslateY.value));
+
 const sheetStyle = computed(() => ({
   height: `${currentBaseH.value}px`,
-  transform: props.open
-    ? `translateY(${liveTranslateY.value}px)`
-    : "translateY(100%)",
+  transform: `translateY(${liveTranslateY.value}px)`,
+  "--sheet-current-y": `${currentTranslateY.value}px`,
   transition: isDragging.value
     ? "none"
     : "transform 0.34s cubic-bezier(0.32, 0.72, 0, 1), height 0.34s cubic-bezier(0.32, 0.72, 0, 1)",
@@ -108,11 +109,24 @@ function endDrag() {
 
 function close() {
   emit("update:open", false);
-  snapLevel.value = "peek";
+}
+
+function handleScrimClick() {
+  if (snapLevel.value === "full") {
+    snapLevel.value = "peek";
+    emit("peek");
+  } else {
+    close();
+  }
 }
 
 function toggleSnap() {
   snapLevel.value = snapLevel.value === "full" ? "peek" : "full";
+  if (snapLevel.value === "full") {
+    emit("expand");
+  } else {
+    emit("peek");
+  }
 }
 
 // Reset snap level on open
@@ -149,27 +163,31 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-    <!-- Scrim: only when fully expanded -->
+    <!-- Scrim / Backdrop -->
     <Transition name="scrim">
       <div
-        v-if="open && snapLevel === 'full'"
-        class="fixed inset-0 z-[38] bg-black/25"
+        v-if="open"
+        class="fixed inset-0 z-[38] transition-colors duration-300"
+        :class="snapLevel === 'full'
+          ? 'bg-black/45 backdrop-blur-[2px]'
+          : 'bg-black/20 pointer-events-auto'"
         aria-hidden="true"
-        @click="snapLevel = 'peek'"
+        @click="handleScrimClick"
       />
     </Transition>
 
-    <!-- Sheet wrapper: controls height + vertical position -->
-    <div
-      v-if="open"
-      class="fixed bottom-0 left-0 right-0 z-[39] will-change-transform"
-      :style="sheetStyle"
-      @touchmove.passive="onDrag"
-      @touchend="endDrag"
-      @mousemove="onDrag"
-      @mouseup="endDrag"
-      @mouseleave="endDrag"
-    >
+    <!-- Sheet wrapper: controls height + vertical position with open/close transition -->
+    <Transition name="bottom-sheet">
+      <div
+        v-if="open"
+        class="fixed bottom-0 left-0 right-0 z-[39] will-change-transform"
+        :style="sheetStyle"
+        @touchmove.passive="onDrag"
+        @touchend="endDrag"
+        @mousemove="onDrag"
+        @mouseup="endDrag"
+        @mouseleave="endDrag"
+      >
       <!-- Inner container: rounded top corners, clipped overflow for content -->
       <div
         role="region"
@@ -241,16 +259,39 @@ onUnmounted(() => {
         <div class="shrink-0" style="height: env(safe-area-inset-bottom, 0px)" />
       </div>
     </div>
+    </Transition>
   </Teleport>
 </template>
 
 <style scoped>
+/* Scrim Backdrop Transition */
 .scrim-enter-active,
 .scrim-leave-active {
-  transition: opacity 0.22s ease;
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .scrim-enter-from,
 .scrim-leave-to {
   opacity: 0;
+}
+
+/* Bottom Sheet Slide Up & Down Transition */
+.bottom-sheet-enter-active {
+  transition: transform 0.36s cubic-bezier(0.32, 0.72, 0, 1) !important;
+}
+.bottom-sheet-enter-from {
+  transform: translateY(100%) !important;
+}
+.bottom-sheet-enter-to {
+  transform: translateY(0) !important;
+}
+
+.bottom-sheet-leave-active {
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1) !important;
+}
+.bottom-sheet-leave-from {
+  transform: translateY(var(--sheet-current-y, 0px)) !important;
+}
+.bottom-sheet-leave-to {
+  transform: translateY(100%) !important;
 }
 </style>

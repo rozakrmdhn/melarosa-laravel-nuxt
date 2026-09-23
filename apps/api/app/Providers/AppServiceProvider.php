@@ -4,6 +4,14 @@ namespace App\Providers;
 
 use App\Helpers\Image;
 use App\Helpers\Utils;
+use App\Models\BatasWilayahDesa;
+use App\Models\BatasWilayahKecamatan;
+use App\Models\JalanPorosDesa;
+use App\Models\User;
+use App\Policies\BatasWilayahDesaPolicy;
+use App\Policies\BatasWilayahKecamatanPolicy;
+use App\Policies\JalanPorosDesaPolicy;
+use App\Policies\UserPolicy;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
@@ -31,6 +39,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::policy(User::class, UserPolicy::class);
+        Gate::policy(BatasWilayahKecamatan::class, BatasWilayahKecamatanPolicy::class);
+        Gate::policy(BatasWilayahDesa::class, BatasWilayahDesaPolicy::class);
+        Gate::policy(JalanPorosDesa::class, JalanPorosDesaPolicy::class);
+
         // Super-admin role bypass for all permissions
         Gate::before(static function ($user, $ability) {
             return $user->hasRole('admin') ? true : null;

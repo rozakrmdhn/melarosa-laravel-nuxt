@@ -13,6 +13,7 @@ yarn-error.log
 /.vscode/*
 !/.vscode/settings.json
 /.zed
+prompt.txt
 
 # Nuxt dev/build outputs
 .output

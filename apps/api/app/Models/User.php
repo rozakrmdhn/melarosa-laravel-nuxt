@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -24,6 +25,9 @@ class User extends Authenticatable implements MustVerifyEmail
         'email',
         'avatar',
         'password',
+        'id_kecamatan',
+        'id_desa',
+        'status',
     ];
 
     /**
@@ -47,6 +51,9 @@ class User extends Authenticatable implements MustVerifyEmail
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'id_kecamatan' => 'integer',
+            'id_desa' => 'integer',
+            'status' => 'boolean',
         ];
     }
 
@@ -68,5 +75,47 @@ class User extends Authenticatable implements MustVerifyEmail
     public function mustVerifyEmail(): bool
     {
         return $this instanceof MustVerifyEmail && !$this->hasVerifiedEmail();
+    }
+
+    public function kecamatan(): BelongsTo
+    {
+        return $this->belongsTo(BatasWilayahKecamatan::class, 'id_kecamatan', 'id');
+    }
+
+    public function desa(): BelongsTo
+    {
+        return $this->belongsTo(BatasWilayahDesa::class, 'id_desa', 'id');
+    }
+
+    /**
+     * Scope only active users (status = true).
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('status', true);
+    }
+
+    /**
+     * Filter user by kecamatan.
+     */
+    public function scopeByKecamatan($query, int $idKecamatan)
+    {
+        return $query->where('id_kecamatan', $idKecamatan);
+    }
+
+    /**
+     * Filter user by desa.
+     */
+    public function scopeByDesa($query, int $idDesa)
+    {
+        return $query->where('id_desa', $idDesa);
+    }
+
+    /**
+     * Check if user has wilayah restriction.
+     */
+    public function hasWilayahRestriction(): bool
+    {
+        return !is_null($this->id_kecamatan) || !is_null($this->id_desa);
     }
 }

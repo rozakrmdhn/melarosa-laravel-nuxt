@@ -827,6 +827,10 @@ async function initMap() {
           }
         }
 
+        const pMeter = propsObj.panjang_meter != null && propsObj.panjang_meter !== "" ? parseFloat(propsObj.panjang_meter) : null;
+        const pManual = propsObj.panjang != null && propsObj.panjang !== "" ? parseFloat(propsObj.panjang) : null;
+        const finalPanjang = pMeter ?? pManual ?? 0;
+
         const selected: SelectedFeature = {
           id: featId,
           properties: {
@@ -835,8 +839,8 @@ async function initMap() {
             nama_ruas: propsObj.nama_ruas || "-",
             desa: propsObj.desa || null,
             kecamatan: propsObj.kecamatan || null,
-            panjang: propsObj.panjang != null && propsObj.panjang !== "" ? parseFloat(propsObj.panjang) : 0,
-            panjang_meter: propsObj.panjang_meter != null && propsObj.panjang_meter !== "" ? parseFloat(propsObj.panjang_meter) : 0,
+            panjang: pManual ?? pMeter ?? 0,
+            panjang_meter: pMeter ?? pManual ?? 0,
             lebar: propsObj.lebar != null && propsObj.lebar !== "" ? parseFloat(propsObj.lebar) : null,
             perkerasan: propsObj.perkerasan || null,
             kondisi: propsObj.kondisi || null,

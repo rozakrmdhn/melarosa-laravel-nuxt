@@ -6,6 +6,7 @@ use App\Helpers\Utils;
 use App\Models\User;
 use App\Models\UserProvider;
 use App\Services\AdminNavigationService;
+use App\Services\AuditLogService;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
@@ -23,6 +24,8 @@ use Laravel\Socialite\Facades\Socialite;
 
 class AuthController extends Controller
 {
+    public function __construct(protected AuditLogService $auditLog) {}
+
     /**
      * Register new user
      */
@@ -43,6 +46,14 @@ class AuthController extends Controller
         $user->assignRole('user');
 
         event(new Registered($user));
+
+        $this->auditLog->log(
+            event: 'register',
+            module: 'auth',
+            auditable: $user,
+            description: 'Akun baru didaftarkan: ' . $user->email,
+            actor: $user,
+        );
 
         return response()->json([
             'ok' => true,
@@ -79,6 +90,8 @@ class AuthController extends Controller
             ->where('provider_id', $oAuthUser->id)
             ->first();
 
+        $isNew = false;
+
         if (!$userProvider) {
             if (User::where('email', $oAuthUser->email)->exists()) {
                 return view('oauth', [
@@ -106,6 +119,8 @@ class AuthController extends Controller
                 'provider_id' => $oAuthUser->id,
                 'name' => $provider,
             ]);
+
+            $isNew = true;
         } else {
             $user = $userProvider->user;
         }
@@ -113,6 +128,15 @@ class AuthController extends Controller
         Auth::login($user, true);
 
         $request->session()->regenerate();
+
+        $this->auditLog->log(
+            event: $isNew ? 'oauth.register' : 'oauth.login',
+            module: 'auth',
+            auditable: $user,
+            description: ($isNew ? 'Registrasi' : 'Login') . " via OAuth: {$provider}.",
+            meta: ['provider' => $provider],
+            actor: $user,
+        );
 
         return view('oauth', [
             'message' => [
@@ -134,6 +158,15 @@ class AuthController extends Controller
         ]);
 
         if (!Auth::attempt($request->only('email', 'password'), $request->remember)) {
+            $user = User::where('email', $request->email)->first();
+            $this->auditLog->log(
+                event: 'login.failed',
+                module: 'auth',
+                auditable: $user,
+                description: 'Percobaan login gagal untuk email: ' . $request->email,
+                meta: ['email' => $request->email],
+            );
+
             throw ValidationException::withMessages([
                 'email' => __('auth.failed'),
             ]);
@@ -141,6 +174,13 @@ class AuthController extends Controller
 
         // Cek status keaktifan akun user
         if (!Auth::user()->status) {
+            $this->auditLog->log(
+                event: 'login.blocked',
+                module: 'auth',
+                auditable: Auth::user(),
+                description: 'Login ditolak: akun tidak aktif.',
+            );
+
             Auth::logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();
@@ -153,6 +193,14 @@ class AuthController extends Controller
 
         $request->session()->regenerate();
 
+        $this->auditLog->log(
+            event: 'login',
+            module: 'auth',
+            auditable: Auth::user(),
+            description: 'Login berhasil.',
+            meta: ['remember' => $request->remember ?? false],
+        );
+
         return response()->json(['ok' => true]);
     }
 
@@ -161,6 +209,16 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
+        $user = $request->user();
+
+        $this->auditLog->log(
+            event: 'logout',
+            module: 'auth',
+            auditable: $user,
+            description: 'Pengguna keluar dari sesi.',
+            actor: $user,
+        );
+
         Auth::logout();
 
         $request->session()->invalidate();
@@ -216,6 +274,15 @@ class AuthController extends Controller
             ]);
         }
 
+        $targetUser = User::where('email', $request->email)->first();
+        $this->auditLog->log(
+            event: 'password.reset.request',
+            module: 'auth',
+            auditable: $targetUser,
+            description: 'Permintaan reset password dikirim ke: ' . $request->email,
+            meta: ['email' => $request->email],
+        );
+
         return response()->json([
             'ok' => true,
             'message' => __($status),
@@ -246,6 +313,14 @@ class AuthController extends Controller
                 ])->save();
 
                 event(new PasswordReset($user));
+
+                app(AuditLogService::class)->log(
+                    event: 'password.reset',
+                    module: 'auth',
+                    auditable: $user,
+                    description: 'Password berhasil direset via email.',
+                    actor: $user,
+                );
             }
         );
 
@@ -275,6 +350,14 @@ class AuthController extends Controller
             $user->markEmailAsVerified();
 
             event(new Verified($user));
+
+            $this->auditLog->log(
+                event: 'email.verified',
+                module: 'auth',
+                auditable: $user,
+                description: 'Email berhasil diverifikasi: ' . $user->email,
+                actor: $user,
+            );
         }
 
         return response()->json([
@@ -296,6 +379,13 @@ class AuthController extends Controller
         abort_if(!$user, 400);
 
         $user->sendEmailVerificationNotification();
+
+        $this->auditLog->log(
+            event: 'email.verification.sent',
+            module: 'auth',
+            auditable: $user,
+            description: 'Email verifikasi dikirim ulang ke: ' . $user->email,
+        );
 
         return response()->json([
             'ok' => true,
@@ -337,6 +427,14 @@ class AuthController extends Controller
         $request->validate([
             'key' => 'required|string',
         ]);
+
+        $this->auditLog->log(
+            event: 'device.disconnected',
+            module: 'security',
+            auditable: $request->user(),
+            description: 'Sesi perangkat diputus.',
+            meta: ['session_key' => $request->key],
+        );
 
         $request->user()->sessions()->where('id', $request->key)->delete();
 

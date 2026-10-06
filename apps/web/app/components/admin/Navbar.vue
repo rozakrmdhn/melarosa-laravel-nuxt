@@ -1,6 +1,4 @@
-<script setup lang="ts">
-const open = defineModel<boolean>("open", { default: true });
-
+﻿<script setup lang="ts">
 const colorMode = useColorMode();
 const { breadcrumbs } = useAdminNavigation();
 </script>
@@ -8,13 +6,22 @@ const { breadcrumbs } = useAdminNavigation();
 <template>
   <header class="h-14 min-h-14 shrink-0 flex items-center justify-between px-3 sm:px-4 border-b border-gray-200/70 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] z-10">
     <div class="flex items-center gap-2.5 sm:gap-3 min-w-0">
-      <UButton
+      <!-- Desktop sidebar collapse control -->
+      <UDashboardSidebarCollapse
         icon="i-lucide-panel-left"
         color="neutral"
         variant="ghost"
-        aria-label="Toggle sidebar"
-        class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800/60 shrink-0"
-        @click="open = !open"
+        aria-label="Toggle sidebar collapse"
+        class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800/60 shrink-0 cursor-pointer"
+      />
+
+      <!-- Mobile navigation drawer toggle -->
+      <UDashboardSidebarToggle
+        icon="i-lucide-panel-left"
+        color="neutral"
+        variant="ghost"
+        aria-label="Toggle navigation drawer"
+        class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800/60 shrink-0 cursor-pointer"
       />
 
       <div class="h-4 w-px bg-gray-200/70 dark:bg-white/[0.08] shrink-0 hidden sm:block" />
@@ -41,7 +48,7 @@ const { breadcrumbs } = useAdminNavigation();
               :class="[
                 'size-3.5 shrink-0 transition-colors',
                 active
-                  ? 'text-emerald-600 dark:text-emerald-400'
+                  ? 'text-blue-600 dark:text-blue-400'
                   : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300'
               ]"
             />
@@ -84,3 +91,4 @@ const { breadcrumbs } = useAdminNavigation();
     </div>
   </header>
 </template>
+

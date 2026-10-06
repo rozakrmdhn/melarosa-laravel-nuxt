@@ -29,12 +29,34 @@ export default defineNuxtPlugin((nuxtApp) => {
     };
   }
 
-  function buildBaseURL(baseURL: string): string {
-    if (baseURL) return baseURL;
+  function buildBaseURL(baseURL: string, path: string = ''): string {
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    const isSanctum = cleanPath.startsWith('/sanctum');
 
-    return import.meta.server
-      ? config.apiLocal + config.public.apiPrefix
-      : config.public.apiBase + config.public.apiPrefix;
+    const isRemote = typeof window !== 'undefined'
+      && window.location.hostname !== 'localhost'
+      && window.location.hostname !== '127.0.0.1';
+
+    if (baseURL) {
+      if (isRemote && (baseURL.includes('localhost') || baseURL.includes('127.0.0.1'))) {
+        return isSanctum ? '' : config.public.apiPrefix;
+      }
+      return baseURL;
+    }
+
+    if (import.meta.server) {
+      const serverBase = config.apiLocal || 'http://localhost:9000';
+      return isSanctum ? serverBase : serverBase + config.public.apiPrefix;
+    }
+
+    // Jika diakses dari domain remote (misal Cloudflare Tunnel / non-localhost), gunakan relative path agar di-proxy oleh Nuxt Nitro
+    if (isRemote) {
+      return isSanctum ? '' : config.public.apiPrefix;
+    }
+
+    return isSanctum
+      ? (config.public.apiBase || 'http://localhost:9000')
+      : (config.public.apiBase + config.public.apiPrefix);
   }
 
   function buildSecureMethod(options: HttpFetchOptions): void {
@@ -46,7 +68,7 @@ export default defineNuxtPlugin((nuxtApp) => {
   }
 
   function isRequestWithAuth(baseURL: string, path: string): boolean {
-    return !baseURL
+    return (!baseURL || baseURL === config.public.apiBase || baseURL === config.apiLocal)
       && !path.startsWith('/_nuxt')
       && !path.startsWith('http://')
       && !path.startsWith('https://');
@@ -71,7 +93,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       if (!isRequestWithAuth(context.options.baseURL ?? '', context.request.toString())) return;
 
       context.options.credentials = 'include';
-      context.options.baseURL = buildBaseURL(context.options.baseURL ?? '');
+      context.options.baseURL = buildBaseURL(context.options.baseURL ?? '', context.request.toString());
       context.options.headers = buildHeaders(context.options.headers);
 
       buildSecureMethod(context.options);

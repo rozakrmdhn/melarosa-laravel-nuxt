@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 // Native-feel bottom sheet with drag handle + snap points for mobile GIS interface.
 // Snap levels: PEEK (~42% viewport height), FULL (92% viewport height).
 // Swipe down past threshold at PEEK dismisses. Swipe up from PEEK expands to FULL.
@@ -205,7 +205,7 @@ onUnmounted(() => {
           <div
             class="w-10 h-[5px] rounded-full transition-colors duration-150"
             :class="isDragging
-              ? 'bg-emerald-500 dark:bg-emerald-400'
+              ? 'bg-blue-500 dark:bg-blue-400'
               : 'bg-gray-300 dark:bg-gray-600'"
           />
         </div>
@@ -213,7 +213,7 @@ onUnmounted(() => {
         <!-- ── Sheet Header ── -->
         <header class="shrink-0 flex items-center gap-2 px-4 pt-1 pb-2.5 border-b border-gray-100 dark:border-gray-800">
           <slot name="header-icon">
-            <UIcon :name="icon" class="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <UIcon :name="icon" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
           </slot>
 
           <span class="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate leading-none">

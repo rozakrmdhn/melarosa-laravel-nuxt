@@ -49,7 +49,7 @@ export interface ConsoleLog {
   message: string;
 }
 
-export type BasemapType = "osm" | "dark" | "satellite" | "light";
+export type BasemapType = "osm" | "dark" | "satellite" | "topo";
 
 export interface KecamatanOption {
   id: number;
@@ -101,3 +101,29 @@ export const DEFAULT_SYMBOLOGY: LayerSymbology = {
   labelHaloWidth: 3,
   labelMinZoom: 13,
 };
+
+export type LayerId = 'infrastruktur-segmen' | 'jalan-poros-desa' | string;
+
+export interface GisLayerItem {
+  id: LayerId;
+  title: string;
+  subtitle?: string;
+  sourceType: 'mvt' | 'geojson';
+  visible: boolean;
+  opacity: number;
+  symbology: LayerSymbology;
+  isPrimary?: boolean;
+  canEditGeometry?: boolean;
+  canDelete?: boolean;
+  hasFilter?: boolean;
+  activeFilterCount?: number;
+  metadata?: {
+    tipeData?: string;
+    totalItem?: number;
+    totalPanjangMeter?: number;
+    sumberData?: string;
+    srs?: string;
+  };
+  kondisiStats?: Array<{ kondisi: string; jumlah: number; color?: string; panjang_meter?: number }>;
+}
+

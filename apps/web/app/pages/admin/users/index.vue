@@ -1,4 +1,4 @@
-<script lang="ts" setup>
+﻿<script lang="ts" setup>
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: "users-view",
@@ -60,7 +60,6 @@ const queryParams = computed(() => ({
 
 const { data, status, refresh, error } = useHttp<UsersResponse>("admin/users", {
   query: queryParams,
-  watch: [queryParams],
 });
 
 const loading = computed(() => status.value === "pending");
@@ -441,7 +440,7 @@ const columns = computed(() => [
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-          <UIcon name="i-lucide-users" class="size-5 text-emerald-600 dark:text-emerald-400" />
+          <UIcon name="i-lucide-users" class="size-5 text-blue-600 dark:text-blue-400" />
           <span>Manajemen Pengguna</span>
         </h2>
         <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -501,162 +500,191 @@ const columns = computed(() => [
     </div>
 
     <!-- Users Table Card -->
-    <UCard
-      :ui="{
-        root: 'bg-white dark:bg-[#0b0f19] border border-gray-200/70 dark:border-white/[0.08] ring-0 rounded-lg overflow-hidden shadow-none',
-        body: 'p-0 sm:p-0',
-      }"
-    >
-      <UTable
-        :data="data?.users?.data || []"
-        :columns="columns"
-        :loading="loading"
-        loading-color="primary"
+    <div class="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden">
+      <!-- Loading Skeleton State -->
+      <div v-if="loading" class="p-8 text-center space-y-3">
+        <UIcon name="i-lucide-loader-2" class="size-6 animate-spin mx-auto text-primary-500" />
+        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">Memuat data pengguna...</p>
+      </div>
+
+      <!-- Empty State -->
+      <div
+        v-else-if="!data?.users?.data || data.users.data.length === 0"
+        class="p-12 text-center space-y-3"
       >
-        <!-- User Info Column -->
-        <template #name-cell="{ row }">
-          <div class="flex items-center gap-3 py-1.5">
-            <div
-              class="size-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs shrink-0"
-            >
-              {{ row.original.name?.charAt(0).toUpperCase() || 'U' }}
-            </div>
-            <div class="min-w-0">
-              <div class="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
-                <span>{{ row.original.name }}</span>
-                <UBadge
-                  v-if="isCurrentUser(row.original)"
-                  label="Anda"
-                  color="primary"
-                  variant="subtle"
-                  size="xs"
-                  class="text-[9px] px-1 py-0 h-4 leading-none"
-                />
-              </div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {{ row.original.email }}
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- Roles Column -->
-        <template #roles-cell="{ row }">
-          <div class="flex flex-wrap gap-1">
-            <UBadge
-              v-for="role in row.original.roles"
-              :key="role.id"
-              :label="role.name"
-              :color="role.name === 'admin' ? 'primary' : 'neutral'"
-              variant="subtle"
-              size="xs"
-              class="capitalize text-[11px]"
-            />
-            <span
-              v-if="!row.original.roles?.length"
-              class="text-xs text-gray-400 italic"
-            >
-              Tanpa role
-            </span>
-          </div>
-        </template>
-
-        <!-- Status Column -->
-        <template #status-cell="{ row }">
-          <div class="flex justify-center">
-            <UBadge
-              v-if="row.original.email_verified_at"
-              label="Terverifikasi"
-              color="primary"
-              variant="soft"
-              size="xs"
-              class="text-[10px]"
-            />
-            <UBadge
-              v-else
-              label="Belum Verifikasi"
-              color="neutral"
-              variant="outline"
-              size="xs"
-              class="text-[10px] text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-800"
-            />
-          </div>
-        </template>
-
-        <!-- Joined Column -->
-        <template #created_at-cell="{ row }">
-          <div class="text-center text-xs text-gray-500 dark:text-gray-400 font-mono">
-            {{ dayjs(row.original.created_at).format("D MMM YYYY") }}
-          </div>
-        </template>
-
-        <!-- Action Column -->
-        <template #actions-cell="{ row }">
-          <div class="flex items-center justify-end gap-1">
-            <!-- Tombol Edit Data Lengkap -->
-            <UTooltip v-if="canUpdate" text="Edit Pengguna">
-              <UButton
-                icon="i-lucide-pencil"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                class="hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
-                @click="openEditUser(row.original)"
-              />
-            </UTooltip>
-
-            <!-- Tombol Cepat Atur Role -->
-            <UTooltip v-if="canManageRoles" text="Atur Role">
-              <UButton
-                icon="i-lucide-shield-check"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
-                @click="openEditUserRoles(row.original)"
-              />
-            </UTooltip>
-
-            <!-- Tombol Hapus -->
-            <UTooltip v-if="canDelete" :text="isCurrentUser(row.original) ? 'Tidak dapat menghapus akun sendiri' : 'Hapus Pengguna'">
-              <UButton
-                icon="i-lucide-trash-2"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                :disabled="isCurrentUser(row.original)"
-                class="hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 cursor-pointer"
-                @click="openDeleteConfirm(row.original)"
-              />
-            </UTooltip>
-          </div>
-        </template>
-
-        <!-- Empty State -->
-        <template #empty>
-          <div class="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
-            <UIcon name="i-lucide-users" class="size-8 mx-auto mb-2 opacity-40" />
-            <p class="font-medium text-gray-700 dark:text-gray-300">Tidak ada pengguna ditemukan</p>
-            <p class="text-xs mt-1 text-gray-400">Coba ubah kata kunci pencarian atau filter role.</p>
-          </div>
-        </template>
-      </UTable>
-
-      <!-- Pagination Footer -->
-      <template v-if="(data?.users?.last_page ?? 1) > 1" #footer>
-        <div class="flex flex-col sm:flex-row items-center justify-between px-4 py-3 gap-2">
-          <span class="text-xs text-gray-500 dark:text-gray-400">
-            Menampilkan halaman {{ page }} dari {{ data?.users?.last_page }} (Total {{ data?.users?.total }} pengguna)
-          </span>
-          <UPagination
-            v-model:page="page"
-            :total="data?.users?.total || 0"
-            :items-per-page="data?.users?.per_page || 15"
-            size="xs"
+        <div class="size-12 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 mx-auto flex items-center justify-center">
+          <UIcon name="i-lucide-users" class="size-6 opacity-60" />
+        </div>
+        <p class="text-sm font-semibold text-gray-900 dark:text-white">Tidak ada pengguna ditemukan</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
+          Coba ubah kata kunci pencarian atau filter role.
+        </p>
+        <div v-if="canCreate && !search.trim()" class="pt-2">
+          <UButton
+            label="Tambah Pengguna Baru"
+            icon="i-heroicons-plus"
+            size="sm"
+            color="primary"
+            @click="openCreateModal"
           />
         </div>
-      </template>
-    </UCard>
+      </div>
+
+      <!-- Table Content -->
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+          <thead class="bg-gray-50 dark:bg-[#070b14] text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/[0.08]">
+            <tr>
+              <th scope="col" class="py-3 px-4">Pengguna (Nama & Email)</th>
+              <th scope="col" class="py-3 px-4">Role Akses</th>
+              <th scope="col" class="py-3 px-3 text-center">Status</th>
+              <th scope="col" class="py-3 px-3 text-center">Terdaftar</th>
+              <th v-if="hasAnyAction" scope="col" class="py-3 px-4 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 dark:divide-white/[0.04]">
+            <tr
+              v-for="user in data.users.data"
+              :key="user.id"
+              class="hover:bg-gray-50/60 dark:hover:bg-white/[0.02] transition-colors"
+            >
+              <!-- User Info Column -->
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-3">
+                  <div
+                    class="size-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs shrink-0"
+                  >
+                    {{ user.name?.charAt(0).toUpperCase() || 'U' }}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                      <span>{{ user.name }}</span>
+                      <UBadge
+                        v-if="isCurrentUser(user)"
+                        label="Anda"
+                        color="primary"
+                        variant="subtle"
+                        size="xs"
+                        class="text-[9px] px-1 py-0 h-4 leading-none"
+                      />
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {{ user.email }}
+                    </div>
+                  </div>
+                </div>
+              </td>
+
+              <!-- Roles Column -->
+              <td class="py-3 px-4">
+                <div class="flex flex-wrap gap-1">
+                  <UBadge
+                    v-for="role in user.roles"
+                    :key="role.id"
+                    :label="role.name"
+                    :color="role.name === 'admin' ? 'primary' : 'neutral'"
+                    variant="subtle"
+                    size="xs"
+                    class="capitalize text-[11px]"
+                  />
+                  <span
+                    v-if="!user.roles?.length"
+                    class="text-xs text-gray-400 italic"
+                  >
+                    Tanpa role
+                  </span>
+                </div>
+              </td>
+
+              <!-- Status Column -->
+              <td class="py-3 px-3 text-center">
+                <UBadge
+                  v-if="user.email_verified_at"
+                  label="Terverifikasi"
+                  color="primary"
+                  variant="soft"
+                  size="xs"
+                  class="text-[10px]"
+                />
+                <UBadge
+                  v-else
+                  label="Belum Verifikasi"
+                  color="neutral"
+                  variant="outline"
+                  size="xs"
+                  class="text-[10px] text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-800"
+                />
+              </td>
+
+              <!-- Joined Column -->
+              <td class="py-3 px-3 text-center text-xs text-gray-500 dark:text-gray-400 font-mono">
+                {{ dayjs(user.created_at).format("D MMM YYYY") }}
+              </td>
+
+              <!-- Actions Column -->
+              <td v-if="hasAnyAction" class="py-3 px-4 text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <!-- Tombol Edit Data Lengkap -->
+                  <UTooltip v-if="canUpdate" text="Edit Pengguna">
+                    <UButton
+                      icon="i-lucide-pencil"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                      :to="`/admin/users/${user.id}`"
+                    />
+                  </UTooltip>
+
+                  <!-- Tombol Cepat Atur Role -->
+                  <UTooltip v-if="canManageRoles" text="Atur Role">
+                    <UButton
+                      icon="i-lucide-shield-check"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                      @click="openEditUserRoles(user)"
+                    />
+                  </UTooltip>
+
+                  <!-- Tombol Hapus -->
+                  <UTooltip v-if="canDelete" :text="isCurrentUser(user) ? 'Tidak dapat menghapus akun sendiri' : 'Hapus Pengguna'">
+                    <UButton
+                      icon="i-lucide-trash-2"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      :disabled="isCurrentUser(user)"
+                      class="hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 cursor-pointer"
+                      @click="openDeleteConfirm(user)"
+                    />
+                  </UTooltip>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Footer -->
+      <div
+        v-if="!loading && (data?.users?.total ?? 0) > 0"
+        class="p-4 border-t border-gray-200 dark:border-white/[0.08] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400"
+      >
+        <div>
+          Menampilkan baris {{ ((data?.users?.current_page ?? page) - 1) * (data?.users?.per_page ?? 15) + 1 }} sampai
+          {{ Math.min((data?.users?.current_page ?? page) * (data?.users?.per_page ?? 15), data?.users?.total ?? 0) }} dari total
+          <strong class="text-gray-800 dark:text-gray-200">{{ data?.users?.total ?? 0 }}</strong> pengguna
+        </div>
+        <UPagination
+          v-model:page="page"
+          :total="data?.users?.total || 0"
+          :items-per-page="data?.users?.per_page || 15"
+          size="sm"
+        />
+      </div>
+    </div>
 
     <!-- ═══ MODAL: TAMBAH PENGGUNA ═════════════════════════════════════════════ -->
     <UModal
@@ -886,7 +914,7 @@ const columns = computed(() => [
       <template #body>
         <div class="space-y-3.5">
           <div class="p-3 bg-gray-50 dark:bg-[#070b14]/60 rounded-md border border-gray-200/70 dark:border-white/[0.08] flex items-center gap-3">
-            <div class="size-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs shrink-0">
+            <div class="size-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs shrink-0">
               {{ selectedUserForRole?.name?.charAt(0).toUpperCase() || 'U' }}
             </div>
             <div class="min-w-0">

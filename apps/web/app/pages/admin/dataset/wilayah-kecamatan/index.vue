@@ -511,8 +511,9 @@ async function initMap() {
       zIndex: 0,
     });
 
-    // 2. PostGIS MVT Vector Tile Source & Layer
-    const mvtUrl = `${apiBase}/api/v1/dataset/mvt/batas-wilayah-kecamatan/{z}/{x}/{y}.pbf`;
+    // 2. Martin MVT Vector Tile Source & Layer
+    const martinUrl = (config.public.martinUrl as string) || "/martin";
+    const mvtUrl = `${martinUrl}/bataswilayah_kecamatan/{z}/{x}/{y}`;
     vectorTileSource = new VectorTileSource({
       format: new MVT({
         idProperty: "id",
@@ -1131,7 +1132,7 @@ onUnmounted(() => {
           <p class="font-semibold text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">
             Legenda Layer
           </p>
-          <span class="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono">PostGIS MVT</span>
+          <span class="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono">Martin MVT</span>
         </div>
         <div class="flex items-center gap-2">
           <div class="size-3.5 rounded-xs border border-indigo-600 bg-indigo-500/25"></div>

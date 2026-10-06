@@ -1443,7 +1443,7 @@ async function handleConfirmSplit() {
       <!-- Left: Title & Overview Badges -->
       <div class="flex items-center gap-2 sm:gap-3 min-w-0">
         <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <UIcon name="i-lucide-map" class="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <UIcon name="i-lucide-map" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <h1 class="text-xs font-semibold text-gray-800 dark:text-gray-200 capitalize tracking-wide truncate">
             Jalan Poros Desa
           </h1>
@@ -1511,7 +1511,7 @@ async function handleConfirmSplit() {
             color="neutral"
             :variant="allPanelsHidden ? 'subtle' : 'ghost'"
             :class="allPanelsHidden
-              ? 'text-emerald-600 dark:text-emerald-400'
+              ? 'text-blue-600 dark:text-blue-400'
               : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'"
             @click="toggleAllPanels"
           />
@@ -1553,7 +1553,7 @@ async function handleConfirmSplit() {
           :ui="{
             root: 'h-full w-full',
             panel: isDraggingVertical ? '' : 'panel-smooth-transition',
-            handle: 'h-1 bg-gray-200 dark:bg-gray-800 hover:bg-emerald-500 active:bg-emerald-600 transition-colors cursor-row-resize'
+            handle: 'h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-row-resize'
           }"
         >
           <!-- Workspace: Horizontal Splitter (Left 300px + Map + Right 380px in px units) -->
@@ -1567,7 +1567,7 @@ async function handleConfirmSplit() {
               :ui="{
                 root: 'h-full w-full',
                 panel: isDraggingHorizontal ? '' : 'panel-smooth-transition',
-                handle: 'w-1 bg-gray-200 dark:bg-gray-800 hover:bg-emerald-500 active:bg-emerald-600 transition-colors cursor-col-resize'
+                handle: 'w-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-col-resize'
               }"
             >
               <!-- Panel Kiri: Layer & Simbologi -->
@@ -1613,6 +1613,8 @@ async function handleConfirmSplit() {
                     :desa-filter="tableDesa"
                     :kondisi-filter="tableKondisi"
                     :perkerasan-filter="tablePerkerasan"
+                    :kecamatan-options="kecamatanOptions"
+                    :desa-options="desaOptions"
                     v-model:basemap="currentBasemap"
                     v-model:mouse-coords="mouseCoords"
                     @select="handleFeatureSelect"
@@ -1696,6 +1698,8 @@ async function handleConfirmSplit() {
           :desa-filter="tableDesa"
           :kondisi-filter="tableKondisi"
           :perkerasan-filter="tablePerkerasan"
+          :kecamatan-options="kecamatanOptions"
+          :desa-options="desaOptions"
           v-model:basemap="currentBasemap"
           v-model:mouse-coords="mouseCoords"
           @select="handleFeatureSelect"
@@ -1790,7 +1794,7 @@ async function handleConfirmSplit() {
         class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 rounded-lg transition-colors cursor-pointer"
         :class="[
           mobileDrawerOpen && mobileDrawerTab === 'layer'
-            ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+            ? 'text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
         ]"
         @click="openMobileTab('layer')"
@@ -1805,7 +1809,7 @@ async function handleConfirmSplit() {
         class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 rounded-lg transition-colors cursor-pointer"
         :class="[
           mobileDrawerOpen && mobileDrawerTab === 'table'
-            ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+            ? 'text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
         ]"
         @click="openMobileTab('table')"
@@ -1814,7 +1818,7 @@ async function handleConfirmSplit() {
           <UIcon name="i-lucide-table" class="size-5" />
           <span
             v-if="tableTotal > 0"
-            class="absolute -top-1 -right-2.5 px-1 text-[8px] font-mono rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-semibold"
+            class="absolute -top-1 -right-2.5 px-1 text-[8px] font-mono rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold"
           >
             {{ tableTotal > 99 ? '99+' : tableTotal }}
           </span>
@@ -1826,10 +1830,10 @@ async function handleConfirmSplit() {
       <button
         v-if="canCreate"
         type="button"
-        class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors cursor-pointer group"
+        class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors cursor-pointer group"
         @click="openCreate"
       >
-        <div class="size-7 rounded-full bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-600/30 group-active:scale-95 transition-transform">
+        <div class="size-7 rounded-full bg-blue-600 dark:bg-blue-500 text-white flex items-center justify-center shadow-md shadow-blue-600/30 group-active:scale-95 transition-transform">
           <UIcon name="i-lucide-plus" class="size-4 stroke-[2.5]" />
         </div>
         <span class="text-[10px] mt-0.5 leading-none font-medium">Tambah</span>
@@ -1841,7 +1845,7 @@ async function handleConfirmSplit() {
         class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 rounded-lg transition-colors cursor-pointer"
         :class="[
           mobileDrawerOpen && mobileDrawerTab === 'inspector'
-            ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+            ? 'text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
         ]"
         @click="openMobileTab('inspector')"
@@ -1850,7 +1854,7 @@ async function handleConfirmSplit() {
           <UIcon name="i-lucide-info" class="size-5" />
           <span
             v-if="selectedFeature"
-            class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#0b0f19]"
+            class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-[#0b0f19]"
           />
         </div>
         <span class="text-[10px] mt-0.5 leading-none">Properties</span>
@@ -1862,7 +1866,7 @@ async function handleConfirmSplit() {
         class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 rounded-lg transition-colors cursor-pointer"
         :class="[
           mobileDrawerOpen && mobileDrawerTab === 'filter'
-            ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+            ? 'text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
         ]"
         @click="openMobileTab('filter')"
@@ -1871,7 +1875,7 @@ async function handleConfirmSplit() {
           <UIcon name="i-lucide-filter" class="size-5" />
           <span
             v-if="activeFilterCount > 0"
-            class="absolute -top-1 -right-2 px-1 text-[8px] font-mono rounded-full bg-emerald-600 text-white font-bold"
+            class="absolute -top-1 -right-2 px-1 text-[8px] font-mono rounded-full bg-blue-600 text-white font-bold"
           >
             {{ activeFilterCount }}
           </span>
@@ -1911,7 +1915,7 @@ async function handleConfirmSplit() {
               type="button"
               class="flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
               :class="mobileDrawerTab === 'layer'
-                ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-xs font-semibold'
+                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
               @click="mobileDrawerTab = 'layer'"
             >
@@ -1924,7 +1928,7 @@ async function handleConfirmSplit() {
               type="button"
               class="flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
               :class="mobileDrawerTab === 'table'
-                ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-xs font-semibold'
+                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
               @click="mobileDrawerTab = 'table'; refreshTable()"
             >
@@ -1934,7 +1938,7 @@ async function handleConfirmSplit() {
                 v-if="tableTotal > 0"
                 class="px-1 py-0.2 rounded-full text-[9px] font-mono leading-tight"
                 :class="mobileDrawerTab === 'table'
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300'
                   : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
               >
                 {{ tableTotal > 999 ? (tableTotal / 1000).toFixed(1) + 'k' : tableTotal }}
@@ -1946,7 +1950,7 @@ async function handleConfirmSplit() {
               type="button"
               class="flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-medium transition-all relative cursor-pointer"
               :class="mobileDrawerTab === 'inspector'
-                ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-xs font-semibold'
+                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
               @click="mobileDrawerTab = 'inspector'"
             >
@@ -1954,7 +1958,7 @@ async function handleConfirmSplit() {
               <span>Detail</span>
               <span
                 v-if="selectedFeature"
-                class="size-1.5 rounded-full bg-emerald-500 shrink-0"
+                class="size-1.5 rounded-full bg-blue-500 shrink-0"
               />
             </button>
 
@@ -1963,7 +1967,7 @@ async function handleConfirmSplit() {
               type="button"
               class="flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-xs font-medium transition-all relative cursor-pointer"
               :class="mobileDrawerTab === 'filter'
-                ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-xs font-semibold'
+                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
               @click="mobileDrawerTab = 'filter'"
             >
@@ -1971,7 +1975,7 @@ async function handleConfirmSplit() {
               <span>Filter</span>
               <span
                 v-if="activeFilterCount > 0"
-                class="px-1 py-0.2 rounded-full text-[9px] font-mono leading-tight bg-emerald-600 text-white"
+                class="px-1 py-0.2 rounded-full text-[9px] font-mono leading-tight bg-blue-600 text-white"
               >
                 {{ activeFilterCount }}
               </span>
@@ -2303,9 +2307,9 @@ async function handleConfirmSplit() {
           </div>
 
           <!-- Bagian 1 Card -->
-          <div class="p-3 rounded-lg border border-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/10 space-y-2">
+          <div class="p-3 rounded-lg border border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/10 space-y-2">
             <div class="flex items-center justify-between">
-              <span class="font-semibold text-emerald-700 dark:text-emerald-300 text-xs">Bagian 1 (Ruas Eksisting)</span>
+              <span class="font-semibold text-blue-700 dark:text-blue-300 text-xs">Bagian 1 (Ruas Eksisting)</span>
               <UBadge label="Kode Ruas Tetap" color="primary" variant="subtle" size="xs" />
             </div>
             <UFormField label="Nama Ruas Bagian 1" size="sm" required>

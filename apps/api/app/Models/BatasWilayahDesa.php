@@ -2,14 +2,18 @@
 
 namespace App\Models;
 
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 
 class BatasWilayahDesa extends Model
 {
-    use HasFactory;
+    use HasFactory, Auditable;
+
+    public string $auditModule = 'batas-wilayah-desa';
 
     /**
      * Relationship to subdistrict (kecamatan).
@@ -17,6 +21,21 @@ class BatasWilayahDesa extends Model
     public function kecamatan(): BelongsTo
     {
         return $this->belongsTo(BatasWilayahKecamatan::class, 'id_kecamatan', 'id');
+    }
+
+    public function infrastrukturSegmen(): HasMany
+    {
+        return $this->hasMany(InfrastrukturSegmen::class, 'id_desa', 'id');
+    }
+
+    public function plottingAnggaran(): HasMany
+    {
+        return $this->hasMany(PlottingAnggaran::class, 'id_desa', 'id');
+    }
+
+    public function monitoringRealisasi(): HasMany
+    {
+        return $this->hasMany(MonitoringRealisasi::class, 'id_desa', 'id');
     }
 
     /**

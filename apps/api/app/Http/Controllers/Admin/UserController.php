@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -163,6 +164,9 @@ class UserController extends Controller
             ], 422);
         }
 
+        $statusBefore = (bool) $user->status;
+        $rolesBefore = $user->roles->pluck('name')->sort()->values()->all();
+
         $userData = [
             'name' => $validated['name'],
             'email' => $validated['email'],
@@ -186,6 +190,42 @@ class UserController extends Controller
 
         $user->update($userData);
         $user->syncRoles($validated['roles']);
+
+        $rolesAfter = collect($validated['roles'])->sort()->values()->all();
+
+        $auditLog = app(AuditLogService::class);
+
+        if (array_key_exists('status', $userData) && $statusBefore !== (bool) $userData['status']) {
+            $auditLog->log(
+                event: 'user.status.changed',
+                module: 'security',
+                auditable: $user,
+                description: 'Status akun pengguna "' . $user->name . '" diubah menjadi: '
+                    . ($userData['status'] ? 'Aktif' : 'Nonaktif') . '.',
+                before: ['status' => $statusBefore],
+                after: ['status' => (bool) $userData['status']],
+            );
+        }
+
+        if (!empty($validated['password'])) {
+            $auditLog->log(
+                event: 'user.password.reset.admin',
+                module: 'security',
+                auditable: $user,
+                description: 'Password pengguna "' . $user->name . '" direset oleh admin.',
+            );
+        }
+
+        if ($rolesBefore !== $rolesAfter) {
+            $auditLog->log(
+                event: 'user.roles.updated',
+                module: 'security',
+                auditable: $user,
+                description: 'Role pengguna "' . $user->name . '" diperbarui.',
+                before: ['roles' => $rolesBefore],
+                after: ['roles' => $rolesAfter],
+            );
+        }
 
         return response()->json([
             'ok' => true,
@@ -239,7 +279,20 @@ class UserController extends Controller
             ], 422);
         }
 
+        $rolesBefore = $user->roles->pluck('name')->sort()->values()->all();
+
         $user->syncRoles($validated['roles']);
+
+        $rolesAfter = collect($validated['roles'])->sort()->values()->all();
+
+        app(AuditLogService::class)->log(
+            event: 'user.roles.updated',
+            module: 'security',
+            auditable: $user,
+            description: 'Role pengguna "' . $user->name . '" diperbarui.',
+            before: ['roles' => $rolesBefore],
+            after:  ['roles' => $rolesAfter],
+        );
 
         return response()->json([
             'ok' => true,

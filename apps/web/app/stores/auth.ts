@@ -40,9 +40,20 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref(<User>{});
 
   async function logout(): Promise<void> {
-    await $http('logout', { method: 'POST' });
+    const toast = useToast();
+    try {
+      await $http('logout', { method: 'POST' });
+    } catch {
+      // Ignore network errors on session termination
+    }
     reset();
-    await navigateTo('/');
+    toast.add({
+      icon: 'i-lucide-check-circle',
+      title: 'Berhasil Keluar',
+      description: 'Anda telah berhasil logout dari sistem.',
+      color: 'success',
+    });
+    await navigateTo('/auth/login');
   }
 
   async function fetchUser(): Promise<void> {
@@ -55,11 +66,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function fetchCsrf(): Promise<unknown> {
-    return $http('/sanctum/csrf-cookie', {
-      baseURL: config.public.apiBase,
-      credentials: 'include',
-      headers: { Accept: 'application/json' }
-    });
+    return $http('/sanctum/csrf-cookie');
   }
 
   async function login(): Promise<void> {

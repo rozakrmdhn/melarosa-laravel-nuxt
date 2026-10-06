@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\TemporaryUpload;
 use App\Rules\TemporaryFileExists;
+use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -14,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 class AccountController extends Controller
 {
+    public function __construct(protected AuditLogService $auditLog) {}
+
     /**
      * Update the user's profile information.
      */
@@ -37,6 +40,7 @@ class AccountController extends Controller
         }
 
         $email = $user->email;
+        $before = $user->only(['name', 'email', 'avatar']);
 
         $user->update($request->only(['name', 'email', 'avatar']));
 
@@ -48,6 +52,17 @@ class AccountController extends Controller
 
         // Delete temporary upload record
         TemporaryUpload::where('path', $request->avatar)->delete();
+
+        $after = $user->fresh()->only(['name', 'email', 'avatar']);
+
+        $this->auditLog->log(
+            event: 'profile.updated',
+            module: 'security',
+            auditable: $user,
+            description: 'Profil akun diperbarui.',
+            before: $before,
+            after: $after,
+        );
 
         return response()->json([
             'ok' => true,
@@ -77,6 +92,13 @@ class AccountController extends Controller
         $user->update([
             'password' => Hash::make($request->password),
         ]);
+
+        $this->auditLog->log(
+            event: 'password.changed',
+            module: 'security',
+            auditable: $user,
+            description: 'Password akun berhasil diubah.',
+        );
 
         return response()->json([
             'ok' => true,

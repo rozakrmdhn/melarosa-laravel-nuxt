@@ -1,4 +1,4 @@
-<script lang="ts" setup>
+﻿<script lang="ts" setup>
 interface Permission {
   id: number;
   name: string;
@@ -245,7 +245,7 @@ const columns = computed(() => [
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-          <UIcon name="i-lucide-key" class="size-5 text-emerald-600 dark:text-emerald-400" />
+          <UIcon name="i-lucide-key" class="size-5 text-blue-600 dark:text-blue-400" />
           <span>Hak Akses (Permissions)</span>
         </h2>
         <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -293,102 +293,127 @@ const columns = computed(() => [
     </div>
 
     <!-- Permissions Table Card -->
-    <UCard
-      :ui="{
-        root: 'bg-white dark:bg-[#0b0f19] border border-gray-200/70 dark:border-white/[0.08] ring-0 rounded-lg overflow-hidden shadow-none',
-        body: 'p-0 sm:p-0',
-      }"
-    >
-      <UTable
-        :data="paginatedPermissions"
-        :columns="columns"
-        :loading="loading"
-        loading-color="primary"
+    <div class="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden">
+      <!-- Loading Skeleton State -->
+      <div v-if="loading" class="p-8 text-center space-y-3">
+        <UIcon name="i-lucide-loader-2" class="size-6 animate-spin mx-auto text-primary-500" />
+        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">Memuat data hak akses...</p>
+      </div>
+
+      <!-- Empty State -->
+      <div
+        v-else-if="filteredPermissions.length === 0"
+        class="p-12 text-center space-y-3"
       >
-        <!-- Permission Name Cell -->
-        <template #name-cell="{ row }">
-          <div class="flex items-center gap-2 font-mono text-xs py-1.5">
-            <div class="size-6 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
-              <UIcon name="i-lucide-key" class="size-3.5" />
-            </div>
-            <span class="text-gray-900 dark:text-white font-medium">
-              {{ row.original.name }}
-            </span>
-          </div>
-        </template>
-
-        <!-- Roles Count Cell -->
-        <template #roles_count-cell="{ row }">
-          <div class="text-center font-mono text-xs">
-            <UBadge
-              v-if="row.original.roles_count && row.original.roles_count > 0"
-              :label="`${row.original.roles_count} role`"
-              color="primary"
-              variant="soft"
-              size="xs"
-              class="text-[11px]"
-            />
-            <span v-else class="text-gray-400 dark:text-gray-500 text-[11px] italic">
-              Belum digunakan
-            </span>
-          </div>
-        </template>
-
-        <!-- Actions Cell -->
-        <template #actions-cell="{ row }">
-          <div class="flex items-center justify-end gap-1">
-            <!-- Edit Button -->
-            <UTooltip v-if="canUpdate" text="Edit Hak Akses">
-              <UButton
-                icon="i-lucide-pencil"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                class="hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
-                @click="openEditModal(row.original)"
-              />
-            </UTooltip>
-
-            <!-- Delete Button -->
-            <UTooltip v-if="canDelete" text="Hapus Hak Akses">
-              <UButton
-                icon="i-lucide-trash-2"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                class="hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-                @click="confirmDelete(row.original)"
-              />
-            </UTooltip>
-          </div>
-        </template>
-
-        <!-- Empty State -->
-        <template #empty>
-          <div class="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
-            <UIcon name="i-lucide-key" class="size-8 mx-auto mb-2 opacity-40" />
-            <p class="font-medium text-gray-700 dark:text-gray-300">Tidak ada hak akses ditemukan</p>
-            <p class="text-xs mt-1 text-gray-400">Buat hak akses baru untuk ditugaskan ke grup peran.</p>
-          </div>
-        </template>
-      </UTable>
-
-      <!-- Pagination & Counter Footer -->
-      <template v-if="filteredPermissions.length > 0" #footer>
-        <div class="flex flex-col sm:flex-row items-center justify-between px-4 py-3 gap-2">
-          <span class="text-xs text-gray-500 dark:text-gray-400">
-            Menampilkan {{ paginatedPermissions.length }} dari total {{ filteredPermissions.length }} hak akses
-          </span>
-          <UPagination
-            v-if="totalPages > 1"
-            v-model:page="page"
-            :total="filteredPermissions.length"
-            :items-per-page="perPage"
-            size="xs"
+        <div class="size-12 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 mx-auto flex items-center justify-center">
+          <UIcon name="i-lucide-key" class="size-6" />
+        </div>
+        <p class="text-sm font-semibold text-gray-900 dark:text-white">Tidak ada hak akses ditemukan</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
+          {{ search.trim() ? "Cobalah gunakan kata kunci pencarian yang lain." : "Buat hak akses baru untuk ditugaskan ke grup peran." }}
+        </p>
+        <div v-if="canCreate && !search.trim()" class="pt-2">
+          <UButton
+            label="Tambah Hak Akses Baru"
+            icon="i-lucide-plus"
+            size="sm"
+            color="primary"
+            @click="openCreateModal"
           />
         </div>
-      </template>
-    </UCard>
+      </div>
+
+      <!-- Table Content -->
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+          <thead class="bg-gray-50 dark:bg-[#070b14] text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/[0.08]">
+            <tr>
+              <th scope="col" class="py-3 px-4">Nama Hak Akses (Identifier)</th>
+              <th scope="col" class="py-3 px-3 w-44 text-center">Terhubung ke Role</th>
+              <th v-if="hasAnyAction" scope="col" class="py-3 px-4 w-28 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 dark:divide-white/[0.04]">
+            <tr
+              v-for="perm in paginatedPermissions"
+              :key="perm.id"
+              class="hover:bg-gray-50/60 dark:hover:bg-white/[0.02] transition-colors"
+            >
+              <!-- Name Cell -->
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-2 font-mono text-xs">
+                  <div class="size-6 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center shrink-0">
+                    <UIcon name="i-lucide-key" class="size-3.5" />
+                  </div>
+                  <span class="text-gray-900 dark:text-white font-medium">
+                    {{ perm.name }}
+                  </span>
+                </div>
+              </td>
+
+              <!-- Roles Count Cell -->
+              <td class="py-3 px-3 text-center">
+                <UBadge
+                  v-if="perm.roles_count && perm.roles_count > 0"
+                  :label="`${perm.roles_count} role`"
+                  color="primary"
+                  variant="soft"
+                  size="xs"
+                  class="text-[11px]"
+                />
+                <span v-else class="text-gray-400 dark:text-gray-500 text-[11px] italic">
+                  Belum digunakan
+                </span>
+              </td>
+
+              <!-- Actions Cell -->
+              <td v-if="hasAnyAction" class="py-3 px-4 text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <UTooltip v-if="canUpdate" text="Edit Hak Akses">
+                    <UButton
+                      icon="i-lucide-pencil"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                      @click="openEditModal(perm)"
+                    />
+                  </UTooltip>
+                  <UTooltip v-if="canDelete" text="Hapus Hak Akses">
+                    <UButton
+                      icon="i-lucide-trash-2"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      class="hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                      @click="confirmDelete(perm)"
+                    />
+                  </UTooltip>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Footer -->
+      <div
+        v-if="!loading && filteredPermissions.length > 0"
+        class="p-4 border-t border-gray-200 dark:border-white/[0.08] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400"
+      >
+        <div>
+          Menampilkan baris {{ (page - 1) * perPage + 1 }} sampai
+          {{ Math.min(page * perPage, filteredPermissions.length) }} dari total
+          <strong class="text-gray-800 dark:text-gray-200">{{ filteredPermissions.length }}</strong> hak akses
+        </div>
+        <UPagination
+          v-model:page="page"
+          :total="filteredPermissions.length"
+          :items-per-page="perPage"
+          size="sm"
+        />
+      </div>
+    </div>
 
     <!-- ═══ MODAL: TAMBAH HAK AKSES ════════════════════════════════════════════ -->
     <UModal
@@ -413,7 +438,7 @@ const columns = computed(() => [
             />
             <template #help>
               <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Format: <code class="font-mono text-emerald-600 dark:text-emerald-400">modul.aksi</code> (huruf kecil, dapat menggunakan titik, strip, atau garis bawah).
+                Format: <code class="font-mono text-blue-600 dark:text-blue-400">modul.aksi</code> (huruf kecil, dapat menggunakan titik, strip, atau garis bawah).
               </p>
             </template>
           </UFormField>

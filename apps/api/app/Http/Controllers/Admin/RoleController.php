@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Spatie\Permission\Models\Permission;
@@ -30,6 +31,21 @@ class RoleController extends Controller
     }
 
     /**
+     * Display the specified role.
+     */
+    public function show(Role $role): JsonResponse
+    {
+        $role->load('permissions')->loadCount('users');
+        $permissions = Permission::orderBy('name')->get();
+
+        return response()->json([
+            'ok' => true,
+            'role' => $role,
+            'permissions' => $permissions,
+        ]);
+    }
+
+    /**
      * Store a newly created role.
      */
     public function store(Request $request): JsonResponse
@@ -48,6 +64,14 @@ class RoleController extends Controller
         if (!empty($validated['permissions'])) {
             $role->syncPermissions($validated['permissions']);
         }
+
+        app(AuditLogService::class)->log(
+            event: 'created',
+            module: 'roles',
+            auditable: ['target_label' => $role->name],
+            description: 'Akses grup "' . $role->name . '" dibuat.',
+            after: ['name' => $role->name, 'permissions' => $validated['permissions'] ?? []],
+        );
 
         return response()->json([
             'ok' => true,
@@ -75,11 +99,23 @@ class RoleController extends Controller
             ], 422);
         }
 
+        $originalName = $role->name;
+        $permissionsBefore = $role->permissions->pluck('name')->sort()->values()->all();
+
         $role->update(['name' => $validated['name']]);
 
         if (array_key_exists('permissions', $validated)) {
             $role->syncPermissions($validated['permissions'] ?? []);
         }
+
+        app(AuditLogService::class)->log(
+            event: 'updated',
+            module: 'roles',
+            auditable: ['target_label' => $role->name],
+            description: 'Akses grup "' . $role->name . '" diperbarui.',
+            before: ['name' => $originalName, 'permissions' => $permissionsBefore],
+            after:  ['name' => $role->name,   'permissions' => $validated['permissions'] ?? []],
+        );
 
         return response()->json([
             'ok' => true,
@@ -106,6 +142,16 @@ class RoleController extends Controller
                 'message' => 'Tidak dapat menghapus akses grup yang masih memiliki pengguna terdaftar. Silakan pindahkan pengguna terlebih dahulu.',
             ], 422);
         }
+
+        $roleName = $role->name;
+
+        app(AuditLogService::class)->log(
+            event: 'deleted',
+            module: 'roles',
+            auditable: ['target_label' => $roleName],
+            description: 'Akses grup "' . $roleName . '" dihapus.',
+            before: ['name' => $roleName],
+        );
 
         $role->delete();
 

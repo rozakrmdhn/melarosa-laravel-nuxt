@@ -544,8 +544,9 @@ async function initMap() {
       zIndex: 0,
     });
 
-    // 2. PostGIS MVT Vector Tile Source & Layer
-    const mvtUrl = `${apiBase}/api/v1/dataset/mvt/batas-wilayah-desa/{z}/{x}/{y}.pbf`;
+    // 2. Martin MVT Vector Tile Source & Layer
+    const martinUrl = (config.public.martinUrl as string) || "/martin";
+    const mvtUrl = `${martinUrl}/bataswilayah_desa/{z}/{x}/{y}`;
     vectorTileSource = new VectorTileSource({
       format: new MVT({
         idProperty: "id",
@@ -973,7 +974,7 @@ onUnmounted(() => {
         >
           <div class="flex items-center justify-between gap-2">
             <p class="font-bold text-gray-900 dark:text-white">{{ tooltipContent.nama_desa }}</p>
-            <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+            <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
               Desa
             </span>
           </div>
@@ -983,7 +984,7 @@ onUnmounted(() => {
           </div>
           <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 gap-2">
             <span>Luas:</span>
-            <span class="font-semibold text-emerald-600 dark:text-emerald-400">
+            <span class="font-semibold text-blue-600 dark:text-blue-400">
               {{ tooltipContent.luas_hektar.toLocaleString('id-ID') }} Ha
             </span>
           </div>
@@ -1045,7 +1046,7 @@ onUnmounted(() => {
             <select
               :value="selectedKecamatanId ?? ''"
               :disabled="isKecamatanRestricted"
-              class="w-full text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 transition-colors disabled:opacity-75 disabled:cursor-not-allowed"
+              class="w-full text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition-colors disabled:opacity-75 disabled:cursor-not-allowed"
               @change="(e: any) => selectKecamatan(e.target.value ? Number(e.target.value) : null)"
             >
               <option v-if="!isKecamatanRestricted" value="">Semua Kecamatan (28)</option>
@@ -1097,12 +1098,12 @@ onUnmounted(() => {
           <!-- Active Kecamatan Stats Pill -->
           <div
             v-if="selectedKecamatan"
-            class="hidden xl:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-300"
+            class="hidden xl:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-blue-500/10 dark:bg-blue-500/15 border border-blue-500/20 text-xs text-blue-700 dark:text-blue-300"
           >
             <span class="font-semibold">{{ selectedKecamatan.nama_kecamatan }}</span>
-            <span class="size-1 rounded-full bg-emerald-500" />
+            <span class="size-1 rounded-full bg-blue-500" />
             <span>{{ selectedKecamatan.jumlah_desa }} Desa</span>
-            <span class="size-1 rounded-full bg-emerald-500" />
+            <span class="size-1 rounded-full bg-blue-500" />
             <span>{{ selectedKecamatan.luas_hektar.toLocaleString('id-ID') }} Ha</span>
           </div>
         </div>
@@ -1197,10 +1198,10 @@ onUnmounted(() => {
           <p class="font-semibold text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">
             Legenda Layer
           </p>
-          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">PostGIS MVT</span>
+          <span class="text-[10px] text-blue-600 dark:text-blue-400 font-mono">Martin MVT</span>
         </div>
         <div class="flex items-center gap-2">
-          <div class="size-3.5 rounded-xs border border-emerald-600 bg-emerald-500/25"></div>
+          <div class="size-3.5 rounded-xs border border-blue-600 bg-blue-500/25"></div>
           <span class="text-gray-700 dark:text-gray-300 text-[11px]">Batas Wilayah Desa</span>
         </div>
         <div class="flex items-center gap-2">
@@ -1256,8 +1257,8 @@ onUnmounted(() => {
             <!-- Header -->
             <div class="flex items-center justify-between border-b border-gray-100 dark:border-white/[0.08] pb-2.5">
               <div class="flex items-center gap-2 min-w-0">
-                <div class="size-7 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
-                  <UIcon name="i-lucide-map-pin" class="size-4 text-emerald-600 dark:text-emerald-400" />
+                <div class="size-7 rounded-lg bg-blue-500/15 flex items-center justify-center shrink-0">
+                  <UIcon name="i-lucide-map-pin" class="size-4 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div class="min-w-0">
                   <h3 class="font-bold text-sm text-gray-900 dark:text-white truncate">
@@ -1281,7 +1282,7 @@ onUnmounted(() => {
             <div class="p-3 rounded-xl bg-gray-50 dark:bg-[#070b14]/70 border border-gray-200/60 dark:border-white/[0.06] space-y-2 text-xs">
               <div class="flex justify-between items-center">
                 <span class="text-gray-500 dark:text-gray-400">Luas Wilayah</span>
-                <span class="font-bold text-emerald-600 dark:text-emerald-400">
+                <span class="font-bold text-blue-600 dark:text-blue-400">
                   {{ selectedFeature.properties.luas_hektar }} Ha
                 </span>
               </div>
@@ -1504,7 +1505,7 @@ onUnmounted(() => {
                 <td class="px-4 py-3 text-xs text-gray-700 dark:text-gray-300 font-medium">
                   {{ getKecamatanName(feat.id_kecamatan) }}
                 </td>
-                <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400 font-medium">
+                <td class="px-4 py-3 text-blue-600 dark:text-blue-400 font-medium">
                   {{ feat.luas_hektar }} Ha
                 </td>
                 <td class="px-4 py-3">
@@ -1589,7 +1590,7 @@ onUnmounted(() => {
               <select
                 v-model="formState.id_kecamatan"
                 :disabled="isKecamatanRestricted"
-                class="w-full text-sm rounded-md border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 disabled:opacity-75 disabled:cursor-not-allowed"
+                class="w-full text-sm rounded-md border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-3 py-2 focus:outline-hidden focus:ring-1 focus:ring-blue-500 disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 <option v-if="!isKecamatanRestricted" :value="null">-- Pilih Kecamatan --</option>
                 <option
@@ -1648,7 +1649,7 @@ onUnmounted(() => {
             />
             <template #help>
               <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Format standar GeoJSON EPSG:4326 yang akan disimpan ke kolom PostGIS <code class="text-emerald-500">geometry</code>.
+                Format standar GeoJSON EPSG:4326 yang akan disimpan ke kolom PostGIS <code class="text-blue-500">geometry</code>.
               </p>
             </template>
           </UFormField>

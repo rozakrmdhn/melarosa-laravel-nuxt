@@ -15,15 +15,33 @@ return [
     |
     */
 
-    'paths' => ['*'],
+    'paths' => ['api/*', 'sanctum/*'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => [env('FRONTEND_URL', 'http://localhost:3000')],
+    'allowed_origins' => array_values(array_unique(array_filter(
+        env('APP_ENV') === 'production'
+            ? [
+                env('FRONTEND_URL'),
+                'https://dev-melarosa.saggaserv.my.id',
+            ]
+            : [
+                env('FRONTEND_URL', 'http://localhost:4000'),
+                'https://dev-melarosa.saggaserv.my.id',
+                'http://localhost:3000',
+                'http://localhost:4000',
+                'http://localhost:5000',
+                'http://127.0.0.1:3000',
+                'http://127.0.0.1:4000',
+                'http://127.0.0.1:5000',
+            ]
+    ))),
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^https?://.*\.saggaserv\.my\.id$#',
+    ],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['Content-Type', 'X-Requested-With', 'X-XSRF-TOKEN', 'Accept', 'Authorization'],
 
     'exposed_headers' => [],
 

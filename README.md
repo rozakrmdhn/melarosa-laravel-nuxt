@@ -13,7 +13,9 @@ The goal of the project is to create a template for development on Laravel and N
 <!-- TOC -->
 
 - [Features](#features)
+- [Services & Ports](#services--ports)
 - [Requirements](#requirements)
+- [Environment Configuration](#environment-configuration)
 - [Installation](#installation)
     - [Standalone](#standalone)
     - [Docker](#docker)
@@ -39,6 +41,7 @@ The goal of the project is to create a template for development on Laravel and N
  - [**Spatie Laravel Permissions**](https://spatie.be/docs/laravel-permission/v6/introduction) This package allows you to manage user permissions and roles in a database.
  - [**Pest**](https://pestphp.com/) Elegant testing framework with expressive syntax and zero-config Laravel integration.
  - UI library [**Nuxt UI 4**](https://ui.nuxt.com/) based on [**TailwindCSS 4**](https://tailwindcss.com/) and [**Reka UI**](https://reka-ui.com/).
+ - [**Martin Tile Server**](https://maplibre.org/martin/) High-performance PostGIS vector tile server for WebGIS maps and spatial datasets.
  - [**Pinia**](https://pinia.vuejs.org/ssr/nuxt.html) The intuitive store for Vue.js
  - Integrated pages: login, registration, password recovery, email confirmation, account information update, password change.
  - Temporary uploads with cropping and optimization of images.
@@ -46,11 +49,40 @@ The goal of the project is to create a template for development on Laravel and N
  - Enhanced Fetch Wrappers : Utilizes `$http` and `useHttp`, which extend the capabilities of **Nuxt's** standard `$fetch` and `useFetch`.
  - Monorepo layout (`apps/api` + `apps/web`) with `just` task runner.
 
+## Services & Ports
+
+All services are dynamically configured via environment variables:
+
+| Service | Port | Default URL | Environment Variable |
+| :--- | :---: | :--- | :--- |
+| **Laravel API** | `9000` | `http://localhost:9000` | `SERVER_PORT=9000` / `OCTANE_PORT=9000` |
+| **Nuxt UI** | `4000` | `http://localhost:4000` | `PORT=4000` / `NUXT_PORT=4000` / `NITRO_PORT=4000` |
+| **Martin Serve** | `9090` | `http://localhost:9090` | `MARTIN_PORT=9090` / `MARTIN_LISTEN_ADDRESSES=0.0.0.0:9090` |
+| **Redis** | `6379` | `localhost:6379` | `REDIS_PORT=6379` |
+
 ## Requirements
 
  - PHP 8.4+ / Node 20+ (or [**Bun**](https://bun.com))
- - **Redis** is required for the [**Throttling with Redis**](https://laravel.com/docs/13.x/routing#throttling-with-redis) feature
+ - **PostgreSQL with PostGIS extension** (for WebGIS spatial datasets and Martin)
+ - **Redis** is required for cache / session / queue / throttling
  - For Docker setup: [**Docker**](https://github.com/docker/docker-install) and [**just**](https://github.com/casey/just) task runner
+
+## Environment Configuration
+
+Configuration files are separated between **Local Development** and **Production Server** across the monorepo:
+
+| Scope | Local Template / Active | Production Template |
+| :--- | :--- | :--- |
+| **Root (Docker/Orchestration)** | `.env.local` &rarr; `.env` | `.env.production` |
+| **Backend API (`apps/api/`)** | `apps/api/.env.local` &rarr; `.env` | `apps/api/.env.production` |
+| **Frontend Web (`apps/web/`)** | `apps/web/.env.local` &rarr; `.env` | `apps/web/.env.production` |
+
+You can switch all environment files at once using the `just` task runner:
+
+```bash
+just env-local     # Activate LOCAL environment across root, api, and web
+just env-prod      # Activate PRODUCTION environment across root, api, and web
+```
 
 ## Installation
 ### Standalone
@@ -58,18 +90,45 @@ The goal of the project is to create a template for development on Laravel and N
 <details>
 <summary>Show standalone instructions</summary>
 
-1. `cd apps/api && composer install && cd ../web && bun install && cd ../..`
-2. `cp apps/api/.env.example apps/api/.env`
-3. `cd apps/api && php artisan key:generate && php artisan storage:link`
-4. `php artisan migrate && php artisan db:seed`
-5. `php artisan octane:install --server=swoole && php artisan octane:start --host=127.0.0.1 --port=8000`
-6. In another terminal: `cd apps/web && bun run dev`
+1. **Install dependencies:**
+   ```bash
+   cd apps/api && composer install && cd ../web && npm install && cd ../..
+   ```
+2. **Setup environment:**
+   ```bash
+   just env-local
+   # Or manually copy .env.local to .env in root, apps/api/, and apps/web/
+   ```
+3. **Initialize Laravel:**
+   ```bash
+   cd apps/api
+   php artisan key:generate
+   php artisan storage:link
+   php artisan migrate --seed
+   ```
+4. **Run services:**
+   - **Laravel API (Port 9000):**
+     ```bash
+     cd apps/api && php artisan serve
+     # or using Octane:
+     # php artisan octane:start
+     ```
+   - **Nuxt UI (Port 4000):**
+     ```bash
+     cd apps/web && npm run dev
+     # or production preview:
+     # npm run build && npm run serve
+     ```
+   - **Martin Tile Server (Port 9090):**
+     ```bash
+     martin --config martin.yaml
+     ```
 
 </details>
 
 ### Docker
 
-Single `docker-compose.yml`: API runs on [**Laravel Sail**](https://laravel.com/docs/13.x/sail) with [**Octane**](https://laravel.com/docs/13.x/octane) in watch mode, web runs on `oven/bun:1`, plus a `redis:8-alpine` service for cache / queue / session / throttling. Orchestrated via `just`. `just sail ...` wraps the upstream `vendor/bin/sail` for those who want it.
+Single `docker-compose.yml`: API runs on [**Laravel Sail**](https://laravel.com/docs/13.x/sail) with [**Octane**](https://laravel.com/docs/13.x/octane) in watch mode, web runs on `oven/bun:1`, Martin tile server runs on `maplibre/martin:latest`, plus `redis:8-alpine` for cache / queue / session / throttling. Orchestrated via `just`.
 
 #### Installing `just`
 
@@ -84,10 +143,10 @@ Other systems: see the [full list of packages](https://github.com/casey/just/tre
 #### Lifecycle
 
 ```bash
-just up -d                 # start full app (api + web) — :8000 / :3000
+just up -d                 # start full app (api + web + martin) — :9000 / :4000 / :9090
 just prod -d               # production mode (Octane no-watch, web .output/)
-just api -d                # api only — :8000
-just web                   # web foreground, ephemeral — :3000
+just api -d                # api only — :9000
+just web                   # web foreground, ephemeral — :4000
 just stop                  # pause containers
 just down                  # remove containers
 ```
@@ -100,9 +159,11 @@ just up -d
 just a migrate --seed
 ```
 
-Common commands:
+Environment management & common commands:
 
 ```bash
+just env-local             # switch all services to local environment
+just env-prod              # switch all services to production environment
 just                       # show all recipes
 just build                 # rebuild the api image
 just a migrate             # `php artisan migrate` in ephemeral container
@@ -231,6 +292,8 @@ https://github.com/k2so-dev/laravel-nuxt/assets/15279423/9b134491-1444-4323-a7a3
 * [Nuxt UI 4](https://ui.nuxt.com/)
 * [Tailwind CSS 4](https://tailwindcss.com/)
 * [Laravel 13x](https://laravel.com/docs/13.x)
+* [Martin Tile Server](https://maplibre.org/martin/)
+* [MapLibre GL JS](https://maplibre.org/)
 
 ## License
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fk2so-dev%2Flaravel-nuxt.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fk2so-dev%2Flaravel-nuxt?ref=badge_large)

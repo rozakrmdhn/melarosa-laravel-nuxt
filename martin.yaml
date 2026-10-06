@@ -1,0 +1,18 @@
+# Martin Tile Server Configuration
+# Documentation: https://maplibre.org/martin/
+# Usage:
+#   martin --config martin.yaml
+#   or set DATABASE_URL in .env and run:
+#   martin
+
+server:
+  listen_addresses: '${MARTIN_LISTEN_ADDRESSES:-0.0.0.0:9090}'
+  worker_processes: 4
+
+postgres:
+  connection_string: '${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/db_melarosa}'
+  auto_publish:
+    tables:
+      from_schemas:
+        - public
+      id_format: '{table}'

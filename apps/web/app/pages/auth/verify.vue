@@ -1,4 +1,4 @@
-<script lang="ts" setup>
+﻿<script lang="ts" setup>
 definePageMeta({
   validate: (route) => !!route.query.verify_url,
 });
@@ -29,7 +29,7 @@ useSeoMeta({
         Email Verification
         <UIcon v-if="loading" name="i-heroicons-arrow-path-solid" class="animate-spin" />
         <span v-else-if="error" class="text-red-500">Error</span>
-        <span v-else class="text-emerald-500">Done</span>
+        <span v-else class="text-blue-500">Done</span>
       </h1>
       <div v-if="error && error.data?.message">{{ error.data?.message }}</div>
 

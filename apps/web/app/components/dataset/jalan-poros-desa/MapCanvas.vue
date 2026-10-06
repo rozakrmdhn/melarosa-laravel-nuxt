@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import "ol/ol.css";
-import type { BasemapType, LayerSymbology, RuasProperties, SelectedFeature } from "~/types/dataset-editor";
+import type {
+  BasemapType,
+  DesaOption,
+  KecamatanOption,
+  LayerSymbology,
+  RuasProperties,
+  SelectedFeature,
+} from "~/types/dataset-editor";
 import { DEFAULT_SYMBOLOGY } from "~/types/dataset-editor";
 import { $http } from "~/utils/helpers";
 
@@ -16,6 +23,8 @@ const props = withDefaults(
     desaFilter?: string | null;
     kondisiFilter?: string | null;
     perkerasanFilter?: string | null;
+    kecamatanOptions?: KecamatanOption[];
+    desaOptions?: DesaOption[];
     symbology?: LayerSymbology;
     clickedCoordinate?: [number, number] | null;
   }>(),
@@ -29,6 +38,8 @@ const props = withDefaults(
     desaFilter: null,
     kondisiFilter: null,
     perkerasanFilter: null,
+    kecamatanOptions: () => [],
+    desaOptions: () => [],
     symbology: () => ({ ...DEFAULT_SYMBOLOGY }),
     clickedCoordinate: null,
   }
@@ -48,6 +59,8 @@ const emit = defineEmits<{
 }>();
 
 const colorMode = useColorMode();
+const config = useRuntimeConfig();
+const martinUrl = computed(() => (config.public.martinUrl as string) || "/martin");
 const mapContainer = ref<HTMLElement | null>(null);
 const scaleLineTarget = ref<HTMLElement | null>(null);
 const tooltipEl = ref<HTMLElement | null>(null);
@@ -249,10 +262,102 @@ function clearStyleCache() {
   featureStyleCache.clear();
 }
 
+function matchesFilters(feature: any): boolean {
+  if (!feature) return false;
+
+  // 1. Kecamatan Filter
+  if (props.kecamatanFilter && props.kecamatanFilter !== "ALL") {
+    const filterKecNorm = String(props.kecamatanFilter).trim().toLowerCase();
+    const optMatch = props.kecamatanOptions?.find(
+      (k) => k.nama.trim().toLowerCase() === filterKecNorm || String(k.id) === filterKecNorm
+    );
+    const targetNames = [filterKecNorm];
+    if (optMatch) targetNames.push(optMatch.nama.trim().toLowerCase());
+
+    const targetIds = optMatch ? [String(optMatch.id)] : [];
+    if (/^\d+$/.test(filterKecNorm)) targetIds.push(filterKecNorm);
+
+    const featKec = String(feature.get("kecamatan") || "").trim().toLowerCase();
+    const featKecId = feature.get("id_kecamatan") != null ? String(feature.get("id_kecamatan")).trim() : "";
+
+    const matchKec =
+      (featKec && targetNames.some((n) => featKec === n || featKec.includes(n) || n.includes(featKec))) ||
+      (featKecId && targetIds.includes(featKecId));
+
+    if (!matchKec) return false;
+  }
+
+  // 2. Desa Filter
+  if (props.desaFilter && props.desaFilter !== "ALL") {
+    const filterDesaNorm = String(props.desaFilter).trim().toLowerCase();
+    const optMatch = props.desaOptions?.find(
+      (d) => d.nama.trim().toLowerCase() === filterDesaNorm || String(d.id) === filterDesaNorm
+    );
+    const targetNames = [filterDesaNorm];
+    if (optMatch) targetNames.push(optMatch.nama.trim().toLowerCase());
+
+    const targetIds = optMatch ? [String(optMatch.id)] : [];
+    if (/^\d+$/.test(filterDesaNorm)) targetIds.push(filterDesaNorm);
+
+    const featDesa = String(feature.get("desa") || "").trim().toLowerCase();
+    const featDesaId = feature.get("id_desa") != null ? String(feature.get("id_desa")).trim() : "";
+
+    const matchDesa =
+      (featDesa && targetNames.some((n) => featDesa === n || featDesa.includes(n) || n.includes(featDesa))) ||
+      (featDesaId && targetIds.includes(featDesaId));
+
+    if (!matchDesa) return false;
+  }
+
+  // 3. Kondisi Filter
+  if (props.kondisiFilter && props.kondisiFilter !== "ALL") {
+    const filterKondisi = String(props.kondisiFilter).toUpperCase().trim();
+    const featKondisi = String(feature.get("kondisi") || "").toUpperCase().trim();
+
+    let matchKondisi = false;
+    if (filterKondisi === "RUSAK BERAT") {
+      matchKondisi = featKondisi.includes("RUSAK BERAT");
+    } else if (filterKondisi === "SEDANG") {
+      matchKondisi = featKondisi.includes("SEDANG");
+    } else if (filterKondisi === "BAIK") {
+      matchKondisi = featKondisi.includes("BAIK");
+    } else if (filterKondisi === "RUSAK") {
+      matchKondisi = featKondisi.includes("RUSAK");
+    } else {
+      matchKondisi = featKondisi.includes(filterKondisi);
+    }
+
+    if (!matchKondisi) return false;
+  }
+
+  // 4. Perkerasan Filter
+  if (props.perkerasanFilter && props.perkerasanFilter !== "ALL") {
+    const filterPerkerasan = String(props.perkerasanFilter).toLowerCase().trim();
+    const featPerkerasan = String(feature.get("perkerasan") || "").toLowerCase().trim();
+
+    let matchPerkerasan = false;
+    if (filterPerkerasan === "lainnya") {
+      const isStandard =
+        featPerkerasan.includes("aspal") ||
+        featPerkerasan.includes("beton") ||
+        featPerkerasan.includes("kerikil") ||
+        featPerkerasan.includes("tanah");
+      matchPerkerasan = !isStandard;
+    } else {
+      matchPerkerasan = featPerkerasan.includes(filterPerkerasan);
+    }
+
+    if (!matchPerkerasan) return false;
+  }
+
+  return true;
+}
+
 function getFeatureStyle(feature: any) {
   if (!olModules) return null;
-  const { Style, Stroke, Fill, Text } = olModules;
+  if (!matchesFilters(feature)) return null;
 
+  const { Style, Stroke, Fill, Text } = olModules;
   const id = String(feature.get("id") || feature.getId() || "");
   const isSelected = props.selectedFeature?.id === id;
   const hoverId = hoveredFeature.value
@@ -457,26 +562,51 @@ function zoomToCentroid(coords: [number, number] | string | any) {
 const tileVersion = ref(Date.now());
 
 function getMvtUrl() {
+  const base = martinUrl.value;
   const params = new URLSearchParams();
-  if (props.kecamatanFilter) params.set("kecamatan", props.kecamatanFilter);
-  if (props.desaFilter) params.set("desa", props.desaFilter);
-  if (props.kondisiFilter) params.set("kondisi", props.kondisiFilter);
-  if (props.perkerasanFilter) params.set("perkerasan", props.perkerasanFilter);
   params.set("_v", String(tileVersion.value));
   const qs = params.toString();
-  return `${props.apiBase}/api/v1/dataset/mvt/jalan-poros-desa/{z}/{x}/{y}.pbf?${qs}`;
+  return `${base}/jalan_porosdesa/{z}/{x}/{y}?${qs}`;
 }
 
 function refreshVectorTiles() {
   tileVersion.value = Date.now();
+  clearStyleCache();
   if (vectorTileSource) {
     const newUrl = getMvtUrl();
     vectorTileSource.setUrl(newUrl);
+
+    try {
+      if ((vectorTileSource as any).sourceTiles_) {
+        (vectorTileSource as any).sourceTiles_ = {};
+      }
+      if ((vectorTileSource as any).tileKeysBySourceTileUrl_) {
+        (vectorTileSource as any).tileKeysBySourceTileUrl_ = {};
+      }
+      if ((vectorTileSource as any).tileCache) {
+        (vectorTileSource as any).tileCache.clear();
+      }
+      const renderer = (vectorTileLayer as any)?.getRenderer?.();
+      if (renderer) {
+        if (renderer.tileCache_) {
+          renderer.tileCache_.clear();
+        }
+        if (renderer.sourceTileCache_) {
+          renderer.sourceTileCache_.clear();
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     vectorTileSource.clear();
     vectorTileSource.refresh();
   }
   if (vectorTileLayer) {
     vectorTileLayer.changed();
+  }
+  if (mapInstance) {
+    mapInstance.render();
   }
 }
 
@@ -488,7 +618,10 @@ watch(
     () => props.perkerasanFilter,
   ],
   () => {
-    refreshVectorTiles();
+    clearStyleCache();
+    if (vectorTileLayer) {
+      vectorTileLayer.changed();
+    }
   }
 );
 
@@ -742,6 +875,7 @@ async function initMap() {
         mapInstance.forEachFeatureAtPixel(
           pixel,
           (f: any) => {
+            if (!matchesFilters(f)) return false;
             hit = f;
             return true;
           },
@@ -805,6 +939,7 @@ async function initMap() {
       mapInstance.forEachFeatureAtPixel(
         pixel,
         (f: any) => {
+          if (!matchesFilters(f)) return false;
           clicked = f;
           return true;
         },
@@ -1671,11 +1806,11 @@ defineExpose({
     >
       <div
         v-if="isMvtLoading && mapLoaded && !isDrawing && !isSplitMode"
-        class="absolute top-3 left-3 z-20 flex items-center gap-2 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-emerald-500/30 dark:border-emerald-500/30 rounded-lg shadow-sm pointer-events-none"
+        class="absolute top-3 left-3 z-20 flex items-center gap-2 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-blue-500/30 dark:border-blue-500/30 rounded-lg shadow-sm pointer-events-none"
       >
         <UIcon
           name="i-lucide-loader-2"
-          class="size-3.5 text-emerald-600 dark:text-emerald-400 animate-spin shrink-0"
+          class="size-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0"
         />
         <span class="text-xs font-medium text-gray-700 dark:text-gray-200">
           Memuat tile MVT...
@@ -1798,25 +1933,25 @@ defineExpose({
             <div
               class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-medium select-none whitespace-nowrap shadow-xs transition-all cursor-pointer"
               :class="isSnappingEnabled
-                ? 'bg-emerald-50/95 dark:bg-emerald-950/80 border-emerald-200 dark:border-emerald-800/80 text-emerald-700 dark:text-emerald-300'
+                ? 'bg-blue-50/95 dark:bg-blue-950/80 border-blue-200 dark:border-blue-800/80 text-blue-700 dark:text-blue-300'
                 : 'bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400'"
               :title="isSnappingEnabled ? 'Klik untuk menonaktifkan snapping' : 'Klik untuk mengaktifkan snapping'"
               @click="toggleSnapping"
             >
               <span
                 class="size-1.5 rounded-full shrink-0"
-                :class="isSnappingEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400 dark:bg-gray-500'"
+                :class="isSnappingEnabled ? 'bg-blue-500 animate-pulse' : 'bg-gray-400 dark:bg-gray-500'"
               />
               <span>{{ isSnappingEnabled ? 'Aktif' : 'Non Aktif' }}</span>
               <span
                 v-if="isSnappingEnabled && isSnapLoading"
-                class="flex items-center gap-0.5 text-[9px] text-emerald-600/70"
+                class="flex items-center gap-0.5 text-[9px] text-blue-600/70"
               >
                 <UIcon name="i-lucide-loader-2" class="size-2 animate-spin" />
               </span>
               <span
                 v-else-if="isSnappingEnabled && snapRoadCount > 0"
-                class="text-[9px] font-mono text-emerald-600/80 dark:text-emerald-400/80"
+                class="text-[9px] font-mono text-blue-600/80 dark:text-blue-400/80"
               >
                 ({{ snapRoadCount }})
               </span>
@@ -1852,7 +1987,7 @@ defineExpose({
                 class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] select-none whitespace-nowrap shadow-xs backdrop-blur-xs bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800"
               >
                 <!-- Panjang (Meter) -->
-                <div class="flex items-center gap-1 font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                <div class="flex items-center gap-1 font-mono font-semibold text-blue-600 dark:text-blue-400">
                   <UIcon name="i-lucide-route" class="size-3 shrink-0" />
                   <span>{{ drawnLengthMeters.toLocaleString('id-ID') }} m</span>
                 </div>
@@ -1870,7 +2005,7 @@ defineExpose({
                   </span>
                   <span
                     v-else-if="hasCompletedLine"
-                    class="text-[9px] font-sans font-medium text-emerald-500"
+                    class="text-[9px] font-sans font-medium text-blue-500"
                   >
                     (Selesai)
                   </span>
@@ -1905,7 +2040,7 @@ defineExpose({
         class="px-3 py-2 rounded-lg bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-xl min-w-[190px] max-w-[260px] space-y-1.5"
       >
         <div class="flex items-center gap-1.5">
-          <div class="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+          <div class="size-1.5 rounded-full bg-blue-500 shrink-0" />
           <p class="font-semibold text-gray-900 dark:text-gray-100 truncate text-xs">
             {{ tooltipData.nama_ruas }}
           </p>
@@ -1924,7 +2059,7 @@ defineExpose({
         </div>
 
         <div class="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 truncate pt-0.5 border-t border-gray-100 dark:border-gray-800/80">
-          <UIcon name="i-lucide-map-pin" class="size-3 shrink-0 text-emerald-500" />
+          <UIcon name="i-lucide-map-pin" class="size-3 shrink-0 text-blue-500" />
           <span class="truncate">{{ tooltipData.desa }}, Kec. {{ tooltipData.kecamatan }}</span>
         </div>
       </div>
@@ -1934,11 +2069,11 @@ defineExpose({
         <!-- Segitiga penunjuk kecil -->
         <div class="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-200 dark:border-t-gray-800" />
         <!-- Batang Garis Callout (Lebih Tinggi untuk visibilitas optimal) -->
-        <div class="w-[2px] h-9 bg-emerald-500 dark:bg-emerald-400 shadow-xs -mt-[1px]" />
+        <div class="w-[2px] h-9 bg-blue-500 dark:bg-blue-400 shadow-xs -mt-[1px]" />
         <!-- Pin Target Anchor Dot di Titik Vektor -->
         <div class="relative flex items-center justify-center -mt-[2px]">
-          <span class="size-3.5 rounded-full bg-emerald-500/40 animate-ping absolute" />
-          <span class="size-2 rounded-full bg-emerald-500 dark:bg-emerald-400 ring-2 ring-white dark:ring-[#070b14] shadow-sm" />
+          <span class="size-3.5 rounded-full bg-blue-500/40 animate-ping absolute" />
+          <span class="size-2 rounded-full bg-blue-500 dark:bg-blue-400 ring-2 ring-white dark:ring-[#070b14] shadow-sm" />
         </div>
       </div>
     </div>
@@ -1949,9 +2084,9 @@ defineExpose({
       class="pointer-events-none z-20 flex items-center justify-center size-8"
       :class="isPulseVisible ? 'block' : 'hidden'"
     >
-      <span class="absolute size-8 rounded-full bg-emerald-500/40 animate-ping" />
-      <span class="absolute size-5 rounded-full bg-emerald-500/25" />
-      <span class="relative size-3.5 rounded-full bg-emerald-600 ring-2 ring-white dark:ring-gray-950 shadow-md flex items-center justify-center">
+      <span class="absolute size-8 rounded-full bg-blue-500/40 animate-ping" />
+      <span class="absolute size-5 rounded-full bg-blue-500/25" />
+      <span class="relative size-3.5 rounded-full bg-blue-600 ring-2 ring-white dark:ring-gray-950 shadow-md flex items-center justify-center">
         <span class="size-1 rounded-full bg-white" />
       </span>
     </div>
@@ -2028,7 +2163,7 @@ defineExpose({
       class="absolute inset-0 flex items-center justify-center bg-gray-100/90 dark:bg-[#070b14]/90 z-30"
     >
       <div class="flex flex-col items-center gap-2">
-        <UIcon name="i-lucide-loader-2" class="size-6 text-emerald-600 dark:text-emerald-400 animate-spin" />
+        <UIcon name="i-lucide-loader-2" class="size-6 text-blue-600 dark:text-blue-400 animate-spin" />
         <span class="text-xs text-gray-500 font-medium">Memuat peta spasial...</span>
       </div>
     </div>

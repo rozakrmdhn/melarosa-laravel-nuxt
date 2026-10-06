@@ -21,16 +21,22 @@ class DatabaseSeeder extends Seeder
 
         // Default permissions
         $permissions = [
-            'users.view',
-            'users.create',
-            'users.edit',
-            'users.delete',
-            'roles.view',
-            'roles.manage',
-            'permissions.view',
-            'permissions.manage',
-            'settings.view',
-            'settings.manage',
+            'users-view',
+            'users-create',
+            'users-update',
+            'users-delete',
+            'roles-view',
+            'roles-manage',
+            'permissions-view',
+            'permissions-manage',
+            'settings-view',
+            'settings-manage',
+            'audit-logs-view',
+            'layers-view',
+            'layers-create',
+            'layers-update',
+            'layers-delete',
+            'layers-manage',
         ];
 
         foreach ($permissions as $permissionName) {
@@ -45,7 +51,7 @@ class DatabaseSeeder extends Seeder
         $adminRole->syncPermissions(Permission::all());
 
         // Give basic permissions to user
-        $userRole->syncPermissions(['users.view']);
+        $userRole->syncPermissions(['users-view']);
 
         // Create or get admin user
         $adminUser = User::firstOrCreate(
@@ -57,5 +63,11 @@ class DatabaseSeeder extends Seeder
         );
 
         $adminUser->assignRole($adminRole);
+
+        // Seeder Infrastruktur & Verifikasi
+        $this->call([
+            InfrastrukturPermissionSeeder::class,
+            InfrastrukturMasterSeeder::class,
+        ]);
     }
 }

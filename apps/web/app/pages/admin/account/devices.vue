@@ -1,4 +1,4 @@
-<script lang="ts" setup>
+﻿<script lang="ts" setup>
 const dayjs = useDayjs();
 const auth = useAuthStore();
 
@@ -76,7 +76,7 @@ useSeoMeta({
     >
       <template #name-cell="{ row }">
         <div class="flex items-center gap-2.5 py-1">
-          <div class="size-8 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+          <div class="size-8 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
             <UIcon name="i-lucide-smartphone" class="size-4" />
           </div>
           <div>

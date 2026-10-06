@@ -1,4 +1,4 @@
-<script lang="ts" setup>
+﻿<script lang="ts" setup>
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: "dashboard.view",
@@ -120,13 +120,13 @@ const quickLinks = computed(() => {
         v-for="stat in stats"
         :key="stat.title"
         :to="stat.to"
-        class="block p-4 sm:p-5 rounded-lg border border-gray-200/70 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] hover:border-emerald-500/50 dark:hover:border-emerald-500/40 transition-colors shadow-none group"
+        class="block p-4 sm:p-5 rounded-lg border border-gray-200/70 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] hover:border-blue-500/50 dark:hover:border-blue-500/40 transition-colors shadow-none group"
       >
         <div class="flex items-center justify-between">
           <span class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             {{ stat.title }}
           </span>
-          <div class="size-8 rounded-md bg-gray-100 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300 flex items-center justify-center group-hover:bg-emerald-500/15 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+          <div class="size-8 rounded-md bg-gray-100 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300 flex items-center justify-center group-hover:bg-blue-500/15 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
             <UIcon :name="stat.icon" class="size-4" />
           </div>
         </div>
@@ -156,7 +156,7 @@ const quickLinks = computed(() => {
           class="p-4 sm:p-5 rounded-lg border border-gray-200/70 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] flex flex-col justify-between space-y-4 shadow-none"
         >
           <div class="space-y-2.5">
-            <div class="size-8 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+            <div class="size-8 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <UIcon :name="item.icon" class="size-4.5" />
             </div>
             <h3 class="font-semibold text-sm text-gray-900 dark:text-white">

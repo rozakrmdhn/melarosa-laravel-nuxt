@@ -159,3 +159,19 @@ nuxt *args:
 nuxt-build:
 	just bun install --frozen-lockfile
 	just bun run build
+
+# Switch active configuration to local environment (.env.local -> .env)
+[group('env')]
+env-local:
+	@cp .env.local .env || true
+	@cp apps/api/.env.local apps/api/.env || true
+	@cp apps/web/.env.local apps/web/.env || true
+	@echo "Switched all services to LOCAL environment (.env.local -> .env)"
+
+# Switch active configuration to production environment (.env.production -> .env)
+[group('env')]
+env-prod:
+	@cp .env.production .env || true
+	@cp apps/api/.env.production apps/api/.env || true
+	@cp apps/web/.env.production apps/web/.env || true
+	@echo "Switched all services to PRODUCTION environment (.env.production -> .env)"

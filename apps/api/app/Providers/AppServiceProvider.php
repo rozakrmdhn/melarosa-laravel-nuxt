@@ -6,11 +6,17 @@ use App\Helpers\Image;
 use App\Helpers\Utils;
 use App\Models\BatasWilayahDesa;
 use App\Models\BatasWilayahKecamatan;
+use App\Models\InfrastrukturSegmen;
 use App\Models\JalanPorosDesa;
+use App\Models\MonitoringRealisasi;
+use App\Models\PlottingAnggaran;
 use App\Models\User;
 use App\Policies\BatasWilayahDesaPolicy;
 use App\Policies\BatasWilayahKecamatanPolicy;
+use App\Policies\InfrastrukturSegmenPolicy;
 use App\Policies\JalanPorosDesaPolicy;
+use App\Policies\MonitoringRealisasiPolicy;
+use App\Policies\PlottingAnggaranPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -43,6 +49,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(BatasWilayahKecamatan::class, BatasWilayahKecamatanPolicy::class);
         Gate::policy(BatasWilayahDesa::class, BatasWilayahDesaPolicy::class);
         Gate::policy(JalanPorosDesa::class, JalanPorosDesaPolicy::class);
+        Gate::policy(InfrastrukturSegmen::class, InfrastrukturSegmenPolicy::class);
+        Gate::policy(PlottingAnggaran::class, PlottingAnggaranPolicy::class);
+        Gate::policy(MonitoringRealisasi::class, MonitoringRealisasiPolicy::class);
 
         // Super-admin role bypass for all permissions
         Gate::before(static function ($user, $ability) {

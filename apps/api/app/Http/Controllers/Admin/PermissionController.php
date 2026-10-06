@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Spatie\Permission\Models\Permission;
@@ -53,6 +54,14 @@ class PermissionController extends Controller
             'guard_name' => 'web',
         ]);
 
+        app(AuditLogService::class)->log(
+            event: 'created',
+            module: 'permissions',
+            auditable: ['target_label' => $permission->name],
+            description: 'Hak akses "' . $permission->name . '" dibuat.',
+            after: ['name' => $permission->name],
+        );
+
         return response()->json([
             'ok' => true,
             'message' => 'Hak akses berhasil ditambahkan.',
@@ -79,9 +88,20 @@ class PermissionController extends Controller
             'name.regex' => 'Nama hak akses hanya boleh berisi huruf, angka, titik (.), strip (-), dan garis bawah (_).',
         ]);
 
+        $originalName = $permission->name;
+
         $permission->update([
             'name' => strtolower(trim($validated['name'])),
         ]);
+
+        app(AuditLogService::class)->log(
+            event: 'updated',
+            module: 'permissions',
+            auditable: ['target_label' => $permission->name],
+            description: 'Hak akses "' . $permission->name . '" diperbarui.',
+            before: ['name' => $originalName],
+            after:  ['name' => $permission->name],
+        );
 
         return response()->json([
             'ok' => true,
@@ -95,6 +115,16 @@ class PermissionController extends Controller
      */
     public function destroy(Permission $permission): JsonResponse
     {
+        $permissionName = $permission->name;
+
+        app(AuditLogService::class)->log(
+            event: 'deleted',
+            module: 'permissions',
+            auditable: ['target_label' => $permissionName],
+            description: 'Hak akses "' . $permissionName . '" dihapus.',
+            before: ['name' => $permissionName],
+        );
+
         $permission->delete();
 
         return response()->json([

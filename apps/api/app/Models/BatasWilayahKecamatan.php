@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,7 +10,9 @@ use Illuminate\Support\Facades\DB;
 
 class BatasWilayahKecamatan extends Model
 {
-    use HasFactory;
+    use HasFactory, Auditable;
+
+    public string $auditModule = 'batas-wilayah-kecamatan';
 
     /**
      * Relationship to villages (desa).
@@ -17,6 +20,21 @@ class BatasWilayahKecamatan extends Model
     public function desa(): HasMany
     {
         return $this->hasMany(BatasWilayahDesa::class, 'id_kecamatan', 'id');
+    }
+
+    public function infrastrukturSegmen(): HasMany
+    {
+        return $this->hasMany(InfrastrukturSegmen::class, 'id_kecamatan', 'id');
+    }
+
+    public function plottingAnggaran(): HasMany
+    {
+        return $this->hasMany(PlottingAnggaran::class, 'id_kecamatan', 'id');
+    }
+
+    public function monitoringRealisasi(): HasMany
+    {
+        return $this->hasMany(MonitoringRealisasi::class, 'id_kecamatan', 'id');
     }
 
     /**

@@ -163,11 +163,28 @@ export function useAdminNavigation() {
     ];
   });
 
+  function isPathActive(targetPath?: string, exact?: boolean): boolean {
+    if (!targetPath) return false;
+    const current = route.path.split("?")[0].replace(/\/$/, "");
+    const target = targetPath.split("?")[0].replace(/\/$/, "");
+
+    if (exact || target === "/admin" || target === "/") {
+      return current === target;
+    }
+
+    return current === target || current.startsWith(`${target}/`);
+  }
+
   function getNavItems(state: "collapsed" | "expanded"): NavigationMenuItem[] {
     const isCollapsed = state === "collapsed";
 
     return navTree.value.map((item) => {
       const visibleChildren = item.children ?? [];
+      const hasActiveChild = visibleChildren.some((child) => isPathActive(child.to));
+      const isSelfActive = isPathActive(item.to, item.exact);
+      const isItemActive = isCollapsed
+        ? (hasActiveChild || isSelfActive)
+        : (visibleChildren.length ? false : isSelfActive);
 
       return {
         label: item.label,
@@ -176,6 +193,7 @@ export function useAdminNavigation() {
           ? item.to
           : (visibleChildren.length ? undefined : item.to),
         exact: item.exact,
+        active: isItemActive,
         defaultOpen: true,
         tooltip: isCollapsed ? { text: item.label, content: { side: "right" } } : undefined,
         children: !isCollapsed
@@ -183,6 +201,7 @@ export function useAdminNavigation() {
               label: child.label,
               icon: child.icon,
               to: child.to,
+              active: isPathActive(child.to),
             }))
           : [],
       };

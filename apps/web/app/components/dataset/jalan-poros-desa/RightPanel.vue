@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import type { SelectedFeature } from "~/types/dataset-editor";
 
 const props = withDefaults(
@@ -85,7 +85,7 @@ const emit = defineEmits<{
     <div class="flex items-center h-10 border-b border-gray-200 dark:border-gray-800 shrink-0 px-3 gap-2 justify-between select-none">
       <Transition name="panel-subtle-fade">
         <div v-if="isMobileDrawer || !collapsed" class="flex items-center gap-2 overflow-hidden">
-          <UIcon name="i-lucide-info" class="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <UIcon name="i-lucide-info" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <span class="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">
             Detail Data
           </span>
@@ -131,12 +131,12 @@ const emit = defineEmits<{
               name="i-lucide-info"
               :class="[
                 'size-4 transition-colors',
-                selectedFeature ? 'text-emerald-500' : 'text-gray-400 dark:text-gray-500'
+                selectedFeature ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'
               ]"
             />
             <span
               v-if="selectedFeature"
-              class="absolute top-1 right-1 size-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-[#0b0f19]"
+              class="absolute top-1 right-1 size-1.5 rounded-full bg-blue-500 ring-1 ring-white dark:ring-[#0b0f19]"
             />
           </div>
         </UTooltip>

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import type {
   DesaOption,
   KecamatanOption,
@@ -208,7 +208,7 @@ function resetSymbology() {
 }
 
 const COLOR_PRESETS = [
-  { label: "Emerald", hex: "#059669" },
+  { label: "blue", hex: "#059669" },
   { label: "Sky", hex: "#0284c7" },
   { label: "Indigo", hex: "#6366f1" },
   { label: "Purple", hex: "#9333ea" },
@@ -252,7 +252,7 @@ const colorModeItems = [
     >
       <Transition name="panel-subtle-fade">
         <div v-if="!collapsed" class="flex items-center gap-2 overflow-hidden">
-          <UIcon name="i-lucide-layers" class="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <UIcon name="i-lucide-layers" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <span class="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">
             Daftar Layer & Data
           </span>
@@ -292,11 +292,11 @@ const colorModeItems = [
           <div class="relative p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800">
             <UIcon
               name="i-lucide-route"
-              :class="['size-4', layerVisible ? 'text-emerald-500' : 'text-gray-300 dark:text-gray-600']"
+              :class="['size-4', layerVisible ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600']"
             />
             <span
               v-if="hasActiveFilter"
-              class="absolute top-1 right-1 size-1.5 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-[#0b0f19]"
+              class="absolute top-1 right-1 size-1.5 rounded-full bg-blue-500 ring-1 ring-white dark:ring-[#0b0f19]"
             />
           </div>
         </UTooltip>
@@ -376,7 +376,7 @@ const colorModeItems = [
                   class="p-1.5 rounded-md transition-colors cursor-pointer"
                   :class="[
                     activeTool === 'opacity'
-                      ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400'
+                      ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-200'
                   ]"
                   @click="toggleTool('opacity')"
@@ -403,9 +403,9 @@ const colorModeItems = [
                   class="p-1.5 rounded-md transition-colors relative cursor-pointer"
                   :class="[
                     activeTool === 'filter'
-                      ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 font-semibold'
+                      ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 font-semibold'
                       : hasActiveFilter
-                        ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                        ? 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
                         : 'hover:bg-gray-100 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-200'
                   ]"
                   @click="toggleTool('filter')"
@@ -414,7 +414,7 @@ const colorModeItems = [
                   <!-- Indikator dot / badge filter aktif -->
                   <span
                     v-if="hasActiveFilter"
-                    class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#0e1424]"
+                    class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-[#0e1424]"
                     :title="`${activeFiltersCount} filter aktif`"
                   />
                 </button>
@@ -427,7 +427,7 @@ const colorModeItems = [
                   class="p-1.5 rounded-md transition-colors cursor-pointer"
                   :class="[
                     activeTool === 'symbology'
-                      ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400'
+                      ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-200'
                   ]"
                   @click="toggleTool('symbology')"
@@ -443,7 +443,7 @@ const colorModeItems = [
                   class="p-1.5 rounded-md transition-colors cursor-pointer"
                   :class="[
                     activeTool === 'info'
-                      ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400'
+                      ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-200'
                   ]"
                   @click="toggleTool('info')"
@@ -475,7 +475,7 @@ const colorModeItems = [
             >
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-1.5">
-                  <UIcon name="i-lucide-filter" class="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <UIcon name="i-lucide-filter" class="size-3.5 text-blue-600 dark:text-blue-400" />
                   <span class="text-[11px] font-semibold text-gray-800 dark:text-gray-200">
                     Filter Layer Ini
                   </span>
@@ -570,7 +570,7 @@ const colorModeItems = [
             >
               <div class="flex justify-between items-center text-[11px]">
                 <span class="text-gray-600 dark:text-gray-300 font-medium">Transparansi Layer:</span>
-                <span class="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                <span class="font-mono text-blue-600 dark:text-blue-400 font-semibold">
                   {{ Math.round(layerOpacity * 100) }}%
                 </span>
               </div>
@@ -596,7 +596,7 @@ const colorModeItems = [
                 </span>
                 <button
                   type="button"
-                  class="text-[10px] text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+                  class="text-[10px] text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
                   @click="resetSymbology"
                 >
                   Reset
@@ -633,7 +633,7 @@ const colorModeItems = [
                   <span>Label</span>
                   <span
                     v-if="activeSymbology.labelEnabled"
-                    class="size-1.5 rounded-full bg-emerald-500 shrink-0"
+                    class="size-1.5 rounded-full bg-blue-500 shrink-0"
                   />
                 </button>
               </div>
@@ -653,7 +653,7 @@ const colorModeItems = [
                       :class="[
                         'px-1 py-1 rounded text-[10px] font-medium transition-colors text-center cursor-pointer truncate',
                         activeSymbology.colorMode === mode.value
-                          ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                          ? 'bg-blue-600 text-white shadow-xs font-semibold'
                           : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                       ]"
                       @click="updateSymbology('colorMode', mode.value)"
@@ -675,7 +675,7 @@ const colorModeItems = [
                       :class="[
                         'size-4 rounded-full transition-transform cursor-pointer shrink-0',
                         activeSymbology.lineColor.toLowerCase() === color.hex.toLowerCase()
-                          ? 'ring-2 ring-offset-1 ring-emerald-500 scale-110'
+                          ? 'ring-2 ring-offset-1 ring-blue-500 scale-110'
                           : 'hover:scale-105 opacity-85 hover:opacity-100'
                       ]"
                       :title="color.label"
@@ -724,7 +724,7 @@ const colorModeItems = [
                       :class="[
                         'px-1 py-0.5 rounded text-[10px] font-medium transition-colors text-center cursor-pointer truncate',
                         activeSymbology.lineDash === item.value
-                          ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                          ? 'bg-blue-600 text-white shadow-xs font-semibold'
                           : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                       ]"
                       @click="updateSymbology('lineDash', item.value)"
@@ -742,7 +742,7 @@ const colorModeItems = [
                   <input
                     type="checkbox"
                     :checked="activeSymbology.labelEnabled"
-                    class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     @change="updateSymbology('labelEnabled', ($event.target as HTMLInputElement).checked)"
                   />
                 </div>
@@ -795,7 +795,7 @@ const colorModeItems = [
                 </div>
                 <div class="flex justify-between text-[11px]">
                   <span class="text-gray-500 dark:text-gray-400">Total Ruas:</span>
-                  <span class="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{{ totalRuas }} ruas</span>
+                  <span class="font-mono font-semibold text-blue-600 dark:text-blue-400">{{ totalRuas }} ruas</span>
                 </div>
                 <div class="flex justify-between text-[11px]">
                   <span class="text-gray-500 dark:text-gray-400">Total Panjang:</span>

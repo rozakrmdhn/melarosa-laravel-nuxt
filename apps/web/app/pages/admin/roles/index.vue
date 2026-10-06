@@ -1,4 +1,4 @@
-<script lang="ts" setup>
+﻿<script lang="ts" setup>
 interface Permission {
   id: number;
   name: string;
@@ -383,122 +383,151 @@ const columns = computed(() => [
     </div>
 
     <!-- Table Card -->
-    <UCard
-      :ui="{
-        root: 'bg-white dark:bg-[#0b0f19] border border-gray-200/70 dark:border-white/[0.08] ring-0 rounded-lg overflow-hidden shadow-none',
-        body: 'p-0 sm:p-0',
-      }"
-    >
-      <UTable
-        :data="data?.roles || []"
-        :columns="columns"
-        :loading="loading"
-        loading-color="primary"
+    <div class="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden">
+      <!-- Loading Skeleton State -->
+      <div v-if="loading" class="p-8 text-center space-y-3">
+        <UIcon name="i-lucide-loader-2" class="size-6 animate-spin mx-auto text-primary-500" />
+        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">Memuat data akses grup...</p>
+      </div>
+
+      <!-- Empty State -->
+      <div
+        v-else-if="!data?.roles || data.roles.length === 0"
+        class="p-12 text-center space-y-3"
       >
-        <!-- Role Name Column -->
-        <template #name-cell="{ row }">
-          <div class="flex items-center gap-2 font-medium">
-            <span class="capitalize text-gray-900 dark:text-white font-semibold">
-              {{ row.original.name }}
-            </span>
-            <UBadge
-              v-if="row.original.name === 'admin'"
-              label="Sistem"
-              color="primary"
-              variant="subtle"
-              size="xs"
-            />
-          </div>
-        </template>
+        <div class="size-12 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 mx-auto flex items-center justify-center">
+          <UIcon name="i-heroicons-shield-exclamation" class="size-6 opacity-60" />
+        </div>
+        <p class="text-sm font-semibold text-gray-900 dark:text-white">Tidak ada akses grup ditemukan</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
+          Mulai dengan menambahkan akses grup pertama.
+        </p>
+        <div v-if="canCreate" class="pt-2">
+          <UButton
+            label="Tambah Akses Grup"
+            icon="i-heroicons-plus"
+            size="sm"
+            color="primary"
+            @click="openCreateModal"
+          />
+        </div>
+      </div>
 
-        <!-- Permissions Column -->
-        <template #permissions-cell="{ row }">
-          <div class="flex flex-wrap items-center gap-1.5 max-w-xl py-1">
-            <template v-if="row.original.permissions?.length > 0">
-              <UBadge
-                v-for="perm in row.original.permissions.slice(0, 4)"
-                :key="perm.id"
-                :label="perm.name"
-                color="neutral"
-                variant="subtle"
-                size="xs"
-                class="font-mono text-[11px] dark:bg-gray-800/80 dark:text-gray-300"
-              />
-              <UButton
-                v-if="row.original.permissions.length > 4"
-                :label="`+${row.original.permissions.length - 4} lainnya`"
-                size="xs"
-                color="neutral"
-                variant="outline"
-                class="text-[11px] h-5 px-1.5 dark:border-gray-700 dark:text-gray-400"
-                @click="openEditModal(row.original)"
-              />
-            </template>
-            <span v-else class="text-xs text-gray-400 italic">
-              Belum ada hak akses terdaftar
-            </span>
-          </div>
-        </template>
+      <!-- Table Content -->
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+          <thead class="bg-gray-50 dark:bg-[#070b14] text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/[0.08]">
+            <tr>
+              <th scope="col" class="py-3 px-4">Nama Akses Grup</th>
+              <th scope="col" class="py-3 px-4">Hak Akses Terdaftar</th>
+              <th scope="col" class="py-3 px-3 w-28 text-center">Pengguna</th>
+              <th v-if="hasAnyAction" scope="col" class="py-3 px-4 w-40 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 dark:divide-white/[0.04]">
+            <tr
+              v-for="role in data.roles"
+              :key="role.id"
+              class="hover:bg-gray-50/60 dark:hover:bg-white/[0.02] transition-colors"
+            >
+              <!-- Role Name -->
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-2 font-medium">
+                  <span class="capitalize text-gray-900 dark:text-white font-semibold">
+                    {{ role.name }}
+                  </span>
+                  <UBadge
+                    v-if="role.name === 'admin'"
+                    label="Sistem"
+                    color="primary"
+                    variant="subtle"
+                    size="xs"
+                  />
+                </div>
+              </td>
 
-        <!-- Users Count Column -->
-        <template #users_count-cell="{ row }">
-          <div class="text-center font-medium text-sm text-gray-600 dark:text-gray-300">
-            {{ row.original.users_count ?? 0 }}
-          </div>
-        </template>
+              <!-- Permissions Column -->
+              <td class="py-3 px-4">
+                <div class="flex flex-wrap items-center gap-1.5 max-w-xl py-0.5">
+                  <template v-if="role.permissions?.length > 0">
+                    <UBadge
+                      v-for="perm in role.permissions.slice(0, 4)"
+                      :key="perm.id"
+                      :label="perm.name"
+                      color="neutral"
+                      variant="subtle"
+                      size="xs"
+                      class="font-mono text-[11px] dark:bg-gray-800/80 dark:text-gray-300"
+                    />
+                    <UBadge
+                      v-if="role.permissions.length > 4"
+                      :label="`+${role.permissions.length - 4} lainnya`"
+                      color="neutral"
+                      variant="subtle"
+                      size="xs"
+                      class="font-mono text-[11px] dark:bg-gray-800/80 dark:text-gray-400"
+                    />
+                  </template>
+                  <span v-else class="text-xs text-gray-400 italic">
+                    Belum ada hak akses terdaftar
+                  </span>
+                </div>
+              </td>
 
-        <!-- Actions Column -->
-        <template #actions-cell="{ row }">
-          <div class="flex items-center justify-end gap-1">
-            <!-- Manage Permissions Direct Action -->
-            <UButton
-              v-if="canEdit"
-              icon="i-heroicons-key"
-              size="xs"
-              color="primary"
-              variant="ghost"
-              title="Atur Hak Akses"
-              aria-label="Atur Hak Akses"
-              class="hover:bg-primary-50 dark:hover:bg-primary-950/40"
-              @click="openEditModal(row.original)"
-            />
-            <!-- Edit Role Name Action -->
-            <UButton
-              v-if="canEdit"
-              icon="i-heroicons-pencil-square"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              title="Ubah Akses Grup"
-              aria-label="Ubah Akses Grup"
-              class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
-              @click="openEditModal(row.original)"
-            />
-            <!-- Delete Role Action -->
-            <UButton
-              v-if="canDelete"
-              icon="i-heroicons-trash"
-              size="xs"
-              color="error"
-              variant="ghost"
-              :disabled="row.original.name === 'admin'"
-              title="Hapus Akses Grup"
-              aria-label="Hapus Akses Grup"
-              @click="confirmDelete(row.original)"
-            />
-          </div>
-        </template>
+              <!-- Users Count Column -->
+              <td class="py-3 px-3 text-center">
+                <span class="font-medium text-sm text-gray-600 dark:text-gray-300">
+                  {{ role.users_count ?? 0 }}
+                </span>
+              </td>
 
-        <!-- Empty State -->
-        <template #empty>
-          <div class="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
-            <UIcon name="i-heroicons-shield-exclamation" class="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p class="font-medium">Tidak ada akses grup ditemukan</p>
-            <p class="text-xs mt-1">Mulai dengan menambahkan akses grup pertama.</p>
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+              <!-- Actions Column -->
+              <td v-if="hasAnyAction" class="py-3 px-4 text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <!-- Edit Role Action -->
+                  <UTooltip v-if="canEdit" text="Edit Akses Grup">
+                    <UButton
+                      icon="i-heroicons-pencil"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                      :to="`/admin/roles/${role.id}`"
+                    />
+                  </UTooltip>
+
+                  <!-- Delete Role Action -->
+                  <UTooltip
+                    v-if="canDelete"
+                    :text="role.name === 'admin' ? 'Role sistem tidak dapat dihapus' : 'Hapus Akses Grup'"
+                  >
+                    <UButton
+                      icon="i-heroicons-trash"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      :disabled="role.name === 'admin'"
+                      class="hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 cursor-pointer"
+                      @click="confirmDelete(role)"
+                    />
+                  </UTooltip>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Table Footer -->
+      <div
+        v-if="!loading && (data?.roles?.length ?? 0) > 0"
+        class="p-4 border-t border-gray-200 dark:border-white/[0.08] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400"
+      >
+        <div>
+          Menampilkan total <strong class="text-gray-800 dark:text-gray-200">{{ data?.roles?.length ?? 0 }}</strong> akses grup terdaftar
+        </div>
+      </div>
+    </div>
 
     <!-- Create / Edit Role & Permissions Modal -->
     <UModal
@@ -608,7 +637,7 @@ const columns = computed(() => [
                 <!-- Group Header -->
                 <div class="flex items-center justify-between pb-2 mb-2 border-b border-gray-100 dark:border-white/[0.04]">
                   <div class="flex items-center gap-2">
-                    <UIcon :name="group.icon" class="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <UIcon :name="group.icon" class="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     <span class="text-xs font-semibold text-gray-900 dark:text-white">
                       {{ group.label }}
                     </span>
@@ -640,7 +669,7 @@ const columns = computed(() => [
                     class="flex items-center justify-between p-2 rounded-md transition-colors cursor-pointer border select-none"
                     :class="[
                       isPermissionSelected(perm.name)
-                        ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300/60 dark:border-emerald-800/40 text-gray-900 dark:text-white'
+                        ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-300/60 dark:border-blue-800/40 text-gray-900 dark:text-white'
                         : 'hover:bg-gray-100/70 dark:hover:bg-gray-800/50 border-transparent text-gray-700 dark:text-gray-300'
                     ]"
                     @click="togglePermission(perm.name)"

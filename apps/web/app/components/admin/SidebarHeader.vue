@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import type { DropdownMenuItem } from "@nuxt/ui";
 
 interface Props {
@@ -48,7 +48,7 @@ const teamsItems = computed<DropdownMenuItem[][]>(() => [
     :items="teamsItems"
     :content="{ align: isCollapsed ? 'center' : 'start', collisionPadding: 12 }"
     :ui="{ content: 'w-56 dark:bg-[#0f1422] dark:border-gray-800' }"
-    :class="isCollapsed ? 'w-full flex justify-center' : 'w-full'"
+    :class="isCollapsed ? 'w-full flex justify-center' : 'flex-1 min-w-0'"
   >
     <UButton
       color="neutral"
@@ -63,10 +63,10 @@ const teamsItems = computed<DropdownMenuItem[][]>(() => [
       ]"
     >
       <div class="flex items-center gap-2.5 min-w-0">
-        <div class="size-8 rounded-md bg-emerald-500/10 dark:bg-emerald-500/15 flex items-center justify-center shrink-0">
+        <div class="size-8 rounded-md bg-blue-500/10 dark:bg-blue-500/15 flex items-center justify-center shrink-0">
           <UIcon
             name="i-simple-icons-nuxt"
-            class="size-4.5 text-emerald-600 dark:text-emerald-400 shrink-0"
+            class="size-4.5 text-blue-600 dark:text-blue-400 shrink-0"
           />
         </div>
         <div v-if="!isCollapsed" class="flex flex-col text-left min-w-0">

@@ -2,16 +2,19 @@
 
 namespace App\Models;
 
+use App\Models\BatasWilayahDesa;
+use App\Models\BatasWilayahKecamatan;
+use App\Models\User;
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use App\Models\User;
-use App\Models\BatasWilayahDesa;
-use App\Models\BatasWilayahKecamatan;
 
 class JalanPorosDesa extends Model
 {
-    use HasFactory;
+    use HasFactory, Auditable;
+
+    public string $auditModule = 'jalan-poros-desa';
 
     protected $table = 'jalan_porosdesa';
 
@@ -50,6 +53,21 @@ class JalanPorosDesa extends Model
         'updated_at'   => 'datetime',
     ];
 
+    protected static function booted()
+    {
+        static::saved(function () {
+            DB::afterCommit(function () {
+                \App\Services\MartinTileService::purgeCache('jalan_porosdesa');
+            });
+        });
+
+        static::deleted(function () {
+            DB::afterCommit(function () {
+                \App\Services\MartinTileService::purgeCache('jalan_porosdesa');
+            });
+        });
+    }
+
     /**
      * Relasi ke data batas wilayah kecamatan
      */
@@ -71,7 +89,7 @@ class JalanPorosDesa extends Model
      */
     public function scopeForUser($query, ?User $user = null)
     {
-        if (!$user || $user->hasRole('admin')) {
+        if (!$user || $user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
             return $query;
         }
 

@@ -25,11 +25,11 @@ services:
       XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
       IGNITION_LOCAL_SITES_PATH: '${PWD}'
       APP_ENV: '${APP_ENV:-local}'
-      APP_DEBUG: '${APP_DEBUG:-true}'
+      APP_DEBUG: '${APP_DEBUG:-false}'
       SUPERVISOR_PHP_COMMAND: '${SUPERVISOR_PHP_COMMAND:-php artisan octane:start --watch}'
-      OCTANE_PORT: '8000'
+      OCTANE_PORT: '${OCTANE_PORT:-9000}'
     ports:
-      - '${API_PORT:-8000}:8000'
+      - '${HOST_BIND:-0.0.0.0}:${API_PORT:-9000}:${OCTANE_PORT:-9000}'
     depends_on: [laravelnuxt.redis]
 
   laravelnuxt.schedule:
@@ -72,15 +72,19 @@ services:
     networks:
       - sail
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${HOST_BIND:-0.0.0.0}:${WEB_PORT:-4000}:${NUXT_PORT:-4000}"
 
-  composer:
-    image: composer:latest
-    profiles: [cli]
-    user: '${UID:-1000}:${GID:-1000}'
-    working_dir: /app
-    volumes:
-      - ./apps/api:/app
+  martin:
+    image: maplibre/martin:latest
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND:-0.0.0.0}:${MARTIN_PORT:-9090}:9090"
+    environment:
+      - DATABASE_URL=postgresql://${DB_USERNAME:-postgres}:${DB_PASSWORD:-postgres}@${DB_HOST:-host.docker.internal}:${DB_PORT:-5432}/${DB_DATABASE:-db_melarosa}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks:
+      - sail
 
 networks:
   sail:

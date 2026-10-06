@@ -85,6 +85,8 @@ export interface InfrastrukturSegmen {
   panjang?: number | null;
   panjang_meter_gis?: number | null;
   lebar?: number | null;
+  jenis_perkerasan?: string | null;
+  status_jalan?: string | null;
   kondisi?: KondisiSegmen | null;
   status_kondisi?: StatusKondisi | null;
   tahun_pembangunan?: number | null;

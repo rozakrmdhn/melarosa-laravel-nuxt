@@ -599,6 +599,8 @@ function handleTabClick(tab: 'table' | 'console') {
                   <th class="py-2 px-3">Kecamatan</th>
                   <th class="py-2 px-3 text-right">Panjang (m)</th>
                   <th class="py-2 px-3 text-right">Lebar (m)</th>
+                  <th class="py-2 px-3">Perkerasan</th>
+                  <th class="py-2 px-3">Status Jalan</th>
                   <th class="py-2 px-3">Kondisi</th>
                   <th class="py-2 px-3">Status Verifikasi</th>
                   <th class="py-2 px-3 text-center">Aksi</th>
@@ -645,6 +647,12 @@ function handleTabClick(tab: 'table' | 'console') {
                   </td>
                   <td class="py-2 px-3 text-right font-mono whitespace-nowrap">
                     {{ row.lebar ? `${row.lebar} m` : '-' }}
+                  </td>
+                  <td class="py-2 px-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                    {{ row.jenis_perkerasan || '-' }}
+                  </td>
+                  <td class="py-2 px-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                    {{ row.status_jalan || '-' }}
                   </td>
                   <td class="py-2 px-3 whitespace-nowrap">
                     <UBadge

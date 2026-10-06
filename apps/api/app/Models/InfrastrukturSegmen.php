@@ -33,6 +33,8 @@ class InfrastrukturSegmen extends Model
         'geom',
         'panjang',
         'lebar',
+        'jenis_perkerasan',
+        'status_jalan',
         'kondisi',
         'status_kondisi',
         'tahun_pembangunan',

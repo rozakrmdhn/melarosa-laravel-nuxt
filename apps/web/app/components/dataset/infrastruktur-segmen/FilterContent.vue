@@ -123,6 +123,7 @@ const activeFiltersCount = computed(() => {
     if (props.selectedKondisi) count++;
   } else {
     if (props.selectedTipe) count++;
+    if (props.selectedPerkerasan) count++;
     if (props.selectedKondisi) count++;
     if (props.selectedStatusVerifikasi) count++;
   }
@@ -188,6 +189,23 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
             placeholder="Pilih tipe infrastruktur"
             class="w-full"
             @update:model-value="handleTipeChange"
+          />
+        </div>
+
+        <!-- Jenis Perkerasan -->
+        <div class="space-y-1.5">
+          <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+            Jenis Perkerasan
+          </label>
+          <USelectMenu
+            :model-value="selectedPerkerasan || 'ALL'"
+            :items="perkerasanOptions"
+            value-key="value"
+            label-key="label"
+            :size="isMobile ? 'sm' : 'xs'"
+            placeholder="Pilih perkerasan"
+            class="w-full"
+            @update:model-value="handlePerkerasanChange"
           />
         </div>
 

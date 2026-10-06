@@ -25,6 +25,8 @@ class InfrastrukturSegmenResource extends JsonResource
                 'panjang'            => $this->panjang,
                 'panjang_meter_gis'  => $this->panjang_meter_gis,
                 'lebar'              => $this->lebar,
+                'jenis_perkerasan'   => $this->jenis_perkerasan,
+                'status_jalan'       => $this->status_jalan,
                 'kondisi'            => $this->kondisi?->value ?? $this->kondisi,
                 'status_kondisi'     => $this->status_kondisi,
                 'tahun_pembangunan'  => $this->tahun_pembangunan,

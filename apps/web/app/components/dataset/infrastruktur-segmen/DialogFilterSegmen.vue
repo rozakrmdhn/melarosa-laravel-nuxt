@@ -8,6 +8,7 @@ interface Props {
   selectedTipe?: string | null;
   selectedKondisi?: string | null;
   selectedStatusVerifikasi?: string | null;
+  selectedPerkerasan?: string | null;
   modelKecamatan?: number | null;
   modelDesa?: number | null;
 }
@@ -18,6 +19,7 @@ withDefaults(defineProps<Props>(), {
   selectedTipe: null,
   selectedKondisi: null,
   selectedStatusVerifikasi: null,
+  selectedPerkerasan: null,
   modelKecamatan: null,
   modelDesa: null,
 });
@@ -27,6 +29,7 @@ const emit = defineEmits<{
   (e: 'update:selectedTipe', val: string | null): void;
   (e: 'update:selectedKondisi', val: string | null): void;
   (e: 'update:selectedStatusVerifikasi', val: string | null): void;
+  (e: 'update:selectedPerkerasan', val: string | null): void;
   (e: 'update:modelKecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
   (e: 'apply'): void;
@@ -57,12 +60,14 @@ function handleApply() {
         :selected-tipe="selectedTipe"
         :selected-kondisi="selectedKondisi"
         :selected-status-verifikasi="selectedStatusVerifikasi"
+        :selected-perkerasan="selectedPerkerasan"
         :model-kecamatan="modelKecamatan"
         :model-desa="modelDesa"
         :is-mobile="false"
         @update:selected-tipe="emit('update:selectedTipe', $event)"
         @update:selected-kondisi="emit('update:selectedKondisi', $event)"
         @update:selected-status-verifikasi="emit('update:selectedStatusVerifikasi', $event)"
+        @update:selected-perkerasan="emit('update:selectedPerkerasan', $event)"
         @update:model-kecamatan="emit('update:modelKecamatan', $event)"
         @update:model-desa="emit('update:modelDesa', $event)"
         @apply="handleApply"

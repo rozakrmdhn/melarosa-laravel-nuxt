@@ -53,6 +53,8 @@ const editForm = reactive<Partial<InfrastrukturSegmen>>({
   tipe_kode: '',
   panjang: null,
   lebar: null,
+  jenis_perkerasan: '',
+  status_jalan: '',
   kondisi: 'Baik',
   status_kondisi: 'Eksisting',
   tahun_pembangunan: new Date().getFullYear(),
@@ -107,6 +109,8 @@ watch(
       editForm.tipe_kode = seg.tipe_kode || '';
       editForm.panjang = seg.panjang ?? seg.panjang_meter_gis ?? null;
       editForm.lebar = seg.lebar ?? null;
+      editForm.jenis_perkerasan = seg.jenis_perkerasan || '';
+      editForm.status_jalan = seg.status_jalan || '';
       editForm.kondisi = seg.kondisi || 'Baik';
       editForm.status_kondisi = seg.status_kondisi || 'Eksisting';
       editForm.tahun_pembangunan = seg.tahun_pembangunan || new Date().getFullYear();
@@ -140,6 +144,21 @@ const kondisiItems = [
   { label: 'Sedang', value: 'Sedang' },
   { label: 'Rusak Ringan', value: 'Rusak Ringan' },
   { label: 'Rusak Berat', value: 'Rusak Berat' },
+];
+
+const perkerasanItems = [
+  { label: 'Beton Cor', value: 'Beton Cor' },
+  { label: 'Aspal', value: 'Aspal' },
+  { label: 'Paving', value: 'Paving' },
+  { label: 'Makadam', value: 'Makadam' },
+  { label: 'Tanah', value: 'Tanah' },
+  { label: 'Lainnya', value: 'Lainnya' },
+];
+
+const statusJalanItems = [
+  { label: 'Jalan Desa', value: 'Jalan Desa' },
+  { label: 'Jalan Poros Desa', value: 'Jalan Poros Desa' },
+  { label: 'Jalan Kabupaten', value: 'Jalan Kabupaten' },
 ];
 
 function formatRupiah(val?: number | null) {
@@ -438,6 +457,8 @@ function handleSaveEdit() {
                     ['Kecamatan', selectedSegmen.kecamatan],
                     ['Panjang (GIS)', `${Number(selectedSegmen.panjang_meter_gis ?? selectedSegmen.panjang ?? 0).toLocaleString('id-ID')} m`],
                     ['Lebar Fisik', selectedSegmen.lebar ? `${selectedSegmen.lebar} m` : '-'],
+                    ['Jenis Perkerasan', selectedSegmen.jenis_perkerasan],
+                    ['Status Jalan', selectedSegmen.status_jalan],
                     ['Kondisi', selectedSegmen.kondisi],
                     ['Status Kondisi', selectedSegmen.status_kondisi],
                     ['Sumber Dana', selectedSegmen.sumber_dana],
@@ -572,6 +593,32 @@ function handleSaveEdit() {
                     <UInputNumber
                       v-model="editForm.tahun_pembangunan"
                       placeholder="Contoh: 2024"
+                      size="sm"
+                      class="w-full"
+                    />
+                  </UFormField>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <UFormField label="Jenis Perkerasan" size="sm">
+                    <USelectMenu
+                      v-model="editForm.jenis_perkerasan"
+                      :items="perkerasanItems"
+                      value-key="value"
+                      label-key="label"
+                      placeholder="Pilih perkerasan..."
+                      size="sm"
+                      class="w-full"
+                    />
+                  </UFormField>
+
+                  <UFormField label="Status Jalan" size="sm">
+                    <USelectMenu
+                      v-model="editForm.status_jalan"
+                      :items="statusJalanItems"
+                      value-key="value"
+                      label-key="label"
+                      placeholder="Pilih status..."
                       size="sm"
                       class="w-full"
                     />

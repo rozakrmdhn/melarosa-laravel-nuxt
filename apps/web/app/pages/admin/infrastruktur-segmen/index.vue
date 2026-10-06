@@ -257,6 +257,7 @@ function toggleAllPanels() {
 
 // ─── Filter State & Query Sync ────────────────────────────────────────────────
 const filterTipe = ref<string | null>((route.query.tipe as string) || null);
+const filterPerkerasan = ref<string | null>((route.query.perkerasan as string) || null);
 const filterKondisi = ref<string | null>((route.query.kondisi as string) || null);
 const filterStatusVerifikasi = ref<string | null>((route.query.status as string) || null);
 
@@ -308,6 +309,7 @@ watch(
 const activeFilterCount = computed(() => {
   let count = 0;
   if (filterTipe.value) count++;
+  if (filterPerkerasan.value) count++;
   if (filterKondisi.value) count++;
   if (filterStatusVerifikasi.value) count++;
   if (filterKecamatan.value) count++;
@@ -318,6 +320,7 @@ const activeFilterCount = computed(() => {
 function syncQueryToUrl() {
   const query: Record<string, string> = {};
   if (filterTipe.value) query.tipe = filterTipe.value;
+  if (filterPerkerasan.value) query.perkerasan = filterPerkerasan.value;
   if (filterKondisi.value) query.kondisi = filterKondisi.value;
   if (filterStatusVerifikasi.value) query.status = filterStatusVerifikasi.value;
 
@@ -403,6 +406,7 @@ const filterJalanPerkerasan = ref<string | null>(null);
 const activeSegmenFilterCount = computed(() => {
   let count = 0;
   if (filterTipe.value) count++;
+  if (filterPerkerasan.value) count++;
   if (filterKondisi.value) count++;
   if (filterStatusVerifikasi.value) count++;
   if (filterKecamatan.value) count++;
@@ -666,6 +670,7 @@ async function loadSummary(shouldFitBounds = false) {
   try {
     const params: Record<string, any> = {};
     if (filterTipe.value) params.tipe_kode = filterTipe.value;
+    if (filterPerkerasan.value) params.jenis_perkerasan = filterPerkerasan.value;
     if (filterKondisi.value) params.kondisi = filterKondisi.value;
     if (filterStatusVerifikasi.value) params.status_verifikasi = filterStatusVerifikasi.value;
     if (filterKecamatan.value) params.id_kecamatan = filterKecamatan.value;
@@ -697,6 +702,7 @@ async function loadTable() {
       per_page: tablePerPage.value,
     };
     if (filterTipe.value) params.tipe_kode = filterTipe.value;
+    if (filterPerkerasan.value) params.jenis_perkerasan = filterPerkerasan.value;
     if (filterKondisi.value) params.kondisi = filterKondisi.value;
     if (filterStatusVerifikasi.value) params.status_verifikasi = filterStatusVerifikasi.value;
     if (filterKecamatan.value) params.id_kecamatan = filterKecamatan.value;
@@ -761,6 +767,7 @@ function resetFilters() {
   }
 
   filterTipe.value = null;
+  filterPerkerasan.value = null;
   filterKondisi.value = null;
   filterStatusVerifikasi.value = null;
   tableSearch.value = '';
@@ -774,7 +781,7 @@ function resetFilters() {
 let programmaticPageReset = false;
 
 // Watch filters: reset page, sync URL, refresh once and fitbounds to filtered dataset
-watch([filterTipe, filterKondisi, filterStatusVerifikasi, filterKecamatan, filterDesa], () => {
+watch([filterTipe, filterPerkerasan, filterKondisi, filterStatusVerifikasi, filterKecamatan, filterDesa], () => {
   programmaticPageReset = true;
   tablePage.value = 1;
   programmaticPageReset = false;
@@ -806,6 +813,7 @@ watch(
   () => route.query,
   (newQ) => {
     filterTipe.value = (newQ.tipe as string) || null;
+    filterPerkerasan.value = (newQ.perkerasan as string) || null;
     filterKondisi.value = (newQ.kondisi as string) || null;
     filterStatusVerifikasi.value = (newQ.status as string) || null;
 
@@ -998,6 +1006,8 @@ const createForm = reactive({
   plotting_id: null as string | null,
   panjang: 0,
   lebar: 3.5,
+  jenis_perkerasan: 'Aspal',
+  status_jalan: 'Jalan Desa',
   kondisi: 'Baik' as any,
   status_kondisi: 'Eksisting' as any,
   tahun_pembangunan: new Date().getFullYear(),
@@ -1088,6 +1098,8 @@ async function handleConfirmCreate() {
       plotting_id: createForm.plotting_id,
       panjang: createForm.panjang,
       lebar: createForm.lebar,
+      jenis_perkerasan: createForm.jenis_perkerasan,
+      status_jalan: createForm.status_jalan,
       kondisi: createForm.kondisi,
       status_kondisi: createForm.status_kondisi,
       tahun_pembangunan: createForm.tahun_pembangunan,
@@ -2193,11 +2205,12 @@ onMounted(async () => {
       v-model:active-layer-id="activeLayerId"
       :tipe-list="tipeList"
       v-model:selected-tipe="filterTipe"
+      v-model:selected-perkerasan="filterPerkerasan"
       v-model:selected-kondisi="filterKondisi"
       v-model:selected-status-verifikasi="filterStatusVerifikasi"
       v-model:model-kecamatan="filterKecamatan"
       v-model:model-desa="filterDesa"
-      :segmen-filter-count="activeFiltersCount"
+      :segmen-filter-count="activeSegmenFilterCount"
       v-model:jalan-perkerasan="filterJalanPerkerasan"
       v-model:jalan-kondisi="filterJalanKondisi"
       v-model:jalan-kecamatan="filterJalanKecamatan"
@@ -2319,6 +2332,26 @@ onMounted(async () => {
               <USelectMenu
                 v-model="createForm.kondisi"
                 :items="['Baik', 'Sedang', 'Rusak Ringan', 'Rusak Berat']"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <UFormField label="Jenis Perkerasan" size="sm">
+              <USelectMenu
+                v-model="createForm.jenis_perkerasan"
+                :items="['Beton Cor', 'Aspal', 'Paving', 'Makadam', 'Tanah']"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+
+            <UFormField label="Status Jalan" size="sm">
+              <USelectMenu
+                v-model="createForm.status_jalan"
+                :items="['Jalan Desa', 'Jalan Poros Desa', 'Jalan Kabupaten']"
                 size="sm"
                 class="w-full"
               />

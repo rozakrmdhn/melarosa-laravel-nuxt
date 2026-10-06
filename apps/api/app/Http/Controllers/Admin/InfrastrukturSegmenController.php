@@ -64,6 +64,16 @@ class InfrastrukturSegmenController extends Controller
             $baseQuery->where('infrastruktur_segmen.kondisi', $request->input('kondisi'));
         }
 
+        // Filter jenis perkerasan
+        if ($request->filled('jenis_perkerasan')) {
+            $baseQuery->where('infrastruktur_segmen.jenis_perkerasan', $request->input('jenis_perkerasan'));
+        }
+
+        // Filter status jalan
+        if ($request->filled('status_jalan')) {
+            $baseQuery->where('infrastruktur_segmen.status_jalan', $request->input('status_jalan'));
+        }
+
         // Filter status kondisi (Eksisting / Riwayat)
         if ($request->filled('status_kondisi')) {
             $baseQuery->where('infrastruktur_segmen.status_kondisi', $request->input('status_kondisi'));
@@ -205,6 +215,8 @@ class InfrastrukturSegmenController extends Controller
                         'panjang'               => $segmen->panjang,
                         'panjang_meter_gis'     => $segmen->panjang_meter_gis,
                         'lebar'                 => $segmen->lebar,
+                        'jenis_perkerasan'      => $segmen->jenis_perkerasan,
+                        'status_jalan'          => $segmen->status_jalan,
                         'kondisi'               => $segmen->kondisi?->value ?? $segmen->kondisi,
                         'status_kondisi'        => $segmen->status_kondisi,
                         'tahun_pembangunan'     => $segmen->tahun_pembangunan,

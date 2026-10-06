@@ -19,6 +19,8 @@ class StoreInfrastrukturSegmenRequest extends FormRequest
             'namobj'             => ['nullable', 'string', 'max:255'],
             'panjang'            => ['nullable', 'numeric', 'min:0'],
             'lebar'              => ['nullable', 'numeric', 'min:0'],
+            'jenis_perkerasan'   => ['nullable', 'string', 'max:100'],
+            'status_jalan'       => ['nullable', 'string', 'max:100'],
             'kondisi'            => ['nullable', 'string', 'in:Baik,Sedang,Rusak Ringan,Rusak Berat'],
             'status_kondisi'     => ['nullable', 'string', 'in:Eksisting,Riwayat'],
             'tahun_pembangunan'  => ['nullable', 'integer', 'min:1900', 'max:2100'],

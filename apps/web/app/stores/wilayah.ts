@@ -30,10 +30,21 @@ export const useWilayahStore = defineStore('wilayah', () => {
 
   /**
    * Fetch daftar kecamatan dengan in-memory cache.
-   * Hanya memanggil API satu kali selama aplikasi aktif.
+   * Hanya memanggil API satu kali selama aplikasi aktif, kecuali jika cache kedaluwarsa/berasal dari sesi user terbatas.
    */
   async function getKecamatanList(forceRefresh = false): Promise<KecamatanItem[]> {
-    if (!forceRefresh && isKecamatanLoaded.value && kecamatanList.value.length > 0) {
+    const auth = useAuthStore();
+    const isUnrestrictedUser =
+      (auth.user?.roles ?? []).includes('admin') ||
+      (auth.user?.roles ?? []).includes('verifierBappeda') ||
+      (auth.user?.roles ?? []).includes('verifikator-bappeda') ||
+      (!auth.user?.id_kecamatan && !auth.user?.id_desa && !!auth.user?.uuid);
+
+    // Jika user saat ini adalah admin/bappeda/unrestricted tapi cache hanya memiliki <= 1 kecamatan,
+    // maka cache berasal dari akun kecamatan sebelumnya. Paksa refresh data lengkap (28 kecamatan).
+    const isStaleRestrictedCache = isUnrestrictedUser && isKecamatanLoaded.value && kecamatanList.value.length <= 1;
+
+    if (!forceRefresh && !isStaleRestrictedCache && isKecamatanLoaded.value && kecamatanList.value.length > 0) {
       return kecamatanList.value;
     }
 

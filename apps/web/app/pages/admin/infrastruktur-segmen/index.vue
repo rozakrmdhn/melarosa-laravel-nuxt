@@ -1347,10 +1347,18 @@ const isSymbologyDialogOpen = ref(false);
 export type MobileDrawerTabType = 'layer' | 'symbology' | 'filter' | 'table' | 'inspector';
 const mobileDrawerOpen = ref(false);
 const mobileDrawerTab = ref<MobileDrawerTabType>('layer');
+const mobileDrawerSnap = ref<'peek' | 'full'>('peek');
 
 function openMobileTab(tab: MobileDrawerTabType) {
+  if (!mobileDrawerOpen.value) {
+    if (tab === 'table' || tab === 'filter') {
+      mobileDrawerSnap.value = 'full';
+    } else {
+      mobileDrawerSnap.value = 'peek';
+    }
+    mobileDrawerOpen.value = true;
+  }
   mobileDrawerTab.value = tab;
-  mobileDrawerOpen.value = true;
   if (tab === 'table' && tableRows.value.length === 0) {
     loadTable();
   }
@@ -1358,6 +1366,7 @@ function openMobileTab(tab: MobileDrawerTabType) {
 
 function switchMobileTab(tab: MobileDrawerTabType) {
   mobileDrawerTab.value = tab;
+  // Catatan: mobileDrawerSnap sengaja dipertahankan agar tinggi sheet tidak berubah saat berganti tab
   if (tab === 'table' && tableRows.value.length === 0) {
     loadTable();
   }
@@ -1975,7 +1984,7 @@ onMounted(async () => {
     <!-- ═══ MOBILE BOTTOM SHEET ═══════════════════════════════════════════════ -->
     <MobileBottomSheet
       v-model:open="mobileDrawerOpen"
-      :initial-snap="mobileDrawerTab === 'filter' || mobileDrawerTab === 'table' || mobileDrawerTab === 'symbology' ? 'full' : 'peek'"
+      v-model:snap-level="mobileDrawerSnap"
       :title="
         mobileDrawerTab === 'layer'
           ? 'Daftar Layer & Data'

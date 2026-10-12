@@ -58,6 +58,7 @@ class InfrastrukturPermissionSeeder extends Seeder
 
         // Role verifierBappeda: Mengelola seluruh segmen dan verifikasi tingkat Bappeda
         $verifierBappeda->syncPermissions([
+            'dashboard-view',
             'infrastruktur-tipe-view',
             'infrastruktur-tipe-manage',
             'ref-sumber-dana-view',
@@ -71,10 +72,14 @@ class InfrastrukturPermissionSeeder extends Seeder
             'infrastruktur-segmen-verify-bappeda',
             'monitoring-realisasi-view',
             'monitoring-realisasi-manage',
+            'batas-kecamatan-view',
+            'batas-desa-view',
+            'jalan-poros-desa-view',
         ]);
 
         // Role verifierKecamatan: Mengelola segmen di kecamatannya dan verifikasi seluruh segmen di kecamatannya
         $verifierKecamatan->syncPermissions([
+            'dashboard-view',
             'infrastruktur-tipe-view',
             'ref-sumber-dana-view',
             'plotting-anggaran-view',
@@ -83,6 +88,9 @@ class InfrastrukturPermissionSeeder extends Seeder
             'infrastruktur-segmen-update',
             'infrastruktur-segmen-verify-kecamatan',
             'monitoring-realisasi-view',
+            'batas-kecamatan-view',
+            'batas-desa-view',
+            'jalan-poros-desa-view',
         ]);
     }
 }

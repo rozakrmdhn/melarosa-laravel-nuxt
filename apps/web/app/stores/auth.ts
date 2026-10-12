@@ -39,6 +39,19 @@ export const useAuthStore = defineStore('auth', () => {
 
   const user = ref(<User>{});
 
+  function resetStoresAndCache(): void {
+    try {
+      clearNuxtData();
+    } catch {
+      // Ignore error if invoked outside Nuxt context
+    }
+    try {
+      useWilayahStore().invalidateCache();
+    } catch {
+      // Ignore if wilayahStore not yet initialized
+    }
+  }
+
   async function logout(): Promise<void> {
     const toast = useToast();
     try {
@@ -59,6 +72,9 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUser(): Promise<void> {
     try {
       const res = await $http<{ user: User }>('user');
+      if (user.value?.uuid && res.user?.uuid && user.value.uuid !== res.user.uuid) {
+        resetStoresAndCache();
+      }
       user.value = res.user;
     } catch {
       // ...
@@ -71,12 +87,14 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(): Promise<void> {
     loggedCookie.value = '1';
+    resetStoresAndCache();
     await fetchUser();
   }
 
   function reset(): void {
     loggedCookie.value = null;
-    user.value = <User>{}
+    user.value = <User>{};
+    resetStoresAndCache();
   }
 
   function hasRole(name: string): boolean {

@@ -1,7 +1,7 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 definePageMeta({
   middleware: ["auth", "permission"],
-  permission: "dashboard.view",
+  permission: "dashboard-view",
 });
 
 const auth = useAuthStore();
@@ -43,7 +43,7 @@ const stats = computed(() => {
       icon: "i-heroicons-shield-check",
       to: "/admin/roles",
       description: "Configured access roles",
-      permission: "roles.view",
+      permission: "roles-view",
     },
     {
       title: "Permissions",
@@ -73,7 +73,7 @@ const quickLinks = computed(() => {
       icon: "i-heroicons-shield-check",
       to: "/admin/roles",
       cta: "Manage Roles",
-      permission: "roles.view",
+      permission: "roles-view",
     },
     {
       title: "System Permissions",

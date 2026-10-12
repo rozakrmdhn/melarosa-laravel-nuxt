@@ -135,15 +135,32 @@ const kecamatanList = computed(() => kecamatanResponse.value?.data || []);
 // Map Series Navigation State
 const selectedKecamatanId = ref<number | null>(null);
 
-// Kunci pemilihan kecamatan jika user dibatasi wilayah
+// Kunci pemilihan kecamatan jika user dibatasi wilayah, atau reset jika admin / tidak dibatasi
 watch(
-  userKecamatanId,
-  (newVal) => {
-    if (newVal) {
-      selectedKecamatanId.value = newVal;
+  [userKecamatanId, isWilayahRestricted],
+  ([newKecId, restricted]) => {
+    if (restricted && newKecId) {
+      selectedKecamatanId.value = newKecId;
+    } else if (!restricted) {
+      selectedKecamatanId.value = null;
     }
   },
   { immediate: true }
+);
+
+// Jika sesi pengguna berganti (misal login akun lain di SPA), refresh seluruh data
+watch(
+  () => auth.user?.uuid,
+  (newUuid, oldUuid) => {
+    if (newUuid && oldUuid && newUuid !== oldUuid) {
+      if (!isWilayahRestricted.value) {
+        selectedKecamatanId.value = null;
+      }
+      refreshSummary();
+      refreshKecamatan();
+      refreshTable();
+    }
+  }
 );
 
 const selectedKecamatan = computed(() => {

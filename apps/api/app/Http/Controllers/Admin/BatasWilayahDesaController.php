@@ -56,7 +56,8 @@ class BatasWilayahDesaController extends Controller
         if ($format === 'summary') {
             $whereClause = "";
             $bindings = [];
-            if ($user && !$user->hasRole('admin')) {
+            $isUnrestricted = !$user || $user->hasAnyRole(['admin', 'verifierBappeda', 'verifikator-bappeda']) || (!$user->id_kecamatan && !$user->id_desa);
+            if (!$isUnrestricted) {
                 if ($user->id_desa) {
                     $whereClause = "WHERE id = ?";
                     $bindings = [$user->id_desa];
@@ -92,10 +93,11 @@ class BatasWilayahDesaController extends Controller
         }
 
         if ($format === 'series' || $format === 'options') {
+            $isUnrestricted = !$user || $user->hasAnyRole(['admin', 'verifierBappeda', 'verifikator-bappeda']) || (!$user->id_kecamatan && !$user->id_desa);
             $desaList = DB::table('bataswilayah_desa')
                 ->when($request->filled('id_kecamatan'), fn ($q) => $q->where('id_kecamatan', (int) $request->query('id_kecamatan')))
-                ->when($user && !$user->hasRole('admin') && $user->id_desa, fn ($q) => $q->where('id', $user->id_desa))
-                ->when($user && !$user->hasRole('admin') && !$user->id_desa && $user->id_kecamatan, fn ($q) => $q->where('id_kecamatan', $user->id_kecamatan))
+                ->when(!$isUnrestricted && $user->id_desa, fn ($q) => $q->where('id', $user->id_desa))
+                ->when(!$isUnrestricted && !$user->id_desa && $user->id_kecamatan, fn ($q) => $q->where('id_kecamatan', $user->id_kecamatan))
                 ->select(['id', 'id_kecamatan', 'nama_desa', 'nama_pimpinan'])
                 ->orderBy('nama_desa', 'asc')
                 ->get();

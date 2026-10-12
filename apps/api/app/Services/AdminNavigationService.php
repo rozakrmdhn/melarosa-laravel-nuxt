@@ -17,13 +17,13 @@ class AdminNavigationService
                 'icon' => 'i-lucide-inbox',
                 'to' => '/admin',
                 'exact' => true,
-                'permission' => ['dashboard.view'],
+                'permission' => ['dashboard-view'],
             ],
             [
                 'label' => 'User Management',
                 'icon' => 'i-lucide-users',
                 'to' => '/admin/permissions',
-                'permission' => ['permissions-view', 'roles.view', 'users-view'],
+                'permission' => ['permissions-view', 'roles-view', 'users-view'],
                 'children' => [
                     [
                         'label' => 'Hak Akses',
@@ -35,7 +35,7 @@ class AdminNavigationService
                         'label' => 'Akses Group',
                         'icon' => 'i-lucide-shield',
                         'to' => '/admin/roles',
-                        'permission' => ['roles.view', 'roles.manage'],
+                        'permission' => ['roles-view', 'roles-manage'],
                     ],
                     [
                         'label' => 'Pengguna',

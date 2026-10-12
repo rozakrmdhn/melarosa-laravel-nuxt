@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 interface Permission {
   id: number;
   name: string;
@@ -33,12 +33,12 @@ const { can } = usePermission();
 
 definePageMeta({
   middleware: ["auth", "permission"],
-  permission: "roles.view",
+  permission: "roles-view",
 });
 
-const canCreate = computed(() => can('roles.create') || can('roles.manage'));
-const canEdit = computed(() => can('roles.edit') || can('roles.manage'));
-const canDelete = computed(() => can('roles.delete') || can('roles.manage'));
+const canCreate = computed(() => can('roles-create') || can('roles-manage'));
+const canEdit = computed(() => can('roles-update') || can('roles-manage'));
+const canDelete = computed(() => can('roles-delete') || can('roles-manage'));
 const hasAnyAction = computed(() => canEdit.value || canDelete.value);
 
 useSeoMeta({
@@ -66,28 +66,61 @@ const permissionSearch = ref("");
 
 // Module group metadata
 const groupMetaMap: Record<string, { label: string; icon: string }> = {
+  dashboard: { label: "Dashboard", icon: "i-heroicons-home" },
   users: { label: "Manajemen Pengguna", icon: "i-heroicons-users" },
   roles: { label: "Akses Grup (Roles)", icon: "i-heroicons-shield-check" },
   permissions: { label: "Hak Akses (Permissions)", icon: "i-heroicons-key" },
   settings: { label: "Pengaturan Sistem", icon: "i-heroicons-cog-6-tooth" },
+  "audit-logs": { label: "Log Audit Sistem", icon: "i-heroicons-clipboard-document-list" },
+  layers: { label: "Katalog Layer Spasial", icon: "i-heroicons-square-3-stack-3d" },
   "batas-kecamatan": { label: "Batas Wilayah Kecamatan", icon: "i-heroicons-map" },
   "batas-desa": { label: "Batas Wilayah Desa", icon: "i-heroicons-map" },
   "jalan-poros-desa": { label: "Jalan Poros Desa", icon: "i-heroicons-arrows-pointing-out" },
-  dataset: { label: "Dataset Spasial", icon: "i-heroicons-circle-stack" },
+  "infrastruktur-tipe": { label: "Tipe Infrastruktur", icon: "i-heroicons-tag" },
+  "ref-sumber-dana": { label: "Sumber Dana", icon: "i-heroicons-banknotes" },
+  "plotting-anggaran": { label: "Plotting Anggaran", icon: "i-heroicons-currency-dollar" },
+  "infrastruktur-segmen": { label: "Segmen & Verifikasi Spasial", icon: "i-heroicons-cube" },
+  "monitoring-realisasi": { label: "Monitoring & Realisasi", icon: "i-heroicons-document-check" },
 };
 
+const modulePrefixes = [
+  "infrastruktur-segmen",
+  "infrastruktur-tipe",
+  "ref-sumber-dana",
+  "plotting-anggaran",
+  "monitoring-realisasi",
+  "batas-kecamatan",
+  "batas-desa",
+  "jalan-poros-desa",
+  "audit-logs",
+  "users",
+  "roles",
+  "permissions",
+  "settings",
+  "layers",
+  "dashboard",
+];
+
 function getPermissionGroupKey(name: string): string {
+  for (const prefix of modulePrefixes) {
+    if (name.startsWith(prefix)) {
+      return prefix;
+    }
+  }
   if (name.includes(".")) {
     return name.split(".")[0];
   }
   if (name.includes("-")) {
-    const lastDash = name.lastIndexOf("-");
-    return name.slice(0, lastDash);
+    return name.substring(0, name.lastIndexOf("-"));
   }
   return "general";
 }
 
 function getPermissionAction(name: string): string {
+  const groupKey = getPermissionGroupKey(name);
+  if (name.startsWith(groupKey + "-")) {
+    return name.substring(groupKey.length + 1);
+  }
   if (name.includes(".")) {
     return name.split(".").slice(1).join(".");
   }
@@ -499,14 +532,14 @@ const columns = computed(() => [
                   <!-- Delete Role Action -->
                   <UTooltip
                     v-if="canDelete"
-                    :text="role.name === 'admin' ? 'Role sistem tidak dapat dihapus' : 'Hapus Akses Grup'"
+                    :text="role.name === 'admin' ? 'Role sistem tidak dapat dihapus' : ((role.users_count > 0) ? 'Pindahkan pengguna sebelum menghapus' : 'Hapus Akses Grup')"
                   >
                     <UButton
                       icon="i-heroicons-trash"
                       size="xs"
                       color="neutral"
                       variant="ghost"
-                      :disabled="role.name === 'admin'"
+                      :disabled="role.name === 'admin' || (role.users_count > 0)"
                       class="hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 cursor-pointer"
                       @click="confirmDelete(role)"
                     />

@@ -55,11 +55,11 @@ Route::prefix('api/v1')->group(function () {
                 ]);
             })->name('admin.navigation');
 
-            Route::get('roles', [RoleController::class, 'index'])->middleware('permission:roles.view')->name('admin.roles.index');
-            Route::get('roles/{role}', [RoleController::class, 'show'])->middleware('permission:roles.view')->name('admin.roles.show');
-            Route::post('roles', [RoleController::class, 'store'])->middleware('permission:roles.manage|roles.create')->name('admin.roles.store');
-            Route::put('roles/{role}', [RoleController::class, 'update'])->middleware('permission:roles.manage|roles.edit')->name('admin.roles.update');
-            Route::delete('roles/{role}', [RoleController::class, 'destroy'])->middleware('permission:roles.manage|roles.delete')->name('admin.roles.destroy');
+            Route::get('roles', [RoleController::class, 'index'])->middleware('permission:roles-view')->name('admin.roles.index');
+            Route::get('roles/{role}', [RoleController::class, 'show'])->middleware('permission:roles-view')->name('admin.roles.show');
+            Route::post('roles', [RoleController::class, 'store'])->middleware('permission:roles-manage|roles-create')->name('admin.roles.store');
+            Route::put('roles/{role}', [RoleController::class, 'update'])->middleware('permission:roles-manage|roles-update')->name('admin.roles.update');
+            Route::delete('roles/{role}', [RoleController::class, 'destroy'])->middleware('permission:roles-manage|roles-delete')->name('admin.roles.destroy');
 
             Route::get('permissions', [PermissionController::class, 'index'])->middleware('permission:permissions-view')->name('admin.permissions.index');
             Route::post('permissions', [PermissionController::class, 'store'])->middleware('permission:permissions-manage|permissions-create')->name('admin.permissions.store');

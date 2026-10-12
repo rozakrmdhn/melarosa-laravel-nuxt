@@ -125,7 +125,7 @@ class BatasWilayahKecamatan extends Model
      */
     public function scopeForUser($query, ?User $user = null)
     {
-        if (!$user || $user->hasRole('admin')) {
+        if (!$user || $user->hasAnyRole(['admin', 'verifierBappeda', 'verifikator-bappeda']) || (!$user->id_kecamatan && !$user->id_desa)) {
             return $query;
         }
 

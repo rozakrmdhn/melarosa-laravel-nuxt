@@ -182,16 +182,35 @@ function getKecamatanName(kecId: number | null | undefined): string {
 const tableSearch = ref("");
 const tableKecamatanFilter = ref<number | null>(null);
 
-// Kunci filter kecamatan jika user dibatasi wilayah
+// Kunci filter kecamatan jika user dibatasi wilayah, atau reset jika admin / tidak dibatasi
 watch(
-  userKecamatanId,
-  (newVal) => {
-    if (newVal) {
-      selectedKecamatanId.value = newVal;
-      tableKecamatanFilter.value = newVal;
+  [userKecamatanId, isKecamatanRestricted],
+  ([newKecId, restricted]) => {
+    if (restricted && newKecId) {
+      selectedKecamatanId.value = newKecId;
+      tableKecamatanFilter.value = newKecId;
+    } else if (!restricted) {
+      selectedKecamatanId.value = null;
+      tableKecamatanFilter.value = null;
     }
   },
   { immediate: true }
+);
+
+// Jika sesi pengguna berganti (misal login akun lain di SPA), refresh seluruh data
+watch(
+  () => auth.user?.uuid,
+  (newUuid, oldUuid) => {
+    if (newUuid && oldUuid && newUuid !== oldUuid) {
+      if (!isKecamatanRestricted.value) {
+        selectedKecamatanId.value = null;
+        tableKecamatanFilter.value = null;
+      }
+      refreshSummary();
+      refreshKecamatan();
+      refreshTable();
+    }
+  }
 );
 const { data: tableDataResponse, status: tableStatus, refresh: refreshTable } = useHttp<{
   ok: boolean;

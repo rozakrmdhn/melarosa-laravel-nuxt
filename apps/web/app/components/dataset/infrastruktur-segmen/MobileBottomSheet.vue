@@ -8,6 +8,7 @@ const props = withDefaults(
     title?: string;
     icon?: string;
     initialSnap?: 'peek' | 'full';
+    snapLevel?: 'peek' | 'full';
   }>(),
   {
     open: false,
@@ -19,6 +20,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'update:open', val: boolean): void;
+  (e: 'update:snapLevel', val: SnapLevel): void;
   (e: 'expand'): void;
   (e: 'peek'): void;
 }>();
@@ -76,6 +78,16 @@ function onDrag(e: TouchEvent | MouseEvent) {
   dragDelta.value = clientY - dragStartY.value;
 }
 
+function setSnapLevel(level: SnapLevel) {
+  snapLevel.value = level;
+  emit('update:snapLevel', level);
+  if (level === 'full') {
+    emit('expand');
+  } else {
+    emit('peek');
+  }
+}
+
 function endDrag() {
   if (!isDragging.value) return;
   const delta = dragDelta.value;
@@ -87,13 +99,11 @@ function endDrag() {
     if (delta > DISMISS_PX) {
       emit('update:open', false);
     } else if (delta < SNAP_UP_PX) {
-      snapLevel.value = 'full';
-      emit('expand');
+      setSnapLevel('full');
     }
   } else if (snapLevel.value === 'full') {
     if (delta > SNAP_DOWN_PX) {
-      snapLevel.value = 'peek';
-      emit('peek');
+      setSnapLevel('peek');
     }
   }
 }
@@ -125,10 +135,24 @@ onUnmounted(() => {
 });
 
 watch(
-  () => props.open,
+  () => props.snapLevel,
   (val) => {
-    if (val) {
-      snapLevel.value = props.initialSnap || 'peek';
+    if (val && val !== snapLevel.value) {
+      snapLevel.value = val;
+    }
+  }
+);
+
+watch(
+  () => props.open,
+  (isOpen, wasOpen) => {
+    // Hanya atur snap saat sheet baru saja dibuka dari kondisi tertutup (closed -> open)
+    if (isOpen && !wasOpen) {
+      if (props.snapLevel) {
+        snapLevel.value = props.snapLevel;
+      } else if (props.initialSnap) {
+        setSnapLevel(props.initialSnap);
+      }
     }
   }
 );
@@ -136,7 +160,9 @@ watch(
 watch(
   () => props.initialSnap,
   (val) => {
-    if (val) {
+    // PENTING: Hanya sinkronkan initialSnap saat sheet sedang tertutup.
+    // Jika sheet sedang terbuka dan user berganti tab menu, tinggi sheet tetap stabil dipertahankan!
+    if (!props.open && val && !props.snapLevel) {
       snapLevel.value = val;
     }
   }
@@ -144,11 +170,9 @@ watch(
 
 function toggleSnap() {
   if (snapLevel.value === 'peek') {
-    snapLevel.value = 'full';
-    emit('expand');
+    setSnapLevel('full');
   } else {
-    snapLevel.value = 'peek';
-    emit('peek');
+    setSnapLevel('peek');
   }
 }
 

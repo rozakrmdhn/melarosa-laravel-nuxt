@@ -242,7 +242,7 @@ class AuditLogTest extends TestCase
             'status' => true,
         ]);
 
-        $permission = \Spatie\Permission\Models\Permission::firstOrCreate(['name' => 'roles.manage', 'guard_name' => 'web']);
+        $permission = \Spatie\Permission\Models\Permission::firstOrCreate(['name' => 'roles-manage', 'guard_name' => 'web']);
         $adminRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
         $adminRole->givePermissionTo($permission);
         $admin->assignRole($adminRole);

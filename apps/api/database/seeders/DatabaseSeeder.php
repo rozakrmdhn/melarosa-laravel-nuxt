@@ -19,13 +19,17 @@ class DatabaseSeeder extends Seeder
         // Reset cached roles and permissions
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
-        // Default permissions
+        // Default core permissions & spatial dataset
         $permissions = [
+            'dashboard-view',
             'users-view',
             'users-create',
             'users-update',
             'users-delete',
             'roles-view',
+            'roles-create',
+            'roles-update',
+            'roles-delete',
             'roles-manage',
             'permissions-view',
             'permissions-manage',
@@ -37,6 +41,22 @@ class DatabaseSeeder extends Seeder
             'layers-update',
             'layers-delete',
             'layers-manage',
+            'batas-kecamatan-view',
+            'batas-kecamatan-create',
+            'batas-kecamatan-update',
+            'batas-kecamatan-delete',
+            'batas-kecamatan-manage',
+            'batas-desa-view',
+            'batas-desa-create',
+            'batas-desa-update',
+            'batas-desa-delete',
+            'batas-desa-manage',
+            'jalan-poros-desa-view',
+            'jalan-poros-desa-create',
+            'jalan-poros-desa-update',
+            'jalan-poros-desa-delete',
+            'jalan-poros-desa-manage',
+            'jalan-poros-desa-split',
         ];
 
         foreach ($permissions as $permissionName) {
@@ -51,7 +71,7 @@ class DatabaseSeeder extends Seeder
         $adminRole->syncPermissions(Permission::all());
 
         // Give basic permissions to user
-        $userRole->syncPermissions(['users-view']);
+        $userRole->syncPermissions(['dashboard-view', 'users-view']);
 
         // Create or get admin user
         $adminUser = User::firstOrCreate(

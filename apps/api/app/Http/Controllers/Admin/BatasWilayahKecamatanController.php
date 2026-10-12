@@ -49,7 +49,8 @@ class BatasWilayahKecamatanController extends Controller
         if ($format === 'summary') {
             $whereClause = "";
             $bindings = [];
-            if ($user && !$user->hasRole('admin') && $user->id_kecamatan) {
+            $isUnrestricted = !$user || $user->hasAnyRole(['admin', 'verifierBappeda', 'verifikator-bappeda']) || (!$user->id_kecamatan && !$user->id_desa);
+            if (!$isUnrestricted && $user->id_kecamatan) {
                 $whereClause = "WHERE id = ?";
                 $bindings = [$user->id_kecamatan];
             }
@@ -82,7 +83,8 @@ class BatasWilayahKecamatanController extends Controller
         if ($format === 'series' || $format === 'options') {
             $whereClause = "";
             $bindings = [];
-            if ($user && !$user->hasRole('admin') && $user->id_kecamatan) {
+            $isUnrestricted = !$user || $user->hasAnyRole(['admin', 'verifierBappeda', 'verifikator-bappeda']) || (!$user->id_kecamatan && !$user->id_desa);
+            if (!$isUnrestricted && $user->id_kecamatan) {
                 $whereClause = "WHERE k.id = ?";
                 $bindings = [$user->id_kecamatan];
             }

@@ -182,10 +182,15 @@ class InfrastrukturSegmen extends Model
      */
     public function scopeWithGeoJson(Builder $query): Builder
     {
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+        $panjangMeterRaw = $isSqlite
+            ? 'ROUND(ST_Length(infrastruktur_segmen.geom), 2) as panjang_meter_gis'
+            : 'ROUND(ST_Length(infrastruktur_segmen.geom::geography)::numeric, 2) as panjang_meter_gis';
+
         return $query->select([
             'infrastruktur_segmen.*',
             DB::raw('ST_AsGeoJSON(infrastruktur_segmen.geom) as geojson'),
-            DB::raw('ROUND(ST_Length(infrastruktur_segmen.geom::geography)::numeric, 2) as panjang_meter_gis'),
+            DB::raw($panjangMeterRaw),
             DB::raw('ST_AsGeoJSON(ST_Centroid(infrastruktur_segmen.geom)) as centroid'),
         ]);
     }

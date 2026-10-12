@@ -1,5 +1,9 @@
 # Audit Logs
 
+Kembali ke indeks dokumentasi: [docs/README.md](../README.md)
+
+---
+
 ## Tujuan
 
 Menyediakan jejak aktivitas dan riwayat perubahan data penting pada sistem monitoring geospasial—termasuk perubahan geometri spasial, atribut wilayah/infrastruktur, serta manajemen akses pengguna—agar admin dan surveyor dapat menelusuri kronologi perubahan data.

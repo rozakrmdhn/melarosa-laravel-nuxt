@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -80,7 +81,9 @@ return new class extends Migration
             $table->timestampsTz();
 
             // Indeks
-            $table->spatialIndex('geom');
+            if (DB::getDriverName() !== 'sqlite') {
+                $table->spatialIndex('geom');
+            }
             $table->index('id_kecamatan');
             $table->index('id_desa');
             $table->index('tipe_kode');

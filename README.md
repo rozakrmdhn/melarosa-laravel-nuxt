@@ -267,6 +267,7 @@ melarosa-laravel-nuxt/
 
 ## Dokumentasi Tambahan
 
+- [Indeks & Panduan Dokumentasi Fitur (`docs/README.md`)](docs/README.md)
 - [Panduan Desain Antarmuka (`DESIGN.md`)](file:///c:/laragon/www/melarosa-laravel-nuxt/DESIGN.md)
 - [Dokumentasi Fitur Audit Trail (`docs/features/audit-logs.md`)](file:///c:/laragon/www/melarosa-laravel-nuxt/docs/features/audit-logs.md)
 - [Skema Monitoring Realisasi & Berita Acara (`monitoring_realisasi_schema.md`)](file:///c:/laragon/www/melarosa-laravel-nuxt/monitoring_realisasi_schema.md)

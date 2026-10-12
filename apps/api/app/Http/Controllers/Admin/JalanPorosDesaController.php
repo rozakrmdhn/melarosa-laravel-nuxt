@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Helpers\SpatialHelper;
 use App\Http\Controllers\Controller;
 use App\Models\JalanPorosDesa;
 use Illuminate\Http\JsonResponse;
@@ -49,13 +50,15 @@ class JalanPorosDesaController extends Controller
 
         $query = JalanPorosDesa::query()->forUser($user);
 
+        $likeOp = DB::connection()->getDriverName() === 'sqlite' ? 'like' : 'ilike';
+
         // Text search: nama_ruas, desa, kecamatan
         if ($request->filled('search')) {
             $search = '%' . trim($request->query('search')) . '%';
-            $query->where(function ($q) use ($search) {
-                $q->where('jalan_porosdesa.nama_ruas', 'ilike', $search)
-                  ->orWhere('jalan_porosdesa.desa', 'ilike', $search)
-                  ->orWhere('jalan_porosdesa.kecamatan', 'ilike', $search);
+            $query->where(function ($q) use ($search, $likeOp) {
+                $q->where('jalan_porosdesa.nama_ruas', $likeOp, $search)
+                  ->orWhere('jalan_porosdesa.desa', $likeOp, $search)
+                  ->orWhere('jalan_porosdesa.kecamatan', $likeOp, $search);
             });
         }
 
@@ -134,13 +137,15 @@ class JalanPorosDesaController extends Controller
             $summaryQuery = DB::table('jalan_porosdesa');
             $kondisiQuery = DB::table('jalan_porosdesa')->whereNotNull('kondisi');
 
-            $applyFilters = function ($q) use ($request) {
+            $likeOp = JalanPorosDesa::likeOperator();
+
+            $applyFilters = function ($q) use ($request, $likeOp) {
                 if ($request->filled('search')) {
                     $search = '%' . trim($request->query('search')) . '%';
-                    $q->where(function ($sub) use ($search) {
-                        $sub->where('nama_ruas', 'ilike', $search)
-                            ->orWhere('desa', 'ilike', $search)
-                            ->orWhere('kecamatan', 'ilike', $search);
+                    $q->where(function ($sub) use ($search, $likeOp) {
+                        $sub->where('nama_ruas', $likeOp, $search)
+                            ->orWhere('desa', $likeOp, $search)
+                            ->orWhere('kecamatan', $likeOp, $search);
                     });
                 }
                 if ($request->filled('kondisi')) {
@@ -154,7 +159,7 @@ class JalanPorosDesaController extends Controller
                     if (is_numeric($val)) {
                         $q->where('id_kecamatan', (int) $val);
                     } else {
-                        $q->where('kecamatan', 'ilike', $val);
+                        $q->where('kecamatan', $likeOp, $val);
                     }
                 } elseif ($request->filled('id_kecamatan')) {
                     $q->where('id_kecamatan', (int) $request->query('id_kecamatan'));
@@ -164,7 +169,7 @@ class JalanPorosDesaController extends Controller
                     if (is_numeric($val)) {
                         $q->where('id_desa', (int) $val);
                     } else {
-                        $q->where('desa', 'ilike', $val);
+                        $q->where('desa', $likeOp, $val);
                     }
                 } elseif ($request->filled('id_desa')) {
                     $q->where('id_desa', (int) $request->query('id_desa'));
@@ -174,21 +179,8 @@ class JalanPorosDesaController extends Controller
             $applyFilters($summaryQuery);
             $applyFilters($kondisiQuery);
 
-            $stats = $summaryQuery->selectRaw("
-                COUNT(*) as total_ruas,
-                COALESCE(ROUND(SUM(ST_Length(geom::geography))::numeric, 2), 0) as total_panjang_meter,
-                COALESCE(ROUND((SUM(ST_Length(geom::geography)) / 1000)::numeric, 3), 0) as total_panjang_km,
-                ST_XMin(ST_Extent(geom)) as min_x,
-                ST_YMin(ST_Extent(geom)) as min_y,
-                ST_XMax(ST_Extent(geom)) as max_x,
-                ST_YMax(ST_Extent(geom)) as max_y
-            ")->first();
-
-            $kondisiBreakdown = $kondisiQuery
-                ->selectRaw("kondisi, COUNT(*) as jumlah, ROUND(SUM(ST_Length(geom::geography))::numeric, 2) as panjang_meter, ROUND((SUM(ST_Length(geom::geography)) / 1000)::numeric, 3) as panjang_km")
-                ->groupBy('kondisi')
-                ->orderByDesc('jumlah')
-                ->get();
+            $stats = JalanPorosDesa::getSummaryStats($summaryQuery);
+            $kondisiBreakdown = JalanPorosDesa::getKondisiBreakdown($kondisiQuery);
 
             $maxKodeRuas = (int) DB::table('jalan_porosdesa')->max('kode_ruas');
 
@@ -210,30 +202,9 @@ class JalanPorosDesaController extends Controller
         }
 
         if ($format === 'table') {
-            // Lightweight query: only scalar attribute columns + centroid point (no full linestring geojson)
+            // Lightweight query via model scope: only scalar attribute columns + centroid point + computed length
             $perPage = min(max((int) $request->query('per_page', 15), 1), 100);
-
-            $tableQuery = (clone $query)->select([
-                'jalan_porosdesa.id',
-                'jalan_porosdesa.kode_ruas',
-                'jalan_porosdesa.nama_ruas',
-                'jalan_porosdesa.desa',
-                'jalan_porosdesa.kecamatan',
-                'jalan_porosdesa.panjang',
-                'jalan_porosdesa.lebar',
-                'jalan_porosdesa.perkerasan',
-                'jalan_porosdesa.kondisi',
-                'jalan_porosdesa.status_awal',
-                'jalan_porosdesa.status_eksisting',
-                'jalan_porosdesa.sumber_data',
-                'jalan_porosdesa.id_desa',
-                'jalan_porosdesa.id_kecamatan',
-                DB::raw('ROUND((ST_Length(jalan_porosdesa.geom::geography))::numeric, 2) as panjang_meter'),
-                DB::raw('ST_AsGeoJSON(ST_PointOnSurface(jalan_porosdesa.geom)) as centroid'),
-                DB::raw('ST_AsGeoJSON(jalan_porosdesa.geom) as geojson'),
-            ]);
-
-            $paginated = $tableQuery->orderBy('nama_ruas', 'asc')->paginate($perPage);
+            $paginated = (clone $query)->forTable()->orderBy('nama_ruas', 'asc')->paginate($perPage);
 
             return response()->json([
                 'ok'           => true,
@@ -363,8 +334,7 @@ class JalanPorosDesaController extends Controller
 
         $ruas->id_desa          = $validated['id_desa'] ?? null;
         $ruas->id_kecamatan     = $validated['id_kecamatan'] ?? null;
-        $pdo = DB::getPdo();
-        $ruas->geom             = DB::raw("ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(" . $pdo->quote($geoJsonString) . "), 4326))");
+        $ruas->geom             = SpatialHelper::geomFromGeoJsonRaw($geoJsonString);
         $ruas->save();
 
         $fresh = JalanPorosDesa::withGeoJson()->where('id', $ruas->id)->first();
@@ -439,8 +409,7 @@ class JalanPorosDesaController extends Controller
                 ? $validated['geometry']
                 : json_encode($validated['geometry']);
 
-            $pdo = DB::getPdo();
-            $ruas->geom = DB::raw("ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(" . $pdo->quote($geoJsonString) . "), 4326))");
+            $ruas->geom = SpatialHelper::geomFromGeoJsonRaw($geoJsonString);
         }
 
         $ruas->save();
@@ -518,13 +487,16 @@ class JalanPorosDesaController extends Controller
                 $p1 = $request->input('parts.0');
                 $p2 = $request->input('parts.1');
 
-                $geo1 = is_string($p1['geometry']) ? $p1['geometry'] : json_encode($p1['geometry']);
-                $geo2 = is_string($p2['geometry']) ? $p2['geometry'] : json_encode($p2['geometry']);
+                $geo1 = $p1['geometry'];
+                $geo2 = $p2['geometry'];
+
+                $panjang1 = JalanPorosDesa::calculateLength($geo1, (float) ($p1['panjang'] ?? 0));
+                $panjang2 = JalanPorosDesa::calculateLength($geo2, (float) ($p2['panjang'] ?? 0));
 
                 // Update Part 1 (existing record)
                 $ruas->nama_ruas = $p1['nama_ruas'] ?? ($ruas->nama_ruas . ' (Bagian 1)');
-                $ruas->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geo1')), 4326)");
-                $ruas->panjang = DB::raw("ROUND((ST_Length(ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geo1')), 4326)::geography))::numeric, 2)");
+                $ruas->geom = SpatialHelper::geomFromGeoJsonRaw($geo1);
+                $ruas->panjang = $panjang1;
                 $ruas->save();
 
                 // Create Part 2 (new record)
@@ -543,8 +515,8 @@ class JalanPorosDesaController extends Controller
                 $newRuas->status_awal = $ruas->status_awal;
                 $newRuas->status_eksisting = $ruas->status_eksisting;
                 $newRuas->sumber_data = $ruas->sumber_data;
-                $newRuas->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geo2')), 4326)");
-                $newRuas->panjang = DB::raw("ROUND((ST_Length(ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geo2')), 4326)::geography))::numeric, 2)");
+                $newRuas->geom = SpatialHelper::geomFromGeoJsonRaw($geo2);
+                $newRuas->panjang = $panjang2;
                 $newRuas->save();
             } else {
                 // Mode 2: Split by Point coordinates [lon, lat] using PostGIS spatial algorithms
@@ -602,7 +574,7 @@ class JalanPorosDesaController extends Controller
 
                 // 1. Update Part 1 (existing record)
                 $ruas->nama_ruas = $name1;
-                $ruas->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$part1Geo')), 4326)");
+                $ruas->geom = SpatialHelper::geomFromGeoJsonRaw($part1Geo);
                 $ruas->panjang = (float) $splitQuery->part1_panjang;
                 $ruas->save();
 
@@ -621,7 +593,7 @@ class JalanPorosDesaController extends Controller
                 $newRuas->status_awal = $ruas->status_awal;
                 $newRuas->status_eksisting = $ruas->status_eksisting;
                 $newRuas->sumber_data = $ruas->sumber_data;
-                $newRuas->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$part2Geo')), 4326)");
+                $newRuas->geom = SpatialHelper::geomFromGeoJsonRaw($part2Geo);
                 $newRuas->panjang = (float) $splitQuery->part2_panjang;
                 $newRuas->save();
             }

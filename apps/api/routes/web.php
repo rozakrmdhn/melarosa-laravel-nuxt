@@ -151,6 +151,19 @@ Route::prefix('api/v1')->group(function () {
             Route::put('monitoring-realisasi/{id}', [MonitoringRealisasiController::class, 'update'])->middleware('permission:monitoring-realisasi-manage')->name('admin.monitoring-realisasi.update');
             Route::delete('monitoring-realisasi/{id}', [MonitoringRealisasiController::class, 'destroy'])->middleware('permission:monitoring-realisasi-manage')->name('admin.monitoring-realisasi.destroy');
             Route::post('monitoring-realisasi/{id}/revisi', [MonitoringRealisasiController::class, 'revisi'])->middleware('permission:monitoring-realisasi-manage')->name('admin.monitoring-realisasi.revisi');
+
+            // Audit Logs
+            Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('permission:audit-logs-view|audit-logs-access|audit-logs-manage')->name('admin.audit-logs.index');
+            Route::get('audit-logs/{auditLog}', [AuditLogController::class, 'show'])->middleware('permission:audit-logs-view|audit-logs-access|audit-logs-manage')->name('admin.audit-logs.show');
+
+            // Layer Management
+            Route::get('layers', [LayerController::class, 'index'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.index');
+            Route::post('layers', [LayerController::class, 'store'])->middleware('permission:layers-create|layers-manage')->name('admin.layers.store');
+            Route::post('layers/reorder', [LayerController::class, 'reorder'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.reorder');
+            Route::get('layers/{layer}', [LayerController::class, 'show'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.show');
+            Route::put('layers/{layer}', [LayerController::class, 'update'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.update');
+            Route::delete('layers/{layer}', [LayerController::class, 'destroy'])->middleware('permission:layers-delete|layers-manage')->name('admin.layers.destroy');
+            Route::patch('layers/{layer}/toggle-active', [LayerController::class, 'toggleActive'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.toggle-active');
         });
     });
 

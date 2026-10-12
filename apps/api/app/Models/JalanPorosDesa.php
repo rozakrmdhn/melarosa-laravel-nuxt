@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Helpers\SpatialHelper;
 use App\Models\BatasWilayahDesa;
 use App\Models\BatasWilayahKecamatan;
 use App\Models\User;
@@ -130,9 +131,92 @@ class JalanPorosDesa extends Model
             'jalan_porosdesa.created_at',
             'jalan_porosdesa.updated_at',
             DB::raw('ST_AsGeoJSON(jalan_porosdesa.geom) as geojson'),
-            DB::raw('ROUND((ST_Length(jalan_porosdesa.geom::geography))::numeric, 2) as panjang_meter'),
+            DB::raw(SpatialHelper::lengthColumn('jalan_porosdesa.geom')),
             DB::raw('ST_AsGeoJSON(ST_PointOnSurface(jalan_porosdesa.geom)) as centroid'),
         ]);
+    }
+
+    /**
+     * Scope to select lightweight fields for data tables (scalar columns + centroid + length).
+     */
+    public function scopeForTable($query)
+    {
+        return $query->select([
+            'jalan_porosdesa.id',
+            'jalan_porosdesa.kode_ruas',
+            'jalan_porosdesa.nama_ruas',
+            'jalan_porosdesa.desa',
+            'jalan_porosdesa.kecamatan',
+            'jalan_porosdesa.panjang',
+            'jalan_porosdesa.lebar',
+            'jalan_porosdesa.perkerasan',
+            'jalan_porosdesa.kondisi',
+            'jalan_porosdesa.status_awal',
+            'jalan_porosdesa.status_eksisting',
+            'jalan_porosdesa.sumber_data',
+            'jalan_porosdesa.id_desa',
+            'jalan_porosdesa.id_kecamatan',
+            DB::raw(SpatialHelper::lengthColumn('jalan_porosdesa.geom')),
+            DB::raw('ST_AsGeoJSON(ST_PointOnSurface(jalan_porosdesa.geom)) as centroid'),
+            DB::raw('ST_AsGeoJSON(jalan_porosdesa.geom) as geojson'),
+        ]);
+    }
+
+    /**
+     * Helper to compute road segment length from GeoJSON.
+     */
+    public static function calculateLength(string|array $geometry, float $fallback = 0.0): float
+    {
+        return SpatialHelper::calculateGeoJsonLength($geometry, $fallback);
+    }
+
+    /**
+     * Helper to get aggregate summary statistics.
+     */
+    public static function getSummaryStats($query): ?object
+    {
+        $sumMeter = SpatialHelper::sumLengthMeterExpression('geom');
+        $sumKm = SpatialHelper::sumLengthKmExpression('geom');
+
+        return $query->selectRaw("
+            COUNT(*) as total_ruas,
+            {$sumMeter} as total_panjang_meter,
+            {$sumKm} as total_panjang_km,
+            ST_XMin(ST_Extent(geom)) as min_x,
+            ST_YMin(ST_Extent(geom)) as min_y,
+            ST_XMax(ST_Extent(geom)) as max_x,
+            ST_YMax(ST_Extent(geom)) as max_y
+        ")->first();
+    }
+
+    /**
+     * Helper to get road condition breakdown.
+     */
+    public static function getKondisiBreakdown($query): \Illuminate\Support\Collection
+    {
+        $lenMeter = SpatialHelper::lengthExpression('geom');
+        $isSqlite = SpatialHelper::isSqlite();
+
+        $sumKondisiMeter = $isSqlite
+            ? "ROUND(SUM(ST_Length(geom)), 2)"
+            : "ROUND(SUM(ST_Length(geom::geography))::numeric, 2)";
+        $sumKondisiKm = $isSqlite
+            ? "ROUND(SUM(ST_Length(geom)) / 1000, 3)"
+            : "ROUND((SUM(ST_Length(geom::geography)) / 1000)::numeric, 3)";
+
+        return $query
+            ->selectRaw("kondisi, COUNT(*) as jumlah, {$sumKondisiMeter} as panjang_meter, {$sumKondisiKm} as panjang_km")
+            ->groupBy('kondisi')
+            ->orderByDesc('jumlah')
+            ->get();
+    }
+
+    /**
+     * Operator LIKE yang tepat sesuai driver database.
+     */
+    public static function likeOperator(): string
+    {
+        return SpatialHelper::likeOperator();
     }
 
     /**

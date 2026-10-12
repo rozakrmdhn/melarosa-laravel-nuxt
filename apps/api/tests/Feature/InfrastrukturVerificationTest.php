@@ -11,6 +11,7 @@ use App\Models\MonitoringRealisasi;
 use App\Models\PlottingAnggaran;
 use App\Models\RefSumberDana;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
@@ -19,6 +20,8 @@ use Tests\TestCase;
 
 class InfrastrukturVerificationTest extends TestCase
 {
+    use RefreshDatabase;
+
     protected User $adminUser;
     protected User $kecamatanUser;
     protected User $bappedaUser;
@@ -78,6 +81,11 @@ class InfrastrukturVerificationTest extends TestCase
         $this->desa = BatasWilayahDesa::firstOrCreate(
             ['id' => 3522010001],
             ['nama_desa' => 'Desa Uji Coba', 'id_kecamatan' => $this->kecamatan->id]
+        );
+
+        InfrastrukturTipe::firstOrCreate(
+            ['kode' => 'jalan_poros'],
+            ['nama' => 'Jalan Poros Desa', 'geom_type' => 'LineString', 'icon' => 'road']
         );
 
         // Admin User
@@ -163,7 +171,7 @@ class InfrastrukturVerificationTest extends TestCase
                 'target_panjang_m' => 600,
             ]);
         $responseUpdate->assertOk()
-            ->assertJsonPath('data.target_panjang_m', 600);
+            ->assertJsonPath('data.target_panjang_m', '600.00');
     }
 
     public function test_verification_workflow_state_machine(): void

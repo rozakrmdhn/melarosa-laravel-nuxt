@@ -167,4 +167,9 @@ class InfrastrukturSegmenPolicy
 
         return $currentStatus === StatusVerifikasi::VerifiedKecamatan->value;
     }
+
+    public function split(User $user, InfrastrukturSegmen $segmen): bool
+    {
+        return $this->update($user, $segmen) && $this->create($user);
+    }
 }

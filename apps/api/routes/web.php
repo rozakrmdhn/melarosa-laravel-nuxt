@@ -135,6 +135,8 @@ Route::prefix('api/v1')->group(function () {
             Route::post('infrastruktur-segmen', [InfrastrukturSegmenController::class, 'store'])->middleware('permission:infrastruktur-segmen-create')->name('admin.infrastruktur-segmen.store');
             Route::get('infrastruktur-segmen/{id}', [InfrastrukturSegmenController::class, 'show'])->middleware('permission:infrastruktur-segmen-view')->name('admin.infrastruktur-segmen.show');
             Route::put('infrastruktur-segmen/{id}', [InfrastrukturSegmenController::class, 'update'])->middleware('permission:infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.update');
+            Route::patch('infrastruktur-segmen/{id}/geometry', [InfrastrukturSegmenController::class, 'updateGeometry'])->middleware('permission:infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.update-geometry');
+            Route::post('infrastruktur-segmen/{id}/split', [InfrastrukturSegmenController::class, 'split'])->middleware('permission:infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.split');
             Route::delete('infrastruktur-segmen/{id}', [InfrastrukturSegmenController::class, 'destroy'])->middleware('permission:infrastruktur-segmen-delete')->name('admin.infrastruktur-segmen.destroy');
 
             // State Machine Verifikasi Segmen

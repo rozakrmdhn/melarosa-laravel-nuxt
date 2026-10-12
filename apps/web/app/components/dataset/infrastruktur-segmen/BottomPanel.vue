@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { InfrastrukturSegmen, InfrastrukturTipe } from '~/types/infrastruktur';
 import type { ConsoleLog } from '~/types/dataset-editor';
+import { formatWilayah } from '~/utils/helpers';
 
 interface Props {
   collapsed?: boolean;
@@ -637,10 +638,10 @@ function handleTabClick(tab: 'table' | 'console') {
                     </div>
                   </td>
                   <td class="py-2 px-3 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                    {{ row.desa || '-' }}
+                    {{ formatWilayah(row.desa) }}
                   </td>
                   <td class="py-2 px-3 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                    {{ row.kecamatan || '-' }}
+                    {{ formatWilayah(row.kecamatan) }}
                   </td>
                   <td class="py-2 px-3 text-right font-mono font-medium whitespace-nowrap">
                     {{ Number(row.panjang_meter_gis ?? row.panjang ?? 0).toLocaleString('id-ID') }}

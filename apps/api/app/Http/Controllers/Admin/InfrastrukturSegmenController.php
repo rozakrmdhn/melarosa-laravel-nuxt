@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\SplitInfrastrukturSegmenRequest;
 use App\Http\Requests\Admin\StoreInfrastrukturSegmenRequest;
+use App\Http\Requests\Admin\UpdateInfrastrukturSegmenGeometryRequest;
 use App\Http\Requests\Admin\UpdateInfrastrukturSegmenRequest;
 use App\Http\Resources\InfrastrukturSegmenResource;
 use App\Models\BatasWilayahDesa;
@@ -376,6 +378,13 @@ class InfrastrukturSegmenController extends Controller
 
             $pdo = DB::getPdo();
             $segmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON(" . $pdo->quote($geoJsonString) . "), 4326)");
+
+            if (!isset($validated['panjang'])) {
+                $lenRes = DB::selectOne("SELECT ROUND(ST_Length(ST_SetSRID(ST_GeomFromGeoJSON(?), 4326)::geography)::numeric, 2) AS length_meters", [$geoJsonString]);
+                if ($lenRes) {
+                    $segmen->panjang = (float) ($lenRes->length_meters ?? 0);
+                }
+            }
         }
 
         // Perbarui cache wilayah jika id_desa atau id_kecamatan berubah
@@ -431,6 +440,263 @@ class InfrastrukturSegmenController extends Controller
         return response()->json([
             'ok'      => true,
             'message' => 'Segmen infrastruktur berhasil dihapus.',
+        ]);
+    }
+
+    public function updateGeometry(UpdateInfrastrukturSegmenGeometryRequest $request, string $id): JsonResponse
+    {
+        $segmen = InfrastrukturSegmen::where('id', $id)->first();
+        if (!$segmen) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Segmen infrastruktur tidak ditemukan.',
+            ], 404);
+        }
+
+        Gate::authorize('update', $segmen);
+
+        $geoJsonInput = $request->input('geometry');
+        $geoJsonString = is_string($geoJsonInput) ? $geoJsonInput : json_encode($geoJsonInput);
+
+        try {
+            $parsed = json_decode($geoJsonString, true);
+            if (isset($parsed['type']) && $parsed['type'] === 'Feature' && isset($parsed['geometry'])) {
+                $parsed = $parsed['geometry'];
+                $geoJsonString = json_encode($parsed);
+            }
+
+            if (!isset($parsed['type']) || !in_array($parsed['type'], ['LineString', 'MultiLineString'], true)) {
+                return response()->json([
+                    'ok'      => false,
+                    'message' => 'Tipe geometri harus berupa LineString atau MultiLineString.',
+                ], 422);
+            }
+
+            if (empty($parsed['coordinates']) || !is_array($parsed['coordinates']) || count($parsed['coordinates']) < 2) {
+                return response()->json([
+                    'ok'      => false,
+                    'message' => 'Geometri harus memiliki minimal 2 titik koordinat.',
+                ], 422);
+            }
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Format GeoJSON geometri tidak valid: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        $lengthResult = DB::selectOne("SELECT ROUND(ST_Length(ST_SetSRID(ST_GeomFromGeoJSON(?), 4326)::geography)::numeric, 2) AS length_meters", [$geoJsonString]);
+        $panjang = (float) ($lengthResult->length_meters ?? 0);
+
+        DB::transaction(function () use ($segmen, $geoJsonString, $panjang) {
+            $pdo = DB::getPdo();
+            $quotedGeo = $pdo->quote($geoJsonString);
+
+            $segmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON({$quotedGeo}), 4326)");
+            $segmen->panjang = $panjang;
+            $segmen->save();
+
+            app(\App\Services\AuditLogService::class)->log(
+                event: 'update_geometry',
+                module: 'infrastruktur-segmen',
+                auditable: $segmen,
+                description: "Memperbarui koordinat geometri spasial segmen \"{$segmen->namobj}\"",
+                meta: [
+                    'segmen_id' => $segmen->id,
+                    'panjang'   => $panjang,
+                ]
+            );
+        });
+
+        $fresh = InfrastrukturSegmen::withGeoJson()->where('id', $segmen->id)->first();
+
+        return response()->json([
+            'ok'      => true,
+            'message' => 'Geometri segmen berhasil diperbarui.',
+            'data'    => $fresh,
+        ]);
+    }
+
+    public function split(SplitInfrastrukturSegmenRequest $request, string $id): JsonResponse
+    {
+        $segmen = InfrastrukturSegmen::where('id', $id)->first();
+        if (!$segmen) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Segmen infrastruktur tidak ditemukan.',
+            ], 404);
+        }
+
+        Gate::authorize('split', $segmen);
+
+        if (DB::table('monitoring_realisasi_items')->where('id_segmen', $id)->exists()) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Segmen ini sudah terikat pada Berita Acara realisasi sehingga tidak dapat di-split.',
+            ], 422);
+        }
+
+        $createdFeatures = [];
+        $user = $request->user();
+
+        DB::transaction(function () use ($segmen, $request, $user, &$createdFeatures) {
+            if ($request->filled('parts')) {
+                $p1 = $request->input('parts.0');
+                $p2 = $request->input('parts.1');
+
+                $geo1 = is_string($p1['geometry']) ? $p1['geometry'] : json_encode($p1['geometry']);
+                $geo2 = is_string($p2['geometry']) ? $p2['geometry'] : json_encode($p2['geometry']);
+
+                $name1 = $p1['namobj'] ?? ($segmen->namobj . ' (Bagian 1)');
+                $name2 = $p2['namobj'] ?? ($segmen->namobj . ' (Bagian 2)');
+
+                $pdo = DB::getPdo();
+                $quotedGeo1 = $pdo->quote($geo1);
+                $quotedGeo2 = $pdo->quote($geo2);
+
+                $len1Result = DB::selectOne("SELECT ROUND(ST_Length(ST_SetSRID(ST_GeomFromGeoJSON(?), 4326)::geography)::numeric, 2) AS length_meters", [$geo1]);
+                $len2Result = DB::selectOne("SELECT ROUND(ST_Length(ST_SetSRID(ST_GeomFromGeoJSON(?), 4326)::geography)::numeric, 2) AS length_meters", [$geo2]);
+
+                $segmen->namobj = $name1;
+                $segmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON({$quotedGeo1}), 4326)");
+                $segmen->panjang = (float) ($len1Result->length_meters ?? 0);
+                $segmen->status_parent = true;
+                $segmen->save();
+
+                $newSegmen = new InfrastrukturSegmen();
+                $newSegmen->id = (string) Str::uuid();
+                $newSegmen->parent_id = $segmen->parent_id;
+                $newSegmen->tipe_kode = $segmen->tipe_kode;
+                $newSegmen->namobj = $name2;
+                $newSegmen->lebar = $segmen->lebar;
+                $newSegmen->jenis_perkerasan = $segmen->jenis_perkerasan;
+                $newSegmen->status_jalan = $segmen->status_jalan;
+                $newSegmen->kondisi = $segmen->kondisi;
+                $newSegmen->status_kondisi = $segmen->status_kondisi;
+                $newSegmen->tahun_pembangunan = $segmen->tahun_pembangunan;
+                $newSegmen->sumber_dana = $segmen->sumber_dana;
+                $newSegmen->keterangan = $segmen->keterangan;
+                $newSegmen->status_aset = $segmen->status_aset;
+                $newSegmen->sumber_data = $segmen->sumber_data;
+                $newSegmen->desa = $segmen->desa;
+                $newSegmen->kecamatan = $segmen->kecamatan;
+                $newSegmen->id_desa = $segmen->id_desa;
+                $newSegmen->id_kecamatan = $segmen->id_kecamatan;
+                $newSegmen->plotting_id = $segmen->plotting_id;
+                $newSegmen->status_verifikasi = 'draft';
+                $newSegmen->user_id = $user->uuid;
+                $newSegmen->created_by = $user->uuid;
+                $newSegmen->created_by_role = $user->roles->first()?->name ?? 'user';
+                $newSegmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON({$quotedGeo2}), 4326)");
+                $newSegmen->panjang = (float) ($len2Result->length_meters ?? 0);
+                $newSegmen->save();
+            } else {
+                $point = $request->input('point');
+                if (!$point || count($point) < 2) {
+                    abort(422, 'Titik koordinat pemotongan (point) wajib disertakan [lon, lat].');
+                }
+                $lon = (float) $point[0];
+                $lat = (float) $point[1];
+
+                $splitQuery = DB::selectOne("
+                    SELECT 
+                        fraction,
+                        ST_AsGeoJSON(ST_LineSubstring(line_geom, 0, fraction)) AS part1_geojson,
+                        ROUND((ST_Length(ST_LineSubstring(line_geom, 0, fraction)::geography))::numeric, 2) AS part1_panjang,
+                        ST_AsGeoJSON(ST_LineSubstring(line_geom, fraction, 1)) AS part2_geojson,
+                        ROUND((ST_Length(ST_LineSubstring(line_geom, fraction, 1)::geography))::numeric, 2) AS part2_panjang
+                    FROM (
+                        SELECT 
+                            line_geom,
+                            ST_LineLocatePoint(
+                                line_geom, 
+                                ST_ClosestPoint(line_geom, ST_SetSRID(ST_Point(?, ?), 4326))
+                            ) AS fraction
+                        FROM (
+                            SELECT 
+                                CASE 
+                                    WHEN ST_GeometryType(ST_LineMerge(geom)) = 'ST_LineString' THEN ST_LineMerge(geom)
+                                    ELSE ST_GeometryN(geom, 1)
+                                END AS line_geom
+                            FROM infrastruktur_segmen
+                            WHERE id = ?
+                        ) g
+                    ) sub
+                ", [$lon, $lat, $segmen->id]);
+
+                if (!$splitQuery || empty($splitQuery->part1_geojson) || empty($splitQuery->part2_geojson)) {
+                    abort(422, 'Gagal memproses pemotongan geometri garis segmen.');
+                }
+
+                $fraction = (float) ($splitQuery->fraction ?? 0);
+                if ($fraction <= 0.005 || $fraction >= 0.995) {
+                    abort(422, 'Titik pemotongan terlalu dekat dengan ujung segmen. Silakan pilih titik di badan garis.');
+                }
+
+                $name1 = $request->input('part1.namobj') ?: ($segmen->namobj . ' (Bagian 1)');
+                $name2 = $request->input('part2.namobj') ?: ($segmen->namobj . ' (Bagian 2)');
+
+                $part1Geo = $splitQuery->part1_geojson;
+                $part2Geo = $splitQuery->part2_geojson;
+
+                $pdo = DB::getPdo();
+                $quotedGeo1 = $pdo->quote($part1Geo);
+                $quotedGeo2 = $pdo->quote($part2Geo);
+
+                $segmen->namobj = $name1;
+                $segmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON({$quotedGeo1}), 4326)");
+                $segmen->panjang = (float) $splitQuery->part1_panjang;
+                $segmen->status_parent = true;
+                $segmen->save();
+
+                $newSegmen = new InfrastrukturSegmen();
+                $newSegmen->id = (string) Str::uuid();
+                $newSegmen->parent_id = $segmen->parent_id;
+                $newSegmen->tipe_kode = $segmen->tipe_kode;
+                $newSegmen->namobj = $name2;
+                $newSegmen->lebar = $segmen->lebar;
+                $newSegmen->jenis_perkerasan = $segmen->jenis_perkerasan;
+                $newSegmen->status_jalan = $segmen->status_jalan;
+                $newSegmen->kondisi = $segmen->kondisi;
+                $newSegmen->status_kondisi = $segmen->status_kondisi;
+                $newSegmen->tahun_pembangunan = $segmen->tahun_pembangunan;
+                $newSegmen->sumber_dana = $segmen->sumber_dana;
+                $newSegmen->keterangan = $segmen->keterangan;
+                $newSegmen->status_aset = $segmen->status_aset;
+                $newSegmen->sumber_data = $segmen->sumber_data;
+                $newSegmen->desa = $segmen->desa;
+                $newSegmen->kecamatan = $segmen->kecamatan;
+                $newSegmen->id_desa = $segmen->id_desa;
+                $newSegmen->id_kecamatan = $segmen->id_kecamatan;
+                $newSegmen->plotting_id = $segmen->plotting_id;
+                $newSegmen->status_verifikasi = 'draft';
+                $newSegmen->user_id = $user->uuid;
+                $newSegmen->created_by = $user->uuid;
+                $newSegmen->created_by_role = $user->roles->first()?->name ?? 'user';
+                $newSegmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON({$quotedGeo2}), 4326)");
+                $newSegmen->panjang = (float) $splitQuery->part2_panjang;
+                $newSegmen->save();
+            }
+
+            $createdFeatures['part1'] = InfrastrukturSegmen::withGeoJson()->find($segmen->id);
+            $createdFeatures['part2'] = InfrastrukturSegmen::withGeoJson()->find($newSegmen->id);
+
+            app(\App\Services\AuditLogService::class)->log(
+                event: 'split',
+                module: 'infrastruktur-segmen',
+                auditable: $segmen,
+                description: "Memecah (split) segmen \"{$segmen->namobj}\" menjadi 2 bagian (\"{$newSegmen->namobj}\")",
+                meta: [
+                    'original_id' => $segmen->id,
+                    'new_part_id' => $newSegmen->id,
+                ]
+            );
+        });
+
+        return response()->json([
+            'ok'      => true,
+            'message' => 'Segmen berhasil dipecah (split) menjadi 2 bagian.',
+            'data'    => $createdFeatures,
         ]);
     }
 }

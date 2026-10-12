@@ -7,6 +7,7 @@ import BottomPanel from '~/components/dataset/infrastruktur-segmen/BottomPanel.v
 import MobileBottomSheet from '~/components/dataset/infrastruktur-segmen/MobileBottomSheet.vue';
 import DialogFilter from '~/components/dataset/infrastruktur-segmen/DialogFilter.vue';
 import DialogSimbology from '~/components/dataset/infrastruktur-segmen/DialogSimbology.vue';
+import DialogSplitSegmen from '~/components/dataset/infrastruktur-segmen/DialogSplitSegmen.vue';
 import FilterContent from '~/components/dataset/infrastruktur-segmen/FilterContent.vue';
 import SimbologyContent from '~/components/dataset/infrastruktur-segmen/SimbologyContent.vue';
 import WilayahSelector from '~/components/common/WilayahSelector.vue';
@@ -28,6 +29,7 @@ import type {
   LayerSymbology,
 } from '~/types/dataset-editor';
 import { DEFAULT_SYMBOLOGY } from '~/types/dataset-editor';
+import { formatWilayah } from '~/utils/helpers';
 
 definePageMeta({
   middleware: ['auth', 'permission'],
@@ -812,6 +814,20 @@ watch(tableSearch, () => {
   }, 300);
 });
 
+// Handler jika parameter ID pada URL tidak valid, terhapus, atau di luar akses
+function handleInvalidSegmenId() {
+  selectedSegmenId.value = null;
+  selectedSegmen.value = null;
+  collapseRightPanel();
+  syncQueryToUrl();
+  toast.add({
+    title: 'Data Segmen Tidak Ditemukan',
+    description: 'Segmen yang dituju mungkin telah dihapus atau Anda tidak memiliki akses ke wilayah ini.',
+    color: 'warning',
+    icon: 'i-lucide-alert-triangle',
+  });
+}
+
 // Sync from URL back to refs when browser navigation (back/forward or address bar edit) occurs
 watch(
   () => route.query,
@@ -859,8 +875,12 @@ watch(
       api.getSegmen(qId).then((res) => {
         if (res?.ok && res.data) {
           handleFeatureSelect(res.data, true);
+        } else {
+          handleInvalidSegmenId();
         }
-      }).catch(() => {});
+      }).catch(() => {
+        handleInvalidSegmenId();
+      });
     }
   }
 );
@@ -1183,6 +1203,7 @@ async function handleDelete() {
       selectedSegmenId.value = null;
       selectedSegmen.value = null;
       collapseRightPanel();
+      syncQueryToUrl();
     }
     refreshAll();
   } catch (err: any) {
@@ -1213,6 +1234,108 @@ async function handleSubmitVerifikasi(seg: InfrastrukturSegmen) {
     const msg = err?.data?.message || err?.message || 'Tidak dapat mengajukan verifikasi.';
     toast.add({ title: 'Gagal Mengajukan', description: msg, color: 'error' });
     addLog('ERROR', `Gagal mengajukan verifikasi: ${msg}`);
+  }
+}
+
+// ─── Edit Geometry & Split Handlers ──────────────────────────────────────────
+const isSplitting = ref(false);
+const isSplitDialogOpen = ref(false);
+const splitTargetSegmen = ref<InfrastrukturSegmen | null>(null);
+const splitPointCoordinate = ref<[number, number] | null>(null);
+
+function handleStartEditGeometry(seg?: InfrastrukturSegmen | null) {
+  const target = seg || selectedSegmen.value;
+  if (!target) return;
+  mapCanvasRef.value?.startEditGeometry(target);
+  mobileMapCanvasRef.value?.startEditGeometry(target);
+  addLog('INFO', `Memulai edit geometri untuk: "${target.namobj || target.id}".`);
+}
+
+async function handleEditGeometrySaved(payload: { id: string; geojson: any; lengthMeters: number }) {
+  try {
+    const res = await api.patchSegmenGeometry(payload.id, payload.geojson);
+    if (res?.ok) {
+      toast.add({
+        title: 'Geometri Diperbarui',
+        description: `Koordinat geometri segmen berhasil disimpan (${payload.lengthMeters} m).`,
+        color: 'success',
+      });
+      addLog('INFO', `Geometri segmen ${payload.id} diperbarui (${payload.lengthMeters} m).`);
+      mapCanvasRef.value?.refreshVectorTiles();
+      mobileMapCanvasRef.value?.refreshVectorTiles();
+      await refreshAll();
+      if (selectedSegmenId.value === payload.id) {
+        const fresh = await api.getSegmen(payload.id);
+        if (fresh?.data) selectedSegmen.value = fresh.data;
+      }
+    }
+  } catch (err: any) {
+    const msg = err?.data?.message || err?.message || 'Gagal memperbarui geometri segmen.';
+    toast.add({ title: 'Gagal Edit Geometri', description: msg, color: 'error' });
+    addLog('ERROR', `Gagal edit geometri: ${msg}`);
+  }
+}
+
+function handleEditGeometryCanceled() {
+  addLog('INFO', 'Mode edit geometri dibatalkan.');
+}
+
+function handleStartSplitSegmen(seg?: InfrastrukturSegmen | null) {
+  const target = seg || selectedSegmen.value;
+  if (!target) return;
+  splitTargetSegmen.value = target;
+  mapCanvasRef.value?.startSplitMode(target);
+  mobileMapCanvasRef.value?.startSplitMode(target);
+  addLog('INFO', `Mode split aktif untuk "${target.namobj || target.id}". Klik garis untuk titik potong.`);
+}
+
+function handleSplitPointSelected(payload: { segmen: InfrastrukturSegmen; coordinate: [number, number] }) {
+  splitTargetSegmen.value = payload.segmen;
+  splitPointCoordinate.value = payload.coordinate;
+  isSplitDialogOpen.value = true;
+}
+
+function handleCancelSplit() {
+  isSplitDialogOpen.value = false;
+  splitPointCoordinate.value = null;
+  mapCanvasRef.value?.cancelSplitMode();
+  mobileMapCanvasRef.value?.cancelSplitMode();
+}
+
+async function handleConfirmSplit(names: { part1Name: string; part2Name: string }) {
+  if (!splitTargetSegmen.value || !splitPointCoordinate.value) return;
+
+  isSplitting.value = true;
+  try {
+    const targetId = splitTargetSegmen.value.id;
+    const res = await api.splitSegmen(targetId, {
+      point: splitPointCoordinate.value,
+      part1: { namobj: names.part1Name },
+      part2: { namobj: names.part2Name },
+    });
+
+    if (res?.ok) {
+      toast.add({
+        title: 'Berhasil Split Segmen',
+        description: `Segmen berhasil dipecah menjadi "${names.part1Name}" dan "${names.part2Name}".`,
+        color: 'success',
+      });
+      addLog('INFO', `Segmen "${splitTargetSegmen.value.namobj}" dipecah menjadi 2 bagian.`);
+      isSplitDialogOpen.value = false;
+      splitTargetSegmen.value = null;
+      splitPointCoordinate.value = null;
+      mapCanvasRef.value?.cancelSplitMode();
+      mobileMapCanvasRef.value?.cancelSplitMode();
+      mapCanvasRef.value?.refreshVectorTiles();
+      mobileMapCanvasRef.value?.refreshVectorTiles();
+      await refreshAll();
+    }
+  } catch (err: any) {
+    const msg = err?.data?.message || err?.message || 'Gagal memotong segmen.';
+    toast.add({ title: 'Gagal Split', description: msg, color: 'error' });
+    addLog('ERROR', `Gagal split segmen: ${msg}`);
+  } finally {
+    isSplitting.value = false;
   }
 }
 
@@ -1278,9 +1401,11 @@ onMounted(async () => {
       const res = await api.getSegmen(initialId);
       if (res?.ok && res.data) {
         handleFeatureSelect(res.data, true);
+      } else {
+        handleInvalidSegmenId();
       }
     } catch {
-      // Abaikan bila data tidak ditemukan
+      handleInvalidSegmenId();
     }
   }
 
@@ -1562,6 +1687,9 @@ onMounted(async () => {
                     @draw-saved="handleDrawSaved"
                     @draw-canceled="onDrawCanceled"
                     @map-click="(coord) => clickedCoordinate = coord"
+                    @edit-geometry-saved="handleEditGeometrySaved"
+                    @edit-geometry-canceled="handleEditGeometryCanceled"
+                    @split-point-selected="handleSplitPointSelected"
                   />
                 </div>
               </template>
@@ -1586,6 +1714,8 @@ onMounted(async () => {
                   @submit-verifikasi="handleSubmitVerifikasi"
                   @save-segmen="handleSaveSegmen"
                   @view-in-table="handleViewInTable"
+                  @edit-geometry="handleStartEditGeometry"
+                  @split-segmen="handleStartSplitSegmen"
                 />
               </template>
             </USplitter>
@@ -1670,6 +1800,9 @@ onMounted(async () => {
           @draw-saved="handleDrawSaved"
           @draw-canceled="onDrawCanceled"
           @map-click="(coord) => clickedCoordinate = coord"
+          @edit-geometry-saved="handleEditGeometrySaved"
+          @edit-geometry-canceled="handleEditGeometryCanceled"
+          @split-point-selected="handleSplitPointSelected"
         />
       </div>
     </div>
@@ -1686,7 +1819,7 @@ onMounted(async () => {
               {{ selectedSegmen.namobj || 'Segmen Tanpa Nama' }}
             </p>
             <p class="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">
-              {{ selectedSegmen.desa || '-' }}, Kec. {{ selectedSegmen.kecamatan || '-' }}
+              {{ formatWilayah(selectedSegmen.desa) }}, Kec. {{ formatWilayah(selectedSegmen.kecamatan) }}
             </p>
           </div>
           <UButton
@@ -1695,7 +1828,7 @@ onMounted(async () => {
             color="neutral"
             variant="ghost"
             class="p-1 cursor-pointer"
-            @click="selectedSegmen = null; selectedSegmenId = null"
+            @click="handleFeatureSelect(null)"
           />
         </div>
 
@@ -2125,17 +2258,11 @@ onMounted(async () => {
             :model-kecamatan="filterKecamatan"
             :model-desa="filterDesa"
             @update:selected-tipe="(val) => filterTipe = val"
-            @update:selectedTipe="(val) => filterTipe = val"
             @update:selected-perkerasan="(val) => filterPerkerasan = val"
-            @update:selectedPerkerasan="(val) => filterPerkerasan = val"
             @update:selected-kondisi="(val) => filterKondisi = val"
-            @update:selectedKondisi="(val) => filterKondisi = val"
             @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
-            @update:selectedStatusVerifikasi="(val) => filterStatusVerifikasi = val"
             @update:model-kecamatan="(val) => filterKecamatan = val"
-            @update:modelKecamatan="(val) => filterKecamatan = val"
             @update:model-desa="(val) => filterDesa = val"
-            @update:modelDesa="(val) => filterDesa = val"
             @apply="() => { mobileDrawerOpen = false; handleApplySegmenFilter(); }"
             @reset="resetSegmenFilters"
           />
@@ -2151,13 +2278,9 @@ onMounted(async () => {
             :model-kecamatan="filterJalanKecamatan"
             :model-desa="filterJalanDesa"
             @update:selected-perkerasan="(val) => filterJalanPerkerasan = val"
-            @update:selectedPerkerasan="(val) => filterJalanPerkerasan = val"
             @update:selected-kondisi="(val) => filterJalanKondisi = val"
-            @update:selectedKondisi="(val) => filterJalanKondisi = val"
             @update:model-kecamatan="(val) => filterJalanKecamatan = val"
-            @update:modelKecamatan="(val) => filterJalanKecamatan = val"
             @update:model-desa="(val) => filterJalanDesa = val"
-            @update:modelDesa="(val) => filterJalanDesa = val"
             @apply="() => { mobileDrawerOpen = false; handleApplyJalanFilter(); }"
             @reset="resetJalanFilters"
           />
@@ -2474,5 +2597,15 @@ onMounted(async () => {
         </div>
       </template>
     </UModal>
+
+    <!-- ═══ MODAL: Konfirmasi Split Segmen ══════════════════════════════════════ -->
+    <DialogSplitSegmen
+      v-model:open="isSplitDialogOpen"
+      :segmen="splitTargetSegmen"
+      :split-point="splitPointCoordinate"
+      :loading="isSplitting"
+      @confirm="handleConfirmSplit"
+      @cancel="handleCancelSplit"
+    />
   </div>
 </template>

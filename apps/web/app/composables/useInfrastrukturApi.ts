@@ -166,6 +166,31 @@ export function useInfrastrukturApi() {
     });
   }
 
+  async function patchSegmenGeometry(id: string, geometry: any) {
+    return $http<ApiResponse<InfrastrukturSegmen>>(`admin/infrastruktur-segmen/${id}/geometry`, {
+      method: 'PATCH',
+      body: { geometry },
+    });
+  }
+
+  async function splitSegmen(
+    id: string,
+    payload: {
+      point?: [number, number];
+      part1?: { namobj?: string };
+      part2?: { namobj?: string };
+      parts?: Array<{ namobj: string; geometry: any }>;
+    }
+  ) {
+    return $http<ApiResponse<{ part1: InfrastrukturSegmen; part2: InfrastrukturSegmen }>>(
+      `admin/infrastruktur-segmen/${id}/split`,
+      {
+        method: 'POST',
+        body: payload,
+      }
+    );
+  }
+
   // ─── State Machine Verifikasi ──────────────────────────────────────────────
   async function submitSegmen(id: string) {
     return $http<ApiResponse<InfrastrukturSegmen>>(`admin/infrastruktur-segmen/${id}/submit`, {
@@ -269,6 +294,8 @@ export function useInfrastrukturApi() {
     createSegmen,
     updateSegmen,
     deleteSegmen,
+    patchSegmenGeometry,
+    splitSegmen,
     // Verifikasi
     submitSegmen,
     verifyKecamatan,

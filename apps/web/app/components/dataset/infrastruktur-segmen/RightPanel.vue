@@ -4,6 +4,7 @@ import type {
   InfrastrukturTipe,
   PlottingAnggaran,
 } from '~/types/infrastruktur';
+import { formatWilayah } from '~/utils/helpers';
 
 interface Props {
   collapsed?: boolean;
@@ -43,6 +44,8 @@ const emit = defineEmits<{
   (e: 'submitVerifikasi', segmen: InfrastrukturSegmen): void;
   (e: 'viewInTable', segmen: InfrastrukturSegmen): void;
   (e: 'saveSegmen', payload: Partial<InfrastrukturSegmen>): void;
+  (e: 'editGeometry', segmen: InfrastrukturSegmen): void;
+  (e: 'splitSegmen', segmen: InfrastrukturSegmen): void;
 }>();
 
 const activeTab = ref<'inspector' | 'edit'>('inspector');
@@ -364,6 +367,30 @@ function handleSaveEdit() {
               />
             </div>
 
+            <!-- Spatial Geometry Actions -->
+            <div v-if="canEdit" class="flex items-center gap-1.5 mt-2">
+              <UButton
+                icon="i-lucide-pen-tool"
+                label="Edit Geometri"
+                size="xs"
+                color="neutral"
+                variant="subtle"
+                class="flex-1 justify-center cursor-pointer text-[11px]"
+                title="Ubah titik koordinat garis di peta canvas"
+                @click="emit('editGeometry', selectedSegmen)"
+              />
+              <UButton
+                icon="i-lucide-scissors"
+                label="Split Segmen"
+                size="xs"
+                color="neutral"
+                variant="subtle"
+                class="flex-1 justify-center cursor-pointer text-[11px]"
+                title="Potong segmen menjadi 2 bagian"
+                @click="emit('splitSegmen', selectedSegmen)"
+              />
+            </div>
+
             <!-- Segmented Subtabs -->
             <div class="grid grid-cols-2 gap-1 p-0.5 bg-gray-200/60 dark:bg-gray-800 rounded-lg mt-2">
               <button
@@ -453,8 +480,8 @@ function handleSaveEdit() {
                   v-for="[key, val] in [
                     ['Nama Objek', selectedSegmen.namobj],
                     ['Tipe', tipeLabel],
-                    ['Desa', selectedSegmen.desa],
-                    ['Kecamatan', selectedSegmen.kecamatan],
+                    ['Desa', formatWilayah(selectedSegmen.desa)],
+                    ['Kecamatan', formatWilayah(selectedSegmen.kecamatan)],
                     ['Panjang (GIS)', `${Number(selectedSegmen.panjang_meter_gis ?? selectedSegmen.panjang ?? 0).toLocaleString('id-ID')} m`],
                     ['Lebar Fisik', selectedSegmen.lebar ? `${selectedSegmen.lebar} m` : '-'],
                     ['Jenis Perkerasan', selectedSegmen.jenis_perkerasan],
@@ -470,7 +497,9 @@ function handleSaveEdit() {
                   class="flex items-start justify-between px-3 py-1.5 text-xs"
                 >
                   <span class="text-gray-500 dark:text-gray-400 font-mono w-[38%] shrink-0">{{ key }}</span>
-                  <span class="text-gray-800 dark:text-gray-200 font-mono text-right break-all">{{ val !== null && val !== undefined && val !== '' ? val : '-' }}</span>
+                  <span class="text-gray-800 dark:text-gray-200 font-mono text-right break-all">
+                    {{ typeof val === 'object' && val !== null ? formatWilayah(val) : (val !== null && val !== undefined && val !== '' ? val : '-') }}
+                  </span>
                 </div>
               </div>
 

@@ -76,6 +76,9 @@ const emit = defineEmits<{
   (e: 'drawSaved', payload: { geojson: { type: 'LineString'; coordinates: [number, number][] }; lengthMeters: number }): void;
   (e: 'drawCanceled'): void;
   (e: 'mapClick', coords: [number, number]): void;
+  (e: 'editGeometrySaved', payload: { id: string; geojson: any; lengthMeters: number }): void;
+  (e: 'editGeometryCanceled'): void;
+  (e: 'splitPointSelected', payload: { segmen: InfrastrukturSegmen; coordinate: [number, number] }): void;
 }>();
 
 const colorMode = useColorMode();
@@ -109,6 +112,26 @@ let activeGeomListener: any = null;
 let tooltipOverlay: any = null;
 let pulseOverlay: any = null;
 let olModules: any = null;
+
+let editGeometrySource: any = null;
+let editGeometryLayer: any = null;
+let editModifyInteraction: any = null;
+let editSnapInteraction: any = null;
+let editGeomListener: any = null;
+
+let splitSource: any = null;
+let splitLayer: any = null;
+let splitSnapInteraction: any = null;
+let splitClickListener: any = null;
+
+const isEditGeometryMode = ref(false);
+const editingSegmenData = ref<InfrastrukturSegmen | null>(null);
+const editedFeature = ref<any>(null);
+const editedLengthMeters = ref(0);
+
+const isSplitMode = ref(false);
+const splitSegmenData = ref<InfrastrukturSegmen | null>(null);
+const splitSelectedCoord = ref<[number, number] | null>(null);
 
 let resizeObserver: ResizeObserver | null = null;
 let resizeRaf: number | null = null;
@@ -1115,6 +1138,214 @@ function confirmDraw() {
   saveDrawnSegment();
 }
 
+// ─── Edit Geometry Operations ────────────────────────────────────────────────
+function startEditGeometry(segmen: InfrastrukturSegmen) {
+  if (!mapInstance || !olModules) return;
+  cancelDrawing(false);
+  cancelSplitMode();
+  cancelEditGeometry();
+
+  const rawGeom = (segmen as any).geometry || segmen.geojson || (segmen as any).properties?.geojson || (segmen as any).properties?.geometry;
+  if (!rawGeom) {
+    emit('log', 'WARN', 'Geometri segmen tidak ditemukan untuk diedit.');
+    return;
+  }
+
+  try {
+    const parsedGeom = typeof rawGeom === 'string' ? JSON.parse(rawGeom) : rawGeom;
+    const format = new olModules.GeoJSON();
+    const olGeom = format.readGeometry(parsedGeom, {
+      dataProjection: 'EPSG:4326',
+      featureProjection: 'EPSG:3857',
+    });
+
+    const feat = new olModules.Feature({ geometry: olGeom });
+    feat.setId(segmen.id);
+    editedFeature.value = feat;
+    editingSegmenData.value = segmen;
+    isEditGeometryMode.value = true;
+    editedLengthMeters.value = Math.round(olModules.sphere.getLength(olGeom));
+
+    editGeometrySource.addFeature(feat);
+
+    const extent = olGeom.getExtent();
+    if (extent && !extent.some((n: number) => isNaN(n) || !isFinite(n))) {
+      mapInstance.getView().fit(extent, {
+        padding: [120, 120, 120, 120],
+        maxZoom: 18,
+        duration: 500,
+      });
+    }
+
+    const { Modify, Style, Circle, Fill, Stroke, Snap } = olModules;
+    editModifyInteraction = new Modify({
+      source: editGeometrySource,
+      style: new Style({
+        image: new Circle({
+          radius: 7,
+          fill: new Fill({ color: '#2563eb' }),
+          stroke: new Stroke({ color: '#ffffff', width: 2.5 }),
+        }),
+      }),
+    });
+
+    editGeomListener = () => {
+      const g = feat.getGeometry();
+      if (g) {
+        editedLengthMeters.value = Math.round(olModules.sphere.getLength(g));
+      }
+    };
+    olGeom.on('change', editGeomListener);
+
+    mapInstance.addInteraction(editModifyInteraction);
+
+    if (snapSource) {
+      editSnapInteraction = new Snap({ source: snapSource, pixelTolerance: 14 });
+      mapInstance.addInteraction(editSnapInteraction);
+    }
+
+    emit('log', 'INFO', `Mode edit geometri aktif untuk "${segmen.namobj || 'segmen'}". Geser titik koordinat.`);
+  } catch (err: any) {
+    emit('log', 'ERROR', `Gagal mengaktifkan mode edit: ${err?.message}`);
+  }
+}
+
+function cancelEditGeometry() {
+  if (editModifyInteraction && mapInstance) {
+    mapInstance.removeInteraction(editModifyInteraction);
+    editModifyInteraction = null;
+  }
+  if (editSnapInteraction && mapInstance) {
+    mapInstance.removeInteraction(editSnapInteraction);
+    editSnapInteraction = null;
+  }
+  if (editGeomListener && editedFeature.value) {
+    editedFeature.value.getGeometry()?.un('change', editGeomListener);
+    editGeomListener = null;
+  }
+  if (editGeometrySource) {
+    editGeometrySource.clear();
+  }
+  isEditGeometryMode.value = false;
+  editingSegmenData.value = null;
+  editedFeature.value = null;
+  editedLengthMeters.value = 0;
+  emit('editGeometryCanceled');
+}
+
+function saveEditedGeometry() {
+  if (!editedFeature.value || !editingSegmenData.value || !olModules) return;
+
+  const geom = editedFeature.value.getGeometry();
+  if (!geom) return;
+
+  const format = new olModules.GeoJSON();
+  const geojsonObj = format.writeGeometryObject(geom, {
+    featureProjection: 'EPSG:3857',
+    dataProjection: 'EPSG:4326',
+  });
+  const length = Math.round(olModules.sphere.getLength(geom));
+
+  emit('editGeometrySaved', {
+    id: editingSegmenData.value.id,
+    geojson: geojsonObj,
+    lengthMeters: length,
+  });
+
+  cancelEditGeometry();
+}
+
+// ─── Split Geometry Operations ───────────────────────────────────────────────
+function startSplitMode(segmen: InfrastrukturSegmen) {
+  if (!mapInstance || !olModules) return;
+  cancelDrawing(false);
+  cancelEditGeometry();
+  cancelSplitMode();
+
+  const rawGeom = (segmen as any).geometry || segmen.geojson || (segmen as any).properties?.geojson || (segmen as any).properties?.geometry;
+  if (!rawGeom) {
+    emit('log', 'WARN', 'Geometri segmen tidak valid untuk split.');
+    return;
+  }
+
+  try {
+    const parsedGeom = typeof rawGeom === 'string' ? JSON.parse(rawGeom) : rawGeom;
+    const format = new olModules.GeoJSON();
+    const olGeom = format.readGeometry(parsedGeom, {
+      dataProjection: 'EPSG:4326',
+      featureProjection: 'EPSG:3857',
+    });
+
+    isSplitMode.value = true;
+    splitSegmenData.value = segmen;
+
+    const roadFeat = new olModules.Feature({ geometry: olGeom });
+    splitSource.addFeature(roadFeat);
+
+    const extent = olGeom.getExtent();
+    if (extent && !extent.some((n: number) => isNaN(n) || !isFinite(n))) {
+      mapInstance.getView().fit(extent, {
+        padding: [100, 100, 100, 100],
+        maxZoom: 18,
+        duration: 500,
+      });
+    }
+
+    const { Snap } = olModules;
+    splitSnapInteraction = new Snap({
+      source: splitSource,
+      edge: true,
+      vertex: true,
+      pixelTolerance: 15,
+    });
+    mapInstance.addInteraction(splitSnapInteraction);
+
+    splitClickListener = (evt: any) => {
+      if (!isSplitMode.value) return;
+      const rawCoord = evt.coordinate;
+      const snappedCoord = olGeom?.getClosestPoint ? olGeom.getClosestPoint(rawCoord) : rawCoord;
+      const [lon, lat] = olModules.toLonLat(snappedCoord);
+      splitSelectedCoord.value = [lon, lat];
+
+      const markers = splitSource.getFeatures().filter((f: any) => f.get('isMarker'));
+      markers.forEach((m: any) => splitSource.removeFeature(m));
+
+      const marker = new olModules.Feature({
+        geometry: new olModules.Point(snappedCoord),
+      });
+      marker.set('isMarker', true);
+      splitSource.addFeature(marker);
+
+      emit('splitPointSelected', {
+        segmen,
+        coordinate: [lon, lat],
+      });
+    };
+
+    mapInstance.on('singleclick', splitClickListener);
+    emit('log', 'INFO', `Klik pada garis "${segmen.namobj || 'segmen'}" di titik pemotongan.`);
+  } catch (err: any) {
+    emit('log', 'ERROR', `Gagal memuat segmen untuk split: ${err?.message}`);
+  }
+}
+
+function cancelSplitMode() {
+  if (splitClickListener && mapInstance) {
+    mapInstance.un('singleclick', splitClickListener);
+    splitClickListener = null;
+  }
+  if (splitSnapInteraction && mapInstance) {
+    mapInstance.removeInteraction(splitSnapInteraction);
+    splitSnapInteraction = null;
+  }
+  if (splitSource) {
+    splitSource.clear();
+  }
+  isSplitMode.value = false;
+  splitSegmenData.value = null;
+  splitSelectedCoord.value = null;
+}
+
 // ─── Map Lifecycle ────────────────────────────────────────────────────────────
 async function initMap() {
   if (!import.meta.client || !mapContainer.value) return;
@@ -1274,6 +1505,65 @@ async function initMap() {
       ],
     });
 
+    // 3.1 Edit Geometry Vector Layer
+    editGeometrySource = new VectorSource({ wrapX: false });
+    editGeometryLayer = new VectorLayer({
+      source: editGeometrySource,
+      zIndex: 60,
+      style: [
+        new stylePkg.Style({
+          stroke: new stylePkg.Stroke({
+            color: 'rgba(37, 99, 235, 0.35)',
+            width: 8,
+          }),
+        }),
+        new stylePkg.Style({
+          stroke: new stylePkg.Stroke({
+            color: '#2563eb',
+            width: 3.5,
+            lineDash: [8, 6],
+          }),
+          image: new stylePkg.Circle({
+            radius: 6,
+            fill: new stylePkg.Fill({ color: '#2563eb' }),
+            stroke: new stylePkg.Stroke({ color: '#ffffff', width: 2 }),
+          }),
+        }),
+      ],
+    });
+
+    // 3.2 Split Vector Layer
+    splitSource = new VectorSource({ wrapX: false });
+    splitLayer = new VectorLayer({
+      source: splitSource,
+      zIndex: 65,
+      style: (feature: any) => {
+        if (feature.get('isMarker')) {
+          return new stylePkg.Style({
+            image: new stylePkg.Circle({
+              radius: 8,
+              fill: new stylePkg.Fill({ color: '#ef4444' }),
+              stroke: new stylePkg.Stroke({ color: '#ffffff', width: 3 }),
+            }),
+          });
+        }
+        return [
+          new stylePkg.Style({
+            stroke: new stylePkg.Stroke({
+              color: 'rgba(245, 158, 11, 0.4)',
+              width: 9,
+            }),
+          }),
+          new stylePkg.Style({
+            stroke: new stylePkg.Stroke({
+              color: '#d97706',
+              width: 3.5,
+            }),
+          }),
+        ];
+      },
+    });
+
     // 4. Overlays (Tooltip & Click Pulse)
     if (tooltipEl.value) {
       tooltipOverlay = new Overlay({
@@ -1303,7 +1593,7 @@ async function initMap() {
     // 6. Map Instance
     mapInstance = new Map({
       target: mapContainer.value,
-      layers: [baseTileLayer, jalanPorosVectorTileLayer, vectorTileLayer, drawLayer],
+      layers: [baseTileLayer, jalanPorosVectorTileLayer, vectorTileLayer, drawLayer, editGeometryLayer, splitLayer],
       view: new View({
         center: olModules.fromLonLat([111.88, -7.2]),
         zoom: 11,
@@ -1324,8 +1614,8 @@ async function initMap() {
         return;
       }
 
-      if (isDrawing.value) {
-        if (mapContainer.value) mapContainer.value.style.cursor = 'crosshair';
+      if (isDrawing.value || isEditGeometryMode.value || isSplitMode.value) {
+        if (mapContainer.value) mapContainer.value.style.cursor = isSplitMode.value ? 'crosshair' : (isDrawing.value ? 'crosshair' : 'default');
         hoveredFeature.value = null;
         tooltipData.value = null;
         if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
@@ -1389,7 +1679,7 @@ async function initMap() {
 
     // ─── Click Interaction (Feature Select) ────────────────────────────────────
     mapInstance.on('click', (e: any) => {
-      if (isDrawing.value) return;
+      if (isDrawing.value || isEditGeometryMode.value || isSplitMode.value) return;
 
       if (e.coordinate && pulseOverlay) {
         pulseOverlay.setPosition(e.coordinate);
@@ -1649,6 +1939,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   cancelDrawing(false);
+  cancelEditGeometry();
+  cancelSplitMode();
   clearTimeout(mvtSafetyTimeout);
   if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
   if (jalanFilterDebounceTimer) clearTimeout(jalanFilterDebounceTimer);
@@ -1699,6 +1991,14 @@ defineExpose({
   toggleSnapping,
   snapRoadCount,
   isSnapLoading,
+  startEditGeometry,
+  cancelEditGeometry,
+  saveEditedGeometry,
+  isEditGeometryMode,
+  editedLengthMeters,
+  startSplitMode,
+  cancelSplitMode,
+  isSplitMode,
 });
 </script>
 
@@ -1713,6 +2013,59 @@ defineExpose({
       class="absolute inset-0 w-full h-full transition-colors duration-200"
       :class="currentBasemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
     />
+
+    <!-- ═══ FLOATING BAR: EDIT GEOMETRI MODE ═══════════════════════════════════ -->
+    <Transition
+      enter-active-class="transition-all duration-200 ease-out"
+      enter-from-class="opacity-0 -translate-y-2 scale-95"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
+      leave-active-class="transition-all duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 -translate-y-2 scale-95"
+    >
+      <div
+        v-if="isEditGeometryMode"
+        class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-3.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md rounded-xl shadow-md border border-blue-500/40 text-xs text-gray-800 dark:text-gray-100"
+      >
+        <div class="flex items-center gap-1.5 font-medium text-blue-600 dark:text-blue-400">
+          <UIcon name="i-lucide-pen-tool" class="size-4 animate-pulse shrink-0" />
+          <span class="max-w-[200px] truncate">Edit: <strong>{{ editingSegmenData?.namobj || 'Segmen' }}</strong></span>
+        </div>
+
+        <UBadge :label="`${editedLengthMeters.toLocaleString('id-ID')} m`" color="primary" variant="subtle" size="xs" class="font-mono" />
+
+        <div class="w-px h-4 bg-gray-200 dark:bg-gray-800" />
+
+        <div class="flex items-center gap-1.5">
+          <UButton size="xs" color="neutral" variant="ghost" label="Batal" @click="cancelEditGeometry" />
+          <UButton size="xs" color="primary" icon="i-lucide-check" label="Simpan Geometri" @click="saveEditedGeometry" />
+        </div>
+      </div>
+    </Transition>
+
+    <!-- ═══ FLOATING BAR: SPLIT MODE ═══════════════════════════════════════════ -->
+    <Transition
+      enter-active-class="transition-all duration-200 ease-out"
+      enter-from-class="opacity-0 -translate-y-2 scale-95"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
+      leave-active-class="transition-all duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 -translate-y-2 scale-95"
+    >
+      <div
+        v-if="isSplitMode"
+        class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-3.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md rounded-xl shadow-md border border-amber-500/40 text-xs text-gray-800 dark:text-gray-100"
+      >
+        <div class="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+          <UIcon name="i-lucide-scissors" class="size-4 animate-bounce shrink-0" />
+          <span class="max-w-[240px] truncate">Klik garis untuk potong: <strong>{{ splitSegmenData?.namobj || 'Segmen' }}</strong></span>
+        </div>
+
+        <div class="w-px h-4 bg-gray-200 dark:bg-gray-800" />
+
+        <UButton size="xs" color="neutral" variant="ghost" label="Batal Split" @click="cancelSplitMode" />
+      </div>
+    </Transition>
 
     <!-- Floating MVT Loading Indicator Badge (Top Left) -->
     <Transition

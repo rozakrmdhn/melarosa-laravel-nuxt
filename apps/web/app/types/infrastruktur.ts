@@ -94,8 +94,8 @@ export interface InfrastrukturSegmen {
   keterangan?: string | null;
   foto_url?: string | null;
   atribut?: Record<string, any> | null;
-  desa?: string | null;
-  kecamatan?: string | null;
+  desa?: string | Record<string, any> | any[] | null;
+  kecamatan?: string | Record<string, any> | any[] | null;
   id_desa: number;
   id_kecamatan: number;
   plotting_id?: string | null;

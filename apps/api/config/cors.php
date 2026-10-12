@@ -17,7 +17,7 @@ return [
 
     'paths' => ['api/*', 'sanctum/*'],
 
-    'allowed_methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
     'allowed_origins' => array_values(array_unique(array_filter(
         env('APP_ENV') === 'production'

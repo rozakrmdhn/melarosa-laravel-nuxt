@@ -49,7 +49,7 @@ export interface ConsoleLog {
   message: string;
 }
 
-export type BasemapType = "osm" | "dark" | "satellite" | "topo";
+export type BasemapType = "osm" | "dark" | "satellite" | "topo" | "none";
 
 export interface KecamatanOption {
   id: number;

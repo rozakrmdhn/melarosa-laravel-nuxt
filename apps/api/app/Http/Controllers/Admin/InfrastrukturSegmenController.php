@@ -67,6 +67,8 @@ class InfrastrukturSegmenController extends Controller
         // Filter jenis perkerasan
         if ($request->filled('jenis_perkerasan')) {
             $baseQuery->where('infrastruktur_segmen.jenis_perkerasan', $request->input('jenis_perkerasan'));
+        } elseif ($request->filled('perkerasan')) {
+            $baseQuery->where('infrastruktur_segmen.jenis_perkerasan', $request->input('perkerasan'));
         }
 
         // Filter status jalan

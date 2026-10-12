@@ -109,7 +109,7 @@ function extractSearchQuery(queryObj: any): string | null {
 const searchedLocationLabel = ref<string | null>(extractSearchQuery(route.query));
 
 // Inisialisasi basemap dari parameter URL atau localStorage yang persisten
-const validBasemaps: BasemapKey[] = ["osm", "satellite", "positron", "dark", "topo"];
+const validBasemaps: BasemapKey[] = ["osm", "satellite", "positron", "dark", "topo", "none"];
 
 function getInitialBasemap(): BasemapKey {
   const queryParam = typeof route.query.basemap === "string" ? route.query.basemap : null;

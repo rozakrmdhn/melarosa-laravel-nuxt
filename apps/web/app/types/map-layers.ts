@@ -1,4 +1,4 @@
-export type BasemapKey = "osm" | "satellite" | "positron" | "dark" | "topo";
+export type BasemapKey = "osm" | "satellite" | "positron" | "dark" | "topo" | "none";
 
 export type ActiveLayerTool = "none" | "opacity" | "filter" | "info";
 

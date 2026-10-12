@@ -57,6 +57,7 @@ const BASEMAP_OPTIONS: BasemapOption[] = [
   { key: "positron", name: "Terang", tagline: "Peta Bersih Minimalis" },
   { key: "dark", name: "Gelap", tagline: "Kontras Malam Hari" },
   { key: "topo", name: "Medan", tagline: "Kontur & Topografi" },
+  { key: "none", name: "None", tagline: "Putih Polos Tanpa Basemap" },
 ];
 
 function selectBasemap(key: BasemapKey) {
@@ -280,8 +281,8 @@ function handleFilterStatusChange(layer: ActiveLayerItem, val: string) {
             </span>
           </div>
 
-          <!-- 5 Kartu Pilihan Basemap Horizontal -->
-          <div class="grid grid-cols-5 gap-1.5 pt-0.5" role="radiogroup" aria-label="Pilihan Peta Dasar">
+          <!-- Kartu Pilihan Basemap Horizontal -->
+          <div class="grid grid-cols-6 gap-1 pt-0.5" role="radiogroup" aria-label="Pilihan Peta Dasar">
             <button
               v-for="b in BASEMAP_OPTIONS"
               :key="b.key"
@@ -305,7 +306,8 @@ function handleFilterStatusChange(layer: ActiveLayerItem, val: string) {
                 <UIcon v-else-if="b.key === 'satellite'" name="i-lucide-globe" class="size-4" />
                 <UIcon v-else-if="b.key === 'positron'" name="i-lucide-sun" class="size-4" />
                 <UIcon v-else-if="b.key === 'dark'" name="i-lucide-moon" class="size-4" />
-                <UIcon v-else name="i-lucide-mountain" class="size-4" />
+                <UIcon v-else-if="b.key === 'topo'" name="i-lucide-mountain" class="size-4" />
+                <UIcon v-else name="i-lucide-square" class="size-4" />
               </div>
 
               <span

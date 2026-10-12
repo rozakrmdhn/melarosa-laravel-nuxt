@@ -172,7 +172,7 @@ function dismiss() {
     <Transition name="sheet-slide">
       <div
         v-if="open"
-        class="fixed bottom-0 left-0 right-0 z-40 lg:hidden flex flex-col bg-white dark:bg-[#0b0f19] rounded-t-2xl shadow-2xl border-t border-gray-200 dark:border-gray-800 will-change-transform"
+        class="fixed bottom-0 left-0 right-0 z-50 lg:hidden flex flex-col bg-white dark:bg-[#0b0f19] rounded-t-2xl shadow-2xl border-t border-gray-200 dark:border-gray-800 will-change-transform"
         :style="sheetStyle"
       >
         <!-- Top Drag Header: touch-none strictly isolated here for dragging gesture -->

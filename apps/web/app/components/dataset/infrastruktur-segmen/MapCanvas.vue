@@ -13,6 +13,7 @@ interface Props {
   loading?: boolean;
   basemap?: BasemapType;
   tipeFilter?: string | null;
+  perkerasanFilter?: string | null;
   kondisiFilter?: string | null;
   statusVerifikasiFilter?: string | null;
   kecamatanFilter?: number | null;
@@ -41,6 +42,7 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   basemap: 'osm',
   tipeFilter: null,
+  perkerasanFilter: null,
   kondisiFilter: null,
   statusVerifikasiFilter: null,
   kecamatanFilter: null,
@@ -345,7 +347,7 @@ function getJalanPorosStyle(feature: any) {
 
 // ─── Basemap Source Factory ───────────────────────────────────────────────────
 function getBasemapSource(type: BasemapType) {
-  if (!olModules) return null;
+  if (!olModules || type === 'none') return null;
   const { OSM, XYZ } = olModules;
   if (type === 'satellite') {
     return new XYZ({
@@ -373,7 +375,13 @@ function setBasemap(type: BasemapType) {
   currentBasemap.value = type;
   emit('update:basemap', type);
   if (baseTileLayer && olModules) {
-    baseTileLayer.setSource(getBasemapSource(type));
+    if (type === 'none') {
+      baseTileLayer.setVisible(false);
+      baseTileLayer.setSource(null);
+    } else {
+      baseTileLayer.setVisible(true);
+      baseTileLayer.setSource(getBasemapSource(type));
+    }
   }
 }
 
@@ -437,6 +445,7 @@ function getFeatureStyle(feature: any) {
 
   // Client-side filtering
   if (props.tipeFilter && String(propsObj.tipe_kode || '').trim().toLowerCase() !== props.tipeFilter.trim().toLowerCase()) return null;
+  if (props.perkerasanFilter && !String(propsObj.jenis_perkerasan || propsObj.perkerasan || '').toLowerCase().includes(props.perkerasanFilter.toLowerCase().trim())) return null;
   if (props.kondisiFilter && !String(propsObj.kondisi || '').toLowerCase().includes(props.kondisiFilter.toLowerCase().trim())) return null;
   if (props.statusVerifikasiFilter && String(propsObj.status_verifikasi || '').trim().toLowerCase() !== props.statusVerifikasiFilter.trim().toLowerCase()) return null;
   if (props.kecamatanFilter) {
@@ -1189,7 +1198,8 @@ async function initMap() {
 
     // 1. Basemap Layer
     baseTileLayer = new TileLayer({
-      source: getBasemapSource(currentBasemap.value),
+      source: currentBasemap.value === 'none' ? null : getBasemapSource(currentBasemap.value),
+      visible: currentBasemap.value !== 'none',
       zIndex: 0,
     });
 
@@ -1488,6 +1498,7 @@ let filterDebounceTimer: any = null;
 watch(
   [
     () => props.tipeFilter,
+    () => props.perkerasanFilter,
     () => props.kondisiFilter,
     () => props.statusVerifikasiFilter,
     () => props.kecamatanFilter,
@@ -1692,9 +1703,16 @@ defineExpose({
 </script>
 
 <template>
-  <div class="relative w-full h-full overflow-hidden select-none bg-gray-100 dark:bg-[#070b14]">
+  <div
+    class="relative w-full h-full overflow-hidden select-none transition-colors duration-200"
+    :class="currentBasemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+  >
     <!-- OpenLayers Map Target Container -->
-    <div ref="mapContainer" class="absolute inset-0 w-full h-full bg-gray-100 dark:bg-[#070b14]" />
+    <div
+      ref="mapContainer"
+      class="absolute inset-0 w-full h-full transition-colors duration-200"
+      :class="currentBasemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+    />
 
     <!-- Floating MVT Loading Indicator Badge (Top Left) -->
     <Transition
@@ -1926,9 +1944,9 @@ defineExpose({
     <!-- ═══ FLOATING BASEMAP SELECTOR (Bottom Left, Clean Solid) ════════════════ -->
     <div class="absolute bottom-16 sm:bottom-3 left-3 z-20 flex items-center gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
       <UButton
-        v-for="bm in (['osm', 'dark', 'satellite', 'topo'] as const)"
+        v-for="bm in (['osm', 'dark', 'satellite', 'topo', 'none'] as const)"
         :key="bm"
-        :label="bm === 'satellite' ? 'Satelit' : bm === 'dark' ? 'Gelap' : bm === 'topo' ? 'Topografi' : 'OSM'"
+        :label="bm === 'satellite' ? 'Satelit' : bm === 'dark' ? 'Gelap' : bm === 'topo' ? 'Topografi' : bm === 'none' ? 'None' : 'OSM'"
         size="xs"
         :color="currentBasemap === bm ? 'primary' : 'neutral'"
         :variant="currentBasemap === bm ? 'subtle' : 'ghost'"

@@ -28,7 +28,9 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'update:modelKecamatan', val: number | null): void;
+  (e: 'update:model-kecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
+  (e: 'update:model-desa', val: number | null): void;
   (e: 'change', val: { id_kecamatan: number | null; id_desa: number | null }): void;
 }>();
 
@@ -92,8 +94,10 @@ function resolveId(val: any): number | null {
 function handleKecamatanSelect(val: any) {
   const newKec = resolveId(val);
   emit('update:modelKecamatan', newKec);
+  emit('update:model-kecamatan', newKec);
   if (!isDesaLocked.value) {
     emit('update:modelDesa', null);
+    emit('update:model-desa', null);
     emit('change', { id_kecamatan: newKec, id_desa: null });
   } else {
     emit('change', { id_kecamatan: newKec, id_desa: props.modelDesa });
@@ -103,6 +107,7 @@ function handleKecamatanSelect(val: any) {
 function handleDesaSelect(val: any) {
   const newDesa = resolveId(val);
   emit('update:modelDesa', newDesa);
+  emit('update:model-desa', newDesa);
   emit('change', { id_kecamatan: props.modelKecamatan, id_desa: newDesa });
 }
 
@@ -110,6 +115,7 @@ async function loadKecamatan() {
   await wilayahStore.getKecamatanList();
   if (auth.user?.id_kecamatan && !props.modelKecamatan) {
     emit('update:modelKecamatan', auth.user.id_kecamatan);
+    emit('update:model-kecamatan', auth.user.id_kecamatan);
   }
 }
 
@@ -118,6 +124,7 @@ async function loadDesa(kecId?: number | null) {
   await wilayahStore.getDesaList(kecId);
   if (auth.user?.id_desa && !props.modelDesa) {
     emit('update:modelDesa', auth.user.id_desa);
+    emit('update:model-desa', auth.user.id_desa);
   }
 }
 
@@ -147,6 +154,7 @@ onMounted(() => {
         :disabled="isKecamatanLocked"
         :trailing-icon="isKecamatanLocked ? 'i-lucide-lock' : undefined"
         :size="size"
+        :ui="{ content: 'z-[100]' }"
         placeholder="Pilih Kecamatan"
         class="w-full"
         @update:model-value="handleKecamatanSelect"
@@ -164,6 +172,7 @@ onMounted(() => {
         :disabled="isDesaLocked || !modelKecamatan"
         :trailing-icon="isDesaLocked ? 'i-lucide-lock' : undefined"
         :size="size"
+        :ui="{ content: 'z-[100]' }"
         :placeholder="modelKecamatan ? 'Pilih Desa' : 'Pilih Kecamatan dulu'"
         class="w-full"
         @update:model-value="handleDesaSelect"

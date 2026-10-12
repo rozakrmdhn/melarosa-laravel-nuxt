@@ -484,8 +484,8 @@ function handleSelectLayer(layerId: string) {
               :allow-all="true"
               :show-labels="false"
               size="xs"
-              @update:model-kecamatan="emit('update:modelKecamatan', $event)"
-              @update:model-desa="emit('update:modelDesa', $event)"
+              @update:model-kecamatan="(val) => { emit('update:modelKecamatan', val); emit('update:model-kecamatan', val); }"
+              @update:model-desa="(val) => { emit('update:modelDesa', val); emit('update:model-desa', val); }"
             />
           </div>
         </div>

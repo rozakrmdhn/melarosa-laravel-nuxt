@@ -429,11 +429,15 @@ const activeLayerTitle = computed(() => {
 
 function handleApplySegmenFilter() {
   isFilterDialogOpen.value = false;
+  mobileDrawerOpen.value = false;
+  syncQueryToUrl();
+  refreshAll(true);
   fitAllBounds();
 }
 
 function handleApplyJalanFilter() {
   isFilterDialogOpen.value = false;
+  mobileDrawerOpen.value = false;
   mapCanvasRef.value?.refreshJalanPorosVectorTiles();
   mobileMapCanvasRef.value?.refreshJalanPorosVectorTiles();
 }
@@ -1534,6 +1538,7 @@ onMounted(async () => {
                     :selected-segmen-id="selectedSegmenId"
                     :selected-segmen="selectedSegmen"
                     :tipe-filter="filterTipe"
+                    :perkerasan-filter="filterPerkerasan"
                     :kondisi-filter="filterKondisi"
                     :status-verifikasi-filter="filterStatusVerifikasi"
                     :kecamatan-filter="filterKecamatan"
@@ -1641,6 +1646,7 @@ onMounted(async () => {
           :selected-segmen-id="selectedSegmenId"
           :selected-segmen="selectedSegmen"
           :tipe-filter="filterTipe"
+          :perkerasan-filter="filterPerkerasan"
           :kondisi-filter="filterKondisi"
           :status-verifikasi-filter="filterStatusVerifikasi"
           :kecamatan-filter="filterKecamatan"
@@ -2112,11 +2118,24 @@ onMounted(async () => {
             layer-id="infrastruktur-segmen"
             layer-title="Segmen Fisik Infrastruktur"
             :tipe-list="tipeList"
-            v-model:selected-tipe="filterTipe"
-            v-model:selected-kondisi="filterKondisi"
-            v-model:selected-status-verifikasi="filterStatusVerifikasi"
-            v-model:model-kecamatan="filterKecamatan"
-            v-model:model-desa="filterDesa"
+            :selected-tipe="filterTipe"
+            :selected-perkerasan="filterPerkerasan"
+            :selected-kondisi="filterKondisi"
+            :selected-status-verifikasi="filterStatusVerifikasi"
+            :model-kecamatan="filterKecamatan"
+            :model-desa="filterDesa"
+            @update:selected-tipe="(val) => filterTipe = val"
+            @update:selectedTipe="(val) => filterTipe = val"
+            @update:selected-perkerasan="(val) => filterPerkerasan = val"
+            @update:selectedPerkerasan="(val) => filterPerkerasan = val"
+            @update:selected-kondisi="(val) => filterKondisi = val"
+            @update:selectedKondisi="(val) => filterKondisi = val"
+            @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
+            @update:selectedStatusVerifikasi="(val) => filterStatusVerifikasi = val"
+            @update:model-kecamatan="(val) => filterKecamatan = val"
+            @update:modelKecamatan="(val) => filterKecamatan = val"
+            @update:model-desa="(val) => filterDesa = val"
+            @update:modelDesa="(val) => filterDesa = val"
             @apply="() => { mobileDrawerOpen = false; handleApplySegmenFilter(); }"
             @reset="resetSegmenFilters"
           />
@@ -2127,10 +2146,18 @@ onMounted(async () => {
             :is-mobile="true"
             layer-id="jalan-poros-desa"
             layer-title="Jalan Poros Desa"
-            v-model:selected-perkerasan="filterJalanPerkerasan"
-            v-model:selected-kondisi="filterJalanKondisi"
-            v-model:model-kecamatan="filterJalanKecamatan"
-            v-model:model-desa="filterJalanDesa"
+            :selected-perkerasan="filterJalanPerkerasan"
+            :selected-kondisi="filterJalanKondisi"
+            :model-kecamatan="filterJalanKecamatan"
+            :model-desa="filterJalanDesa"
+            @update:selected-perkerasan="(val) => filterJalanPerkerasan = val"
+            @update:selectedPerkerasan="(val) => filterJalanPerkerasan = val"
+            @update:selected-kondisi="(val) => filterJalanKondisi = val"
+            @update:selectedKondisi="(val) => filterJalanKondisi = val"
+            @update:model-kecamatan="(val) => filterJalanKecamatan = val"
+            @update:modelKecamatan="(val) => filterJalanKecamatan = val"
+            @update:model-desa="(val) => filterJalanDesa = val"
+            @update:modelDesa="(val) => filterJalanDesa = val"
             @apply="() => { mobileDrawerOpen = false; handleApplyJalanFilter(); }"
             @reset="resetJalanFilters"
           />

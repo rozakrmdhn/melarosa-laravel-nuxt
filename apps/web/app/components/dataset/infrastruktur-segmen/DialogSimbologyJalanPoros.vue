@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<Props>(), {
   open: false,
   symbology: () => ({
     ...DEFAULT_SYMBOLOGY,
-    lineColor: '#2563eb',
+    lineColor: '#FF9100',
     lineWidth: 2,
   }),
 });

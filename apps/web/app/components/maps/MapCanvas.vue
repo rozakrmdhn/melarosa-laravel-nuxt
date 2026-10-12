@@ -204,6 +204,8 @@ function getBasemapSource(key: BasemapKey) {
         attributions: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a>',
         maxZoom: 17,
       });
+    case "none":
+      return null;
     case "osm":
     default:
       return new OSM();
@@ -214,9 +216,15 @@ watch(
   () => props.currentBasemap,
   (newBasemap) => {
     if (tileLayer && olModules) {
-      const source = getBasemapSource(newBasemap);
-      if (source) {
-        tileLayer.setSource(source);
+      if (newBasemap === "none") {
+        tileLayer.setVisible(false);
+        tileLayer.setSource(null);
+      } else {
+        const source = getBasemapSource(newBasemap);
+        if (source) {
+          tileLayer.setVisible(true);
+          tileLayer.setSource(source);
+        }
       }
     }
   }
@@ -620,7 +628,8 @@ async function initMap() {
     };
 
     tileLayer = new TileLayer({
-      source: getBasemapSource(props.currentBasemap),
+      source: props.currentBasemap === "none" ? null : getBasemapSource(props.currentBasemap),
+      visible: props.currentBasemap !== "none",
       zIndex: 0,
     });
 
@@ -1245,11 +1254,15 @@ defineExpose({
 </script>
 
 <template>
-  <div class="relative w-full h-full select-none overflow-hidden bg-gray-100 dark:bg-[#070b14]">
+  <div
+    class="relative w-full h-full select-none overflow-hidden transition-colors duration-200"
+    :class="currentBasemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+  >
     <!-- OpenLayers Map Target Container (Default panah, pointer saat menyorot feature data) -->
     <div
       ref="mapContainer"
-      class="w-full h-full cursor-default focus:outline-hidden"
+      class="w-full h-full cursor-default focus:outline-hidden transition-colors duration-200"
+      :class="currentBasemap === 'none' ? 'bg-white' : ''"
       tabindex="0"
       aria-label="Peta Interaktif Kabupaten Bojonegoro"
       @mouseenter="handleMapMouseEnter"

@@ -166,7 +166,7 @@ let pulseOverlay: any = null;
 let olModules: any = null;
 
 function getBasemapSource(type: BasemapType) {
-  if (!olModules) return null;
+  if (!olModules || type === "none") return null;
   const { OSM, XYZ } = olModules;
   if (type === "satellite") {
     return new XYZ({
@@ -187,7 +187,13 @@ function getBasemapSource(type: BasemapType) {
 function setBasemap(type: BasemapType) {
   emit("update:basemap", type);
   if (tileLayer && olModules) {
-    tileLayer.setSource(getBasemapSource(type));
+    if (type === "none") {
+      tileLayer.setVisible(false);
+      tileLayer.setSource(null);
+    } else {
+      tileLayer.setVisible(true);
+      tileLayer.setSource(getBasemapSource(type));
+    }
   }
 }
 
@@ -717,7 +723,8 @@ async function initMap() {
     };
 
     tileLayer = new TileLayer({
-      source: getBasemapSource(props.basemap),
+      source: props.basemap === 'none' ? null : getBasemapSource(props.basemap),
+      visible: props.basemap !== 'none',
       zIndex: 0,
     });
 
@@ -1791,9 +1798,16 @@ defineExpose({
 </script>
 
 <template>
-  <div class="relative w-full h-full overflow-hidden select-none bg-gray-100 dark:bg-[#070b14]">
+  <div
+    class="relative w-full h-full overflow-hidden select-none transition-colors duration-200"
+    :class="basemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+  >
     <!-- Map Canvas Element -->
-    <div ref="mapContainer" class="absolute inset-0 w-full h-full bg-gray-100 dark:bg-[#070b14]" />
+    <div
+      ref="mapContainer"
+      class="absolute inset-0 w-full h-full transition-colors duration-200"
+      :class="basemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+    />
 
     <!-- Floating MVT Loading Indicator Badge (Top Left) -->
     <Transition
@@ -2129,9 +2143,9 @@ defineExpose({
     <!-- Floating Basemap Selector (Bottom Left, Clean Solid) -->
     <div class="absolute bottom-16 sm:bottom-3 left-3 z-20 flex items-center gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
       <UButton
-        v-for="bm in (['osm', 'dark', 'satellite'] as const)"
+        v-for="bm in (['osm', 'dark', 'satellite', 'none'] as const)"
         :key="bm"
-        :label="bm === 'satellite' ? 'Satelit' : bm === 'dark' ? 'Gelap' : 'OSM'"
+        :label="bm === 'satellite' ? 'Satelit' : bm === 'dark' ? 'Gelap' : bm === 'none' ? 'None' : 'OSM'"
         size="xs"
         :color="basemap === bm ? 'primary' : 'neutral'"
         :variant="basemap === bm ? 'subtle' : 'ghost'"

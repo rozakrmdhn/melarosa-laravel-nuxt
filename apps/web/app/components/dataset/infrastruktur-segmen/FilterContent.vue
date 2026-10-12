@@ -34,11 +34,17 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'update:selectedTipe', val: string | null): void;
+  (e: 'update:selected-tipe', val: string | null): void;
   (e: 'update:selectedKondisi', val: string | null): void;
+  (e: 'update:selected-kondisi', val: string | null): void;
   (e: 'update:selectedStatusVerifikasi', val: string | null): void;
+  (e: 'update:selected-status-verifikasi', val: string | null): void;
   (e: 'update:selectedPerkerasan', val: string | null): void;
+  (e: 'update:selected-perkerasan', val: string | null): void;
   (e: 'update:modelKecamatan', val: number | null): void;
+  (e: 'update:model-kecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
+  (e: 'update:model-desa', val: number | null): void;
   (e: 'apply'): void;
   (e: 'reset'): void;
 }>();
@@ -59,27 +65,39 @@ function extractNumber(val: any): number | null {
 }
 
 function handleTipeChange(val: any) {
-  emit('update:selectedTipe', extractValue(val));
+  const v = extractValue(val);
+  emit('update:selectedTipe', v);
+  emit('update:selected-tipe', v);
 }
 
 function handleKondisiChange(val: any) {
-  emit('update:selectedKondisi', extractValue(val));
+  const v = extractValue(val);
+  emit('update:selectedKondisi', v);
+  emit('update:selected-kondisi', v);
 }
 
 function handleStatusVerifikasiChange(val: any) {
-  emit('update:selectedStatusVerifikasi', extractValue(val));
+  const v = extractValue(val);
+  emit('update:selectedStatusVerifikasi', v);
+  emit('update:selected-status-verifikasi', v);
 }
 
 function handlePerkerasanChange(val: any) {
-  emit('update:selectedPerkerasan', extractValue(val));
+  const v = extractValue(val);
+  emit('update:selectedPerkerasan', v);
+  emit('update:selected-perkerasan', v);
 }
 
 function handleKecamatanChange(val: any) {
-  emit('update:modelKecamatan', extractNumber(val));
+  const n = extractNumber(val);
+  emit('update:modelKecamatan', n);
+  emit('update:model-kecamatan', n);
 }
 
 function handleDesaChange(val: any) {
-  emit('update:modelDesa', extractNumber(val));
+  const n = extractNumber(val);
+  emit('update:modelDesa', n);
+  emit('update:model-desa', n);
 }
 
 const tipeSelectItems = computed(() => [
@@ -186,6 +204,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
             value-key="value"
             label-key="label"
             :size="isMobile ? 'sm' : 'xs'"
+            :ui="{ content: 'z-[100]' }"
             placeholder="Pilih tipe infrastruktur"
             class="w-full"
             @update:model-value="handleTipeChange"
@@ -203,6 +222,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
             value-key="value"
             label-key="label"
             :size="isMobile ? 'sm' : 'xs'"
+            :ui="{ content: 'z-[100]' }"
             placeholder="Pilih perkerasan"
             class="w-full"
             @update:model-value="handlePerkerasanChange"
@@ -221,6 +241,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
               value-key="value"
               label-key="label"
               :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
               placeholder="Pilih kondisi"
               class="w-full"
               @update:model-value="handleKondisiChange"
@@ -237,6 +258,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
               value-key="value"
               label-key="label"
               :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
               placeholder="Pilih status"
               class="w-full"
               @update:model-value="handleStatusVerifikasiChange"
@@ -259,6 +281,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
               value-key="value"
               label-key="label"
               :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
               placeholder="Pilih perkerasan"
               class="w-full"
               @update:model-value="handlePerkerasanChange"
@@ -276,6 +299,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
               value-key="value"
               label-key="label"
               :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
               placeholder="Pilih kondisi"
               class="w-full"
               @update:model-value="handleKondisiChange"

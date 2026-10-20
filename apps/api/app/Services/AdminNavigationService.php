@@ -132,6 +132,50 @@ class AdminNavigationService
                 ],
             ],
             [
+                'label' => 'Proposal BKKD',
+                'icon' => 'i-lucide-file-text',
+                'to' => '/admin/bkkd/proposal',
+                'permission' => [
+                    'bkkd-proposal-view',
+                    'bkkd-proposal-create',
+                    'bkkd-verifikasi-view',
+                    'bkkd-verifikasi-manage',
+                    'bkkd-riwayat-view',
+                ],
+                'children' => [
+                    [
+                        'label' => 'Daftar Proposal',
+                        'icon' => 'i-lucide-list',
+                        'to' => '/admin/bkkd/proposal',
+                        'permission' => ['bkkd-proposal-view'],
+                    ],
+                    [
+                        'label' => 'Hasil Verifikasi OPD',
+                        'icon' => 'i-lucide-clipboard-check',
+                        'to' => '/admin/bkkd/verifikasi',
+                        'permission' => ['bkkd-verifikasi-view'],
+                    ],
+                    [
+                        'label' => 'Rekapitulasi & TAPD',
+                        'icon' => 'i-lucide-calculator',
+                        'to' => '/admin/bkkd/rekapitulasi',
+                        'permission' => ['bkkd-proposal-view'],
+                    ],
+                    [
+                        'label' => 'Agregasi Usulan Desa',
+                        'icon' => 'i-lucide-table-properties',
+                        'to' => '/admin/bkkd/agregasi-desa',
+                        'permission' => ['bkkd-proposal-view'],
+                    ],
+                    [
+                        'label' => 'Riwayat Perubahan',
+                        'icon' => 'i-lucide-history',
+                        'to' => '/admin/bkkd/riwayat',
+                        'permission' => ['bkkd-riwayat-view'],
+                    ],
+                ],
+            ],
+            [
                 'label' => 'Layers',
                 'icon' => 'i-lucide-layers',
                 'to' => '/admin/layers',

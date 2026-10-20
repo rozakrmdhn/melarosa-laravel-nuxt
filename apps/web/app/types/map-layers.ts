@@ -1,4 +1,4 @@
-export type BasemapKey = "osm" | "satellite" | "positron" | "dark" | "topo" | "none";
+export type BasemapKey = "esri" | "rbi" | "osm" | "satellite" | "aerial" | "none" | "dark" | "positron" | "topo";
 
 export type ActiveLayerTool = "none" | "opacity" | "filter" | "info";
 
@@ -10,6 +10,7 @@ export interface ActiveLayerItem {
   protocol?: string;
   url?: string;
   attribution?: string | null;
+  instansi?: string | null;
   description?: string | null;
   source_type?: string | null;
   is_active?: boolean;
@@ -27,6 +28,10 @@ export interface ActiveLayerItem {
   // WMS / OGC geospatial service parameters
   wmsUrl?: string;
   wmsLayerName?: string;
+
+  // Martin / MVT vector tile parameters
+  mvtUrl?: string;
+  martinSource?: string;
 
   // Filter state
   filterKecamatan?: string | null;

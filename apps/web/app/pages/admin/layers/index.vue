@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: "layers-view",
@@ -553,7 +553,7 @@ function getSourceTypeLabel(type: string): string {
           <UInput
             v-model="search"
             icon="i-heroicons-magnifying-glass"
-            placeholder="Cari nama layer atau atribusi..."
+            placeholder="Cari nama layer atau instansi/atribusi..."
             class="w-full"
             clearable
           />
@@ -677,8 +677,8 @@ function getSourceTypeLabel(type: string): string {
                   <div v-if="layer.layer_name" class="font-mono text-[11px] text-gray-500 dark:text-gray-400 truncate max-w-md">
                     {{ layer.layer_name }}
                   </div>
-                  <div v-if="layer.attribution" class="text-[11px] text-gray-400 flex items-center gap-1">
-                    <UIcon name="i-lucide-copyright" class="size-3" />
+                  <div v-if="layer.attribution" class="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                    <UIcon name="i-lucide-building-2" class="size-3 text-gray-400 shrink-0" />
                     <span>{{ layer.attribution }}</span>
                   </div>
                 </div>
@@ -891,10 +891,10 @@ function getSourceTypeLabel(type: string): string {
           </div>
 
           <!-- Attribution & Description -->
-          <UFormField label="Hak Cipta / Atribusi Sumber Data">
+          <UFormField label="Instansi / Atribusi Sumber Data">
             <UInput
               v-model="formState.attribution"
-              placeholder="Contoh: Geoportal Kabupaten Bojonegoro"
+              placeholder="Contoh: Bappeda / Geoportal Kabupaten Bojonegoro"
               class="w-full"
             />
           </UFormField>

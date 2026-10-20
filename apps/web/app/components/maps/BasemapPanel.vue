@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import type { BasemapKey } from "~/components/maps/MapCanvas.vue";
 
 const props = withDefaults(
@@ -6,7 +6,7 @@ const props = withDefaults(
     currentBasemap?: BasemapKey;
   }>(),
   {
-    currentBasemap: "osm",
+    currentBasemap: "esri",
   }
 );
 
@@ -23,8 +23,20 @@ interface BasemapDef {
 
 const basemapList: BasemapDef[] = [
   {
+    key: "esri",
+    name: "Esri",
+    tagline: "Esri World Topo Map",
+    type: "raster",
+  },
+  {
+    key: "rbi",
+    name: "RBI",
+    tagline: "Rupabumi Indonesia (BIG)",
+    type: "raster",
+  },
+  {
     key: "osm",
-    name: "Standar",
+    name: "OSM",
     tagline: "Peta jalan OpenStreetMap",
     type: "vector",
   },
@@ -35,21 +47,9 @@ const basemapList: BasemapDef[] = [
     type: "raster",
   },
   {
-    key: "positron",
-    name: "Terang",
-    tagline: "Peta bersih minimalis",
-    type: "vector",
-  },
-  {
-    key: "dark",
-    name: "Gelap",
-    tagline: "Kontras malam hari",
-    type: "vector",
-  },
-  {
-    key: "topo",
-    name: "Medan",
-    tagline: "Kontur dan elevasi",
+    key: "aerial",
+    name: "Aerial",
+    tagline: "Foto udara resolusi tinggi",
     type: "raster",
   },
 ];
@@ -144,9 +144,46 @@ onUnmounted(() => {
     >
       <!-- Preview Visual of the currently active basemap -->
       <div class="absolute inset-0 w-full h-full pointer-events-none">
+        <!-- Esri World Topo Preview (Default) -->
+        <svg
+          v-if="activeBasemap.key === 'esri' || activeBasemap.key === 'positron'"
+          class="w-full h-full"
+          viewBox="0 0 64 64"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect width="64" height="64" fill="#E8ECE4" />
+          <path d="M0 20C15 15 35 25 50 18C58 14 62 16 64 15V64H0V20Z" fill="#DCE5D8" />
+          <path d="M0 38C18 32 32 44 48 36C56 32 60 35 64 33V64H0V38Z" fill="#CBDBC5" />
+          <path d="M0 48C12 45 24 55 40 50C52 46 58 52 64 48V64H0V48Z" fill="#B7D2AE" />
+          <line x1="0" y1="28" x2="64" y2="28" stroke="#FFFFFF" stroke-width="2.5" />
+          <line x1="0" y1="28" x2="64" y2="28" stroke="#E28935" stroke-width="1.2" />
+          <line x1="36" y1="0" x2="36" y2="64" stroke="#FFFFFF" stroke-width="2" />
+          <line x1="36" y1="0" x2="36" y2="64" stroke="#E28935" stroke-width="0.8" />
+        </svg>
+
+        <!-- RBI Preview -->
+        <svg
+          v-else-if="activeBasemap.key === 'rbi'"
+          class="w-full h-full"
+          viewBox="0 0 64 64"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect width="64" height="64" fill="#F4F6F0" />
+          <path d="M0 0H36L28 28H0V0Z" fill="#DDECD2" />
+          <path d="M32 36H64V64H24L32 36Z" fill="#CEE3C3" />
+          <path d="M0 44C18 42 28 50 44 42C52 38 58 40 64 38V48C56 50 48 58 36 54C24 50 14 56 0 54V44Z" fill="#85C1E9" />
+          <line x1="0" y1="22" x2="64" y2="22" stroke="#FFFFFF" stroke-width="3" />
+          <line x1="0" y1="22" x2="64" y2="22" stroke="#E74C3C" stroke-width="1.8" />
+          <line x1="26" y1="0" x2="26" y2="64" stroke="#FFFFFF" stroke-width="3" />
+          <line x1="26" y1="0" x2="26" y2="64" stroke="#D35400" stroke-width="1.5" />
+          <circle cx="26" cy="22" r="3.5" fill="#C0392B" stroke="#FFFFFF" stroke-width="1" />
+        </svg>
+
         <!-- OSM Preview -->
         <svg
-          v-if="activeBasemap.key === 'osm'"
+          v-else-if="activeBasemap.key === 'osm' || activeBasemap.key === 'topo'"
           class="w-full h-full"
           viewBox="0 0 64 64"
           fill="none"
@@ -193,60 +230,25 @@ onUnmounted(() => {
           />
         </svg>
 
-        <!-- Positron Preview -->
+        <!-- Aerial Preview -->
         <svg
-          v-else-if="activeBasemap.key === 'positron'"
+          v-else-if="activeBasemap.key === 'aerial'"
           class="w-full h-full"
           viewBox="0 0 64 64"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          <rect width="64" height="64" fill="#F4F4F6" />
-          <rect x="4" y="4" width="22" height="24" rx="2" fill="#EAEBEF" />
-          <rect x="32" y="4" width="28" height="18" rx="2" fill="#EAEBEF" />
-          <rect x="4" y="34" width="36" height="26" rx="2" fill="#EAEBEF" />
-          <rect x="44" y="26" width="16" height="34" rx="2" fill="#EAEBEF" />
-          <line x1="0" y1="30" x2="64" y2="30" stroke="#FFFFFF" stroke-width="3" />
-          <line x1="28" y1="0" x2="28" y2="64" stroke="#FFFFFF" stroke-width="3" />
-          <line x1="0" y1="30" x2="64" y2="30" stroke="#D1D5DB" stroke-width="1" />
-          <line x1="28" y1="0" x2="28" y2="64" stroke="#D1D5DB" stroke-width="1" />
-        </svg>
-
-        <!-- Dark Preview -->
-        <svg
-          v-else-if="activeBasemap.key === 'dark'"
-          class="w-full h-full"
-          viewBox="0 0 64 64"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <rect width="64" height="64" fill="#0F172A" />
-          <rect x="4" y="4" width="24" height="22" rx="2" fill="#1E293B" />
-          <rect x="34" y="4" width="26" height="26" rx="2" fill="#1E293B" />
-          <rect x="4" y="32" width="24" height="28" rx="2" fill="#1E293B" />
-          <rect x="34" y="36" width="26" height="24" rx="2" fill="#1E293B" />
-          <line x1="0" y1="30" x2="64" y2="30" stroke="#334155" stroke-width="2" />
-          <line x1="30" y1="0" x2="30" y2="64" stroke="#334155" stroke-width="2" />
-          <line x1="0" y1="30" x2="64" y2="30" stroke="#0284C7" stroke-width="0.8" opacity="0.8" />
-          <line x1="30" y1="0" x2="30" y2="64" stroke="#0284C7" stroke-width="0.8" opacity="0.8" />
-        </svg>
-
-        <!-- Topo Preview -->
-        <svg
-          v-else-if="activeBasemap.key === 'topo'"
-          class="w-full h-full"
-          viewBox="0 0 64 64"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <rect width="64" height="64" fill="#E2E8D5" />
-          <path d="M0 10C24 4 40 22 64 12V64H0V10Z" fill="#D3DDBE" />
-          <path d="M0 24C20 18 36 34 64 24V64H0V24Z" fill="#C4CEAC" />
-          <path d="M0 38C18 32 30 46 64 36V64H0V38Z" fill="#B2BD97" />
-          <path d="M0 50C22 46 38 56 64 48V64H0V50Z" fill="#A1AC84" />
-          <path d="M0 10C24 4 40 22 64 12" stroke="#8A966E" stroke-width="0.8" fill="none" />
-          <path d="M0 24C20 18 36 34 64 24" stroke="#8A966E" stroke-width="0.8" fill="none" />
-          <path d="M0 38C18 32 30 46 64 36" stroke="#8A966E" stroke-width="0.8" fill="none" />
+          <rect width="64" height="64" fill="#1C3822" />
+          <polygon points="0,0 34,0 26,34 0,28" fill="#365C2E" />
+          <polygon points="34,0 64,0 64,30 26,34" fill="#4A753D" />
+          <polygon points="0,28 26,34 22,64 0,64" fill="#2E5026" />
+          <polygon points="26,34 64,30 64,64 22,64" fill="#3D6433" />
+          <rect x="8" y="10" width="10" height="8" rx="1" fill="#C2593F" />
+          <rect x="42" y="14" width="12" height="10" rx="1" fill="#D97757" />
+          <rect x="36" y="44" width="14" height="10" rx="1" fill="#B34B32" />
+          <path d="M0 40Q24 36 28 32T64 26" stroke="#CBD5E1" stroke-width="2.5" fill="none" opacity="0.8" />
+          <circle cx="32" cy="32" r="10" stroke="#38BDF8" stroke-width="1.2" stroke-dasharray="2 2" fill="none" opacity="0.85" />
+          <circle cx="32" cy="32" r="2.5" fill="#38BDF8" opacity="0.9" />
         </svg>
       </div>
 
@@ -297,9 +299,46 @@ onUnmounted(() => {
                 ? 'border-blue-500 ring-2 ring-blue-500/30 scale-102'
                 : 'border-slate-200 dark:border-slate-700/80 group-hover/card:border-slate-400 dark:group-hover/card:border-slate-500'"
             >
+              <!-- Esri World Topo Thumbnail -->
+              <svg
+                v-if="item.key === 'esri' || item.key === 'positron'"
+                class="w-full h-full"
+                viewBox="0 0 64 64"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect width="64" height="64" fill="#E8ECE4" />
+                <path d="M0 20C15 15 35 25 50 18C58 14 62 16 64 15V64H0V20Z" fill="#DCE5D8" />
+                <path d="M0 38C18 32 32 44 48 36C56 32 60 35 64 33V64H0V38Z" fill="#CBDBC5" />
+                <path d="M0 48C12 45 24 55 40 50C52 46 58 52 64 48V64H0V48Z" fill="#B7D2AE" />
+                <line x1="0" y1="28" x2="64" y2="28" stroke="#FFFFFF" stroke-width="2.5" />
+                <line x1="0" y1="28" x2="64" y2="28" stroke="#E28935" stroke-width="1.2" />
+                <line x1="36" y1="0" x2="36" y2="64" stroke="#FFFFFF" stroke-width="2" />
+                <line x1="36" y1="0" x2="36" y2="64" stroke="#E28935" stroke-width="0.8" />
+              </svg>
+
+              <!-- RBI Thumbnail -->
+              <svg
+                v-else-if="item.key === 'rbi'"
+                class="w-full h-full"
+                viewBox="0 0 64 64"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect width="64" height="64" fill="#F4F6F0" />
+                <path d="M0 0H36L28 28H0V0Z" fill="#DDECD2" />
+                <path d="M32 36H64V64H24L32 36Z" fill="#CEE3C3" />
+                <path d="M0 44C18 42 28 50 44 42C52 38 58 40 64 38V48C56 50 48 58 36 54C24 50 14 56 0 54V44Z" fill="#85C1E9" />
+                <line x1="0" y1="22" x2="64" y2="22" stroke="#FFFFFF" stroke-width="3" />
+                <line x1="0" y1="22" x2="64" y2="22" stroke="#E74C3C" stroke-width="1.8" />
+                <line x1="26" y1="0" x2="26" y2="64" stroke="#FFFFFF" stroke-width="3" />
+                <line x1="26" y1="0" x2="26" y2="64" stroke="#D35400" stroke-width="1.5" />
+                <circle cx="26" cy="22" r="3.5" fill="#C0392B" stroke="#FFFFFF" stroke-width="1" />
+              </svg>
+
               <!-- OSM Thumbnail -->
               <svg
-                v-if="item.key === 'osm'"
+                v-else-if="item.key === 'osm' || item.key === 'topo'"
                 class="w-full h-full"
                 viewBox="0 0 64 64"
                 fill="none"
@@ -346,60 +385,25 @@ onUnmounted(() => {
                 />
               </svg>
 
-              <!-- Positron Thumbnail -->
+              <!-- Aerial Thumbnail -->
               <svg
-                v-else-if="item.key === 'positron'"
+                v-else-if="item.key === 'aerial'"
                 class="w-full h-full"
                 viewBox="0 0 64 64"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
               >
-                <rect width="64" height="64" fill="#F4F4F6" />
-                <rect x="4" y="4" width="22" height="24" rx="2" fill="#EAEBEF" />
-                <rect x="32" y="4" width="28" height="18" rx="2" fill="#EAEBEF" />
-                <rect x="4" y="34" width="36" height="26" rx="2" fill="#EAEBEF" />
-                <rect x="44" y="26" width="16" height="34" rx="2" fill="#EAEBEF" />
-                <line x1="0" y1="30" x2="64" y2="30" stroke="#FFFFFF" stroke-width="3" />
-                <line x1="28" y1="0" x2="28" y2="64" stroke="#FFFFFF" stroke-width="3" />
-                <line x1="0" y1="30" x2="64" y2="30" stroke="#D1D5DB" stroke-width="1" />
-                <line x1="28" y1="0" x2="28" y2="64" stroke="#D1D5DB" stroke-width="1" />
-              </svg>
-
-              <!-- Dark Thumbnail -->
-              <svg
-                v-else-if="item.key === 'dark'"
-                class="w-full h-full"
-                viewBox="0 0 64 64"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect width="64" height="64" fill="#0F172A" />
-                <rect x="4" y="4" width="24" height="22" rx="2" fill="#1E293B" />
-                <rect x="34" y="4" width="26" height="26" rx="2" fill="#1E293B" />
-                <rect x="4" y="32" width="24" height="28" rx="2" fill="#1E293B" />
-                <rect x="34" y="36" width="26" height="24" rx="2" fill="#1E293B" />
-                <line x1="0" y1="30" x2="64" y2="30" stroke="#334155" stroke-width="2" />
-                <line x1="30" y1="0" x2="30" y2="64" stroke="#334155" stroke-width="2" />
-                <line x1="0" y1="30" x2="64" y2="30" stroke="#0284C7" stroke-width="0.8" opacity="0.8" />
-                <line x1="30" y1="0" x2="30" y2="64" stroke="#0284C7" stroke-width="0.8" opacity="0.8" />
-              </svg>
-
-              <!-- Topo Thumbnail -->
-              <svg
-                v-else-if="item.key === 'topo'"
-                class="w-full h-full"
-                viewBox="0 0 64 64"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect width="64" height="64" fill="#E2E8D5" />
-                <path d="M0 10C24 4 40 22 64 12V64H0V10Z" fill="#D3DDBE" />
-                <path d="M0 24C20 18 36 34 64 24V64H0V24Z" fill="#C4CEAC" />
-                <path d="M0 38C18 32 30 46 64 36V64H0V38Z" fill="#B2BD97" />
-                <path d="M0 50C22 46 38 56 64 48V64H0V50Z" fill="#A1AC84" />
-                <path d="M0 10C24 4 40 22 64 12" stroke="#8A966E" stroke-width="0.8" fill="none" />
-                <path d="M0 24C20 18 36 34 64 24" stroke="#8A966E" stroke-width="0.8" fill="none" />
-                <path d="M0 38C18 32 30 46 64 36" stroke="#8A966E" stroke-width="0.8" fill="none" />
+                <rect width="64" height="64" fill="#1C3822" />
+                <polygon points="0,0 34,0 26,34 0,28" fill="#365C2E" />
+                <polygon points="34,0 64,0 64,30 26,34" fill="#4A753D" />
+                <polygon points="0,28 26,34 22,64 0,64" fill="#2E5026" />
+                <polygon points="26,34 64,30 64,64 22,64" fill="#3D6433" />
+                <rect x="8" y="10" width="10" height="8" rx="1" fill="#C2593F" />
+                <rect x="42" y="14" width="12" height="10" rx="1" fill="#D97757" />
+                <rect x="36" y="44" width="14" height="10" rx="1" fill="#B34B32" />
+                <path d="M0 40Q24 36 28 32T64 26" stroke="#CBD5E1" stroke-width="2.5" fill="none" opacity="0.8" />
+                <circle cx="32" cy="32" r="10" stroke="#38BDF8" stroke-width="1.2" stroke-dasharray="2 2" fill="none" opacity="0.85" />
+                <circle cx="32" cy="32" r="2.5" fill="#38BDF8" opacity="0.9" />
               </svg>
 
               <!-- Active Check Badge -->

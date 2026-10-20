@@ -13,8 +13,8 @@ definePageMeta({
 });
 
 useSeoMeta({
-  title: "Peta Interaktif Publik | Melarosa GIS",
-  description: "Peta spasial interaktif publik Kabupaten Bojonegoro dengan pencarian lokasi, eksplorasi basemap, dan katalog layer tematik.",
+  title: "Peta Interaktif | Melarosa GIS",
+  description: "Peta spasial interaktif Kabupaten Bojonegoro dengan pencarian lokasi, eksplorasi basemap, dan katalog layer tematik.",
 });
 
 useHead({
@@ -91,11 +91,16 @@ function parseZoomQuery(raw: any): number | null {
   return null;
 }
 
+// Spatial BBOX Martin Tile Server (gabungan data jalan_porosdesa & infrastruktur_segmen se-Bojonegoro)
+const MARTIN_SPATIAL_BBOX: [number, number, number, number] = [
+  111.445099, -7.451684, 112.163338, -6.981707
+];
+
 // Inisialisasi awal koordinat dari path URL gaya Google Maps atau query bbox
 const pathView = parseGoogleMapsPath(route.fullPath || route.path);
 const initialCenter = pathView ? pathView.center : null;
 const initialZoom = pathView ? pathView.zoom : parseZoomQuery(route.query.zoom || route.query.z);
-const initialBbox = pathView ? null : parseBboxQuery(route.query.bbox);
+const initialBbox = pathView ? null : (parseBboxQuery(route.query.bbox) || MARTIN_SPATIAL_BBOX);
 
 // Label lokasi pencarian dari parameter URL ?search=... atau ?name=...
 function extractSearchQuery(queryObj: any): string | null {
@@ -109,22 +114,30 @@ function extractSearchQuery(queryObj: any): string | null {
 const searchedLocationLabel = ref<string | null>(extractSearchQuery(route.query));
 
 // Inisialisasi basemap dari parameter URL atau localStorage yang persisten
-const validBasemaps: BasemapKey[] = ["osm", "satellite", "positron", "dark", "topo", "none"];
+const validBasemaps: BasemapKey[] = ["esri", "rbi", "osm", "satellite", "aerial", "none", "dark", "topo", "positron"];
 
 function getInitialBasemap(): BasemapKey {
   const queryParam = typeof route.query.basemap === "string" ? route.query.basemap : null;
-  if (queryParam && validBasemaps.includes(queryParam as BasemapKey)) {
-    return queryParam as BasemapKey;
+  if (queryParam) {
+    if (queryParam === "positron") return "esri";
+    if (queryParam === "dark") return "esri";
+    if (queryParam === "topo") return "osm";
+    if (validBasemaps.includes(queryParam as BasemapKey)) {
+      return queryParam as BasemapKey;
+    }
   }
   if (import.meta.client) {
     try {
       const saved = localStorage.getItem("melarosa_active_basemap");
+      if (saved === "positron") return "esri";
+      if (saved === "dark") return "esri";
+      if (saved === "topo") return "osm";
       if (saved && validBasemaps.includes(saved as BasemapKey)) {
         return saved as BasemapKey;
       }
     } catch {}
   }
-  return "osm";
+  return "esri";
 }
 
 const currentBasemap = useState<BasemapKey>("melarosa_active_basemap", () => getInitialBasemap());
@@ -162,45 +175,141 @@ import type { IdentifiedFeature } from "~/components/maps/IdentifyFeatures.vue";
 const identifiedFeatures = ref<IdentifiedFeature[]>([]);
 const isIdentifyingFeatures = ref(false);
 
-// ─── Active GIS Layers State (Dikelola dari Katalog Data & LeftPanel) ─────────
-const activeLayers = ref<ActiveLayerItem[]>([
+// ─── Active GIS Layers Helper & Mapping ──────────────────────────────────────────
+function mapLayerItemToActive(item: any): ActiveLayerItem {
+  const isMvt =
+    (item.protocol || "").toUpperCase() === "MVT" ||
+    item.source_type === "martin" ||
+    (item.url && item.url.includes("/martin/")) ||
+    (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(item.layer_name));
+
+  const isSegmen = item.layer_name === "infrastruktur_segmen" || item.id === "01a1589c-8c15-70b6-a4fe-35517f888b36";
+
+  return {
+    id: String(item.id),
+    title: item.name || item.title || item.layer_name,
+    name: item.name || item.title || item.layer_name,
+    layer_name: item.layer_name || item.wmsLayerName || null,
+    protocol: isMvt ? "MVT" : (item.protocol || "WMS").toUpperCase().replace("OGC:", ""),
+    url: item.url || item.wmsUrl || "",
+    instansi: item.instansi || item.attribution || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
+    attribution: item.attribution || item.instansi || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
+    agency: item.agency || item.instansi || item.attribution || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
+    description: item.description || null,
+    source_type: isMvt ? "martin" : (item.source_type || "external"),
+    visible: true,
+    opacity: typeof item.opacity === "number" ? item.opacity : (isSegmen ? 1 : 0.9),
+    order: typeof item.order === "number" ? item.order : (isSegmen ? 0 : 1),
+    wmsUrl: isMvt ? undefined : (item.wmsUrl || item.url),
+    wmsLayerName: isMvt ? undefined : (item.wmsLayerName || item.layer_name),
+    mvtUrl: isMvt ? (item.mvtUrl || item.url) : undefined,
+    martinSource: isMvt ? (item.martinSource || item.layer_name) : undefined,
+    expanded: isSegmen,
+    activeTool: "none",
+  };
+}
+
+// ─── Preset Fallback Default Layers ───────────────────────────────────────────
+const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
   {
-    id: "batas-desa",
-    title: "Batas Wilayah Administrasi Desa & Kelurahan",
-    name: "Batas Wilayah Administrasi Desa & Kelurahan",
-    layer_name: "palapa:ADMINISTRASIDESA_LN_10K_2019_BOJONEGORO",
-    protocol: "WMS",
-    url: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
-    attribution: "Dinas Pemberdayaan Masyarakat dan Desa (DPMD)",
-    description: "Batas administrasi resmi desa dan kelurahan Kabupaten Bojonegoro.",
-    source_type: "geoserver",
-    wmsUrl: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
-    wmsLayerName: "palapa:ADMINISTRASIDESA_LN_10K_2019_BOJONEGORO",
+    id: "01a1589c-8c15-70b6-a4fe-35517f888b36",
+    title: "Infrastruktur Segmen",
+    name: "Infrastruktur Segmen",
+    layer_name: "infrastruktur_segmen",
+    protocol: "MVT",
+    url: "/martin/infrastruktur_segmen/{z}/{x}/{y}",
+    mvtUrl: "/martin/infrastruktur_segmen/{z}/{x}/{y}",
+    martinSource: "infrastruktur_segmen",
+    source_type: "martin",
+    instansi: "Bappeda",
+    attribution: "Bappeda",
+    agency: "Bappeda",
+    description: "Data spasial vektor MVT segmen jalan dan jembatan infrastruktur Kabupaten Bojonegoro.",
     visible: true,
     opacity: 1,
     expanded: true,
     activeTool: "none",
   },
   {
-    id: "jalan-poros-desa",
-    title: "Jaringan Jalan Poros Desa Bojonegoro",
-    name: "Jaringan Jalan Poros Desa Bojonegoro",
-    layer_name: "palapa:JALAN_LN_5K_2021_POROSDESA_BOJONEGORO",
-    protocol: "WMS",
-    url: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
-    attribution: "Dinas PU Bina Marga dan Penataan Ruang",
-    description: "Trase ruas jalan poros penghubung antar-desa Kabupaten Bojonegoro.",
-    source_type: "geoserver",
-    wmsUrl: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
-    wmsLayerName: "palapa:JALAN_LN_5K_2021_POROSDESA_BOJONEGORO",
+    id: "01a1589c-8bf1-7294-9cf7-41ffda7e71f6",
+    title: "Jalan Poros Desa",
+    name: "Jalan Poros Desa",
+    layer_name: "jalan_porosdesa",
+    protocol: "MVT",
+    url: "/martin/jalan_porosdesa/{z}/{x}/{y}",
+    mvtUrl: "/martin/jalan_porosdesa/{z}/{x}/{y}",
+    martinSource: "jalan_porosdesa",
+    source_type: "martin",
+    instansi: "Bappeda",
+    attribution: "Bappeda",
+    agency: "Bappeda",
+    description: "Data spasial vektor MVT trase ruas jalan poros penghubung antar-desa Kabupaten Bojonegoro.",
     visible: true,
     opacity: 0.9,
     expanded: false,
     activeTool: "none",
   },
-]);
+  {
+    id: "868571d7-f20d-4028-ae23-680752603204",
+    title: "Administrasi Desa (Garis) Tahun 2019 Skala 1:10.000",
+    name: "Administrasi Desa (Garis) Tahun 2019 Skala 1:10.000",
+    layer_name: "palapa:ADMINISTRASIDESA_LN_10K_2019_BOJONEGORO",
+    protocol: "WMS",
+    url: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
+    instansi: "BIG",
+    attribution: "BIG",
+    agency: "BIG",
+    description: "Batas administrasi resmi desa dan kelurahan Kabupaten Bojonegoro.",
+    source_type: "geoserver",
+    wmsUrl: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
+    wmsLayerName: "palapa:ADMINISTRASIDESA_LN_10K_2019_BOJONEGORO",
+    visible: true,
+    opacity: 0.7,
+    expanded: false,
+    activeTool: "none",
+  },
+];
 
-const activeLayerIds = computed(() => activeLayers.value.map((l) => l.id));
+const activeLayers = ref<ActiveLayerItem[]>([...FALLBACK_DEFAULT_LAYERS]);
+const hasInitializedLayersFromApi = ref(false);
+
+function applyLayersFromApi(feed: any) {
+  const list = feed?.data || (Array.isArray(feed) ? feed : null);
+  if (!Array.isArray(list) || list.length === 0) return;
+
+  const defaultVisibleItems = list.filter((item: any) => Boolean(item.default_visible) && Boolean(item.is_active));
+  if (defaultVisibleItems.length > 0) {
+    defaultVisibleItems.sort((a, b) => {
+      const isSegmenA = a.layer_name === "infrastruktur_segmen";
+      const isSegmenB = b.layer_name === "infrastruktur_segmen";
+      if (isSegmenA) return -1;
+      if (isSegmenB) return 1;
+      return (a.order ?? 0) - (b.order ?? 0);
+    });
+
+    activeLayers.value = defaultVisibleItems.map(mapLayerItemToActive);
+    hasInitializedLayersFromApi.value = true;
+  }
+}
+
+watch(
+  () => layersData.value,
+  (val) => {
+    if (val && !hasInitializedLayersFromApi.value) {
+      applyLayersFromApi(val);
+    }
+  },
+  { immediate: true }
+);
+
+const activeLayerIds = computed(() => {
+  const ids: string[] = [];
+  for (const l of activeLayers.value) {
+    if (l.id) ids.push(l.id);
+    if (l.layer_name) ids.push(l.layer_name);
+  }
+  return ids;
+});
 
 // Basemap options definition
 interface BasemapOption {
@@ -210,11 +319,11 @@ interface BasemapOption {
 }
 
 const BASEMAP_OPTIONS: BasemapOption[] = [
-  { key: "osm", name: "Standar", tagline: "Peta Jalan OSM" },
+  { key: "esri", name: "Esri", tagline: "Esri World Topo Map" },
+  { key: "rbi", name: "RBI", tagline: "Rupabumi Indonesia (BIG)" },
+  { key: "osm", name: "OSM", tagline: "Peta Jalan OSM" },
   { key: "satellite", name: "Satelit", tagline: "Citra Resolusi Tinggi" },
-  { key: "positron", name: "Terang", tagline: "Peta Bersih Minimalis" },
-  { key: "dark", name: "Gelap", tagline: "Kontras Malam Hari" },
-  { key: "topo", name: "Medan", tagline: "Kontur & Topografi" },
+  { key: "aerial", name: "Aerial", tagline: "Foto Udara Resolusi Tinggi" },
 ];
 
 // Mobile drawers
@@ -241,7 +350,7 @@ function handleViewportUpdate(viewport: { bbox: [number, number, number, number]
     const targetPath = `/maps/@${lat},${lng},${z}z`;
 
     const url = new URL(window.location.href);
-    const targetBasemap = currentBasemap.value !== "osm" ? currentBasemap.value : null;
+    const targetBasemap = currentBasemap.value !== "esri" ? currentBasemap.value : null;
 
     if (url.pathname === targetPath && url.searchParams.get("basemap") === targetBasemap) {
       return;
@@ -272,7 +381,7 @@ watch(
     } catch {}
 
     const url = new URL(window.location.href);
-    if (newBasemap !== "osm") {
+    if (newBasemap !== "esri") {
       url.searchParams.set("basemap", newBasemap);
     } else {
       url.searchParams.delete("basemap");
@@ -345,7 +454,7 @@ watch(mobileDrawerOpen, (isOpen) => {
   }
 });
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener("popstate", handlePopState);
   try {
     const saved = localStorage.getItem("melarosa_active_basemap");
@@ -353,6 +462,38 @@ onMounted(() => {
       currentBasemap.value = saved as BasemapKey;
     }
   } catch {}
+
+  // Pastikan fitbound by data spasial Martin saat pertama kali dibuka (tanpa url search/pin/coord)
+  if (!pathView && !route.query.bbox && !hasExplicitSearchOrPin) {
+    try {
+      const [segmenRes, jalanRes] = await Promise.allSettled([
+        $fetch<any>("/martin/infrastruktur_segmen"),
+        $fetch<any>("/martin/jalan_porosdesa"),
+      ]);
+      const b1 = segmenRes.status === "fulfilled" ? segmenRes.value?.bounds : null;
+      const b2 = jalanRes.status === "fulfilled" ? jalanRes.value?.bounds : null;
+      let targetBbox = MARTIN_SPATIAL_BBOX;
+      if (Array.isArray(b1) && Array.isArray(b2) && b1.length === 4 && b2.length === 4) {
+        targetBbox = [
+          Math.min(b1[0], b2[0]),
+          Math.min(b1[1], b2[1]),
+          Math.max(b1[2], b2[2]),
+          Math.max(b1[3], b2[3]),
+        ];
+      } else if (Array.isArray(b1) && b1.length === 4) {
+        targetBbox = b1 as [number, number, number, number];
+      } else if (Array.isArray(b2) && b2.length === 4) {
+        targetBbox = b2 as [number, number, number, number];
+      }
+      nextTick(() => {
+        mapCanvasRef.value?.fitBbox(targetBbox, 15, 600);
+      });
+    } catch {
+      nextTick(() => {
+        mapCanvasRef.value?.fitBbox(MARTIN_SPATIAL_BBOX, 15, 600);
+      });
+    }
+  }
 });
 
 onUnmounted(() => {
@@ -464,8 +605,10 @@ function handleCloseInspector() {
       const url = new URL(window.location.href);
       url.searchParams.delete("search");
       url.searchParams.delete("name");
-      if (currentBasemap.value && currentBasemap.value !== "osm") {
+      if (currentBasemap.value && currentBasemap.value !== "esri") {
         url.searchParams.set("basemap", currentBasemap.value);
+      } else {
+        url.searchParams.delete("basemap");
       }
       window.history.replaceState(window.history.state, "", url.toString());
 
@@ -548,29 +691,22 @@ function handleRemoveLayer(layerId: string) {
 }
 
 function handleSelectDataset(dataset: any) {
-  const existing = activeLayers.value.find((l) => l.id === dataset.id);
+  const existing = activeLayers.value.find(
+    (l) => l.id === dataset.id || (l.layer_name && dataset.layer_name && l.layer_name === dataset.layer_name)
+  );
   if (existing) {
     existing.visible = true;
     existing.expanded = true;
   } else {
-    activeLayers.value.push({
-      id: dataset.id,
-      title: dataset.name || dataset.title,
-      name: dataset.name || dataset.title,
-      layer_name: dataset.layer_name || dataset.wmsLayerName,
-      protocol: dataset.protocol,
-      url: dataset.url || dataset.wmsUrl,
-      attribution: dataset.attribution || dataset.agency,
-      description: dataset.description,
-      source_type: dataset.source_type,
-      created_at: dataset.created_at,
-      updated_at: dataset.updated_at,
-      wmsUrl: dataset.wmsUrl || dataset.url,
-      wmsLayerName: dataset.wmsLayerName || dataset.layer_name,
-      visible: true,
-      opacity: typeof dataset.opacity === "number" ? dataset.opacity : 1,
-      expanded: true,
-      activeTool: "none",
+    activeLayers.value.push(mapLayerItemToActive(dataset));
+
+    // Pastikan infrastruktur-segmen selalu berada di posisi paling atas (index 0)
+    activeLayers.value.sort((a, b) => {
+      const isSegmenA = a.layer_name === "infrastruktur_segmen" || a.id.includes("segmen");
+      const isSegmenB = b.layer_name === "infrastruktur_segmen" || b.id.includes("segmen");
+      if (isSegmenA) return -1;
+      if (isSegmenB) return 1;
+      return (a.order ?? 0) - (b.order ?? 0);
     });
   }
 

@@ -62,3 +62,27 @@ export function formatWilayah(val: any): string {
   return String(val);
 }
 
+/**
+ * Menghasilkan opsi filter tahun anggaran dinamis:
+ * Berdasarkan tahun berjalan saat ini, dimulai dari N+1 (misal: 2027 jika tahun ini 2026)
+ * sampai 5 tahun ke belakang (2022).
+ */
+export function getTahunAnggaranOptions(includeAll = true, prefix = ''): { label: string; value: number | 'ALL' }[] {
+  const currentYear = new Date().getFullYear();
+  const startYear = currentYear + 1;
+  const options: { label: string; value: number | 'ALL' }[] = [];
+
+  if (includeAll) {
+    options.push({ label: 'Semua Tahun', value: 'ALL' });
+  }
+
+  for (let y = startYear; y >= startYear - 5; y--) {
+    options.push({
+      label: prefix ? `${prefix} ${y}` : String(y),
+      value: y,
+    });
+  }
+
+  return options;
+}
+

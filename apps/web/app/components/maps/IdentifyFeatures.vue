@@ -20,6 +20,8 @@ export interface IdentifiedFeature {
   id?: string;
   layerId: string;
   layerTitle: string;
+  layerAttribution?: string | null;
+  layerInstansi?: string | null;
   geometryType?: string;
   properties: Record<string, any>;
   coordinate?: [number, number];
@@ -397,6 +399,14 @@ function copyValue(key: string, val: string) {
               <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">
                 {{ featureDisplayName }}
               </h4>
+              <p v-if="currentFeature?.layerTitle" class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 truncate pt-0.5">
+                <span class="font-medium text-slate-700 dark:text-slate-300">{{ currentFeature.layerTitle }}</span>
+                <span v-if="currentFeature.layerInstansi || currentFeature.layerAttribution" class="text-slate-300 dark:text-slate-600">•</span>
+                <span v-if="currentFeature.layerInstansi || currentFeature.layerAttribution" class="text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
+                  <UIcon name="i-lucide-building-2" class="size-3 text-slate-400 shrink-0" />
+                  {{ currentFeature.layerInstansi || currentFeature.layerAttribution }}
+                </span>
+              </p>
             </div>
 
             <!-- Tombol Navigasi Antar Fitur jika ada lebih dari 1 fitur -->

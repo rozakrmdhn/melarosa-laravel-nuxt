@@ -12,7 +12,7 @@ const props = withDefaults(
   {
     isMobileDrawer: false,
     activeLayers: () => [],
-    currentBasemap: "osm",
+    currentBasemap: "esri",
     activeTab: "layers",
   }
 );
@@ -52,11 +52,11 @@ interface BasemapOption {
 }
 
 const BASEMAP_OPTIONS: BasemapOption[] = [
-  { key: "osm", name: "Standar", tagline: "Peta Jalan OSM" },
+  { key: "esri", name: "Esri", tagline: "Esri World Topo Map" },
+  { key: "rbi", name: "RBI", tagline: "Rupabumi Indonesia (BIG)" },
+  { key: "osm", name: "OSM", tagline: "Peta Jalan OSM" },
   { key: "satellite", name: "Satelit", tagline: "Citra Resolusi Tinggi" },
-  { key: "positron", name: "Terang", tagline: "Peta Bersih Minimalis" },
-  { key: "dark", name: "Gelap", tagline: "Kontras Malam Hari" },
-  { key: "topo", name: "Medan", tagline: "Kontur & Topografi" },
+  { key: "aerial", name: "Aerial", tagline: "Foto Udara Resolusi Tinggi" },
   { key: "none", name: "None", tagline: "Putih Polos Tanpa Basemap" },
 ];
 
@@ -302,11 +302,11 @@ function handleFilterStatusChange(layer: ActiveLayerItem, val: string) {
                   ? 'bg-blue-600 text-white'
                   : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'"
               >
-                <UIcon v-if="b.key === 'osm'" name="i-lucide-map" class="size-4" />
+                <UIcon v-if="b.key === 'esri' || b.key === 'positron'" name="i-lucide-compass" class="size-4" />
+                <UIcon v-else-if="b.key === 'rbi'" name="i-lucide-flag" class="size-4" />
+                <UIcon v-else-if="b.key === 'osm' || b.key === 'topo'" name="i-lucide-map" class="size-4" />
                 <UIcon v-else-if="b.key === 'satellite'" name="i-lucide-globe" class="size-4" />
-                <UIcon v-else-if="b.key === 'positron'" name="i-lucide-sun" class="size-4" />
-                <UIcon v-else-if="b.key === 'dark'" name="i-lucide-moon" class="size-4" />
-                <UIcon v-else-if="b.key === 'topo'" name="i-lucide-mountain" class="size-4" />
+                <UIcon v-else-if="b.key === 'aerial'" name="i-lucide-camera" class="size-4" />
                 <UIcon v-else name="i-lucide-square" class="size-4" />
               </div>
 
@@ -402,8 +402,8 @@ function handleFilterStatusChange(layer: ActiveLayerItem, val: string) {
                     {{ layer.title || layer.name }}
                   </span>
                   <span class="block text-[10px] text-slate-400 dark:text-slate-500 truncate">
-                    <template v-if="layer.attribution">
-                      {{ layer.attribution }}
+                    <template v-if="layer.instansi || layer.attribution || layer.agency">
+                      {{ layer.instansi || layer.attribution || layer.agency }}
                     </template>
                     <template v-else-if="layer.layer_name || layer.wmsLayerName">
                       {{ layer.layer_name || layer.wmsLayerName }}
@@ -548,7 +548,7 @@ function handleFilterStatusChange(layer: ActiveLayerItem, val: string) {
                 class="pt-2 border-t border-slate-200/60 dark:border-white/5 space-y-2"
               >
                 <div class="flex justify-between items-center text-[11px]">
-                  <span class="text-slate-600 dark:text-slate-300 font-medium">Transparansi:</span>
+                  <span class="text-slate-600 dark:text-slate-300 font-medium">Opasitas:</span>
                   <span class="font-mono text-blue-600 dark:text-blue-400 font-bold">
                     {{ Math.round(layer.opacity * 100) }}%
                   </span>
@@ -630,10 +630,10 @@ function handleFilterStatusChange(layer: ActiveLayerItem, val: string) {
                   Detail Metadata
                 </span>
                 <div class="rounded-lg bg-white dark:bg-[#09111e] p-2 space-y-1 border border-slate-100 dark:border-white/10 text-[11px]">
-                  <div v-if="layer.attribution || layer.agency" class="flex justify-between gap-2">
+                  <div v-if="layer.instansi || layer.attribution || layer.agency" class="flex justify-between gap-2">
                     <span class="text-slate-400 shrink-0">Instansi:</span>
                     <span class="text-slate-800 dark:text-slate-200 text-right truncate font-medium">
-                      {{ layer.attribution || layer.agency }}
+                      {{ layer.instansi || layer.attribution || layer.agency }}
                     </span>
                   </div>
                   <div v-if="layer.layer_name || layer.wmsLayerName" class="flex justify-between gap-2">

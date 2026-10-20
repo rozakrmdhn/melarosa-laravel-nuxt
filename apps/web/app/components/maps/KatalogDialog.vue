@@ -7,6 +7,8 @@ interface DatasetItem {
   url: string;
   layer_name: string | null;
   attribution: string | null;
+  instansi?: string | null;
+  agency?: string | null;
   description: string | null;
   source_type: string | null;
   opacity: number;
@@ -17,6 +19,8 @@ interface DatasetItem {
   updated_at?: string;
   wmsUrl?: string;
   wmsLayerName?: string;
+  mvtUrl?: string;
+  martinSource?: string;
   apiEndpoint?: string;
 }
 
@@ -43,41 +47,68 @@ const isOpen = computed({
   set: (val) => emit("update:open", val),
 });
 
-function isLayerActive(id: string): boolean {
-  return props.activeLayerIds.includes(id);
+function isLayerActive(itemOrId: DatasetItem | string): boolean {
+  if (typeof itemOrId === "string") {
+    return props.activeLayerIds.includes(itemOrId);
+  }
+  return (
+    props.activeLayerIds.includes(itemOrId.id) ||
+    Boolean(itemOrId.layer_name && props.activeLayerIds.includes(itemOrId.layer_name))
+  );
 }
 
 const searchQuery = ref("");
 const selectedProtocol = ref("Semua");
 const copiedId = ref<string | null>(null);
 
-// Ambil data layer asli langsung dari API layersData tanpa fabrikasi metadata
+// Ambil data layer asli langsung dari endpoint API layersData tanpa hardcoded dataset
 const allDatasets = computed<DatasetItem[]>(() => {
   const dynamic = props.layersData?.data || (Array.isArray(props.layersData) ? props.layersData : null);
   if (!Array.isArray(dynamic)) return [];
 
   return dynamic
     .filter((item: any) => item && (item.name || item.layer_name))
-    .map((item: any) => ({
-      id: String(item.id),
-      name: item.name || item.layer_name,
-      title: item.name || item.layer_name,
-      protocol: (item.protocol || "").toUpperCase(),
-      url: item.url || "",
-      layer_name: item.layer_name || null,
-      attribution: item.attribution || null,
-      description: item.description || null,
-      source_type: item.source_type || null,
-      opacity: typeof item.opacity === "number" ? item.opacity : 1,
-      order: typeof item.order === "number" ? item.order : 0,
-      is_active: Boolean(item.is_active),
-      default_visible: Boolean(item.default_visible),
-      created_at: item.created_at,
-      updated_at: item.updated_at,
-      wmsUrl: item.url,
-      wmsLayerName: item.layer_name,
-      apiEndpoint: item.url,
-    }));
+    .map((item: any) => {
+      const isMvt =
+        (item.protocol || "").toUpperCase() === "MVT" ||
+        item.source_type === "martin" ||
+        (item.url && item.url.includes("/martin/")) ||
+        (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(item.layer_name));
+
+      const isSegmen = item.layer_name === "infrastruktur_segmen" || item.id === "01a1589c-8c15-70b6-a4fe-35517f888b36";
+
+      return {
+        id: String(item.id),
+        name: item.name || item.layer_name,
+        title: item.name || item.layer_name,
+        protocol: isMvt ? "MVT" : (item.protocol || "WMS").toUpperCase().replace("OGC:", ""),
+        url: item.url || "",
+        layer_name: item.layer_name || null,
+        instansi: item.instansi || item.attribution || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
+        attribution: item.attribution || item.instansi || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
+        agency: item.agency || item.instansi || item.attribution || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
+        description: item.description || null,
+        source_type: isMvt ? "martin" : (item.source_type || "external"),
+        opacity: typeof item.opacity === "number" ? item.opacity : (isSegmen ? 1 : 0.9),
+        order: typeof item.order === "number" ? item.order : (isSegmen ? 0 : 1),
+        is_active: Boolean(item.is_active),
+        default_visible: Boolean(item.default_visible),
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+        wmsUrl: isMvt ? undefined : item.url,
+        wmsLayerName: isMvt ? undefined : item.layer_name,
+        mvtUrl: isMvt ? item.url : undefined,
+        martinSource: isMvt ? item.layer_name : undefined,
+        apiEndpoint: item.url,
+      };
+    })
+    .sort((a, b) => {
+      const isSegmenA = a.layer_name === "infrastruktur_segmen";
+      const isSegmenB = b.layer_name === "infrastruktur_segmen";
+      if (isSegmenA) return -1;
+      if (isSegmenB) return 1;
+      return (a.order ?? 0) - (b.order ?? 0);
+    });
 });
 
 // Daftar filter protokol yang ada pada dataset
@@ -253,9 +284,9 @@ async function copyEndpoint(item: DatasetItem) {
                   </span>
 
                   <!-- Atribusi / Instansi Sumber -->
-                  <span v-if="item.attribution" class="flex items-center gap-1">
+                  <span v-if="item.instansi || item.attribution || item.agency" class="flex items-center gap-1">
                     <UIcon name="i-lucide-building-2" class="size-3.5 text-slate-400 shrink-0" />
-                    <span class="truncate max-w-[200px]" :title="item.attribution">{{ item.attribution }}</span>
+                    <span class="truncate max-w-[200px]" :title="item.instansi || item.attribution || item.agency">{{ item.instansi || item.attribution || item.agency }}</span>
                   </span>
 
                   <!-- URL Layanan / Endpoint -->
@@ -286,11 +317,11 @@ async function copyEndpoint(item: DatasetItem) {
               />
 
               <UButton
-                :icon="isLayerActive(item.id) ? 'i-lucide-check-circle-2' : 'i-lucide-plus-circle'"
-                :label="isLayerActive(item.id) ? 'Sudah di Panel' : 'Tambahkan ke Peta'"
+                :icon="isLayerActive(item) ? 'i-lucide-check-circle-2' : 'i-lucide-plus-circle'"
+                :label="isLayerActive(item) ? 'Sudah di Panel' : 'Tambahkan ke Peta'"
                 size="xs"
-                :color="isLayerActive(item.id) ? 'neutral' : 'primary'"
-                :variant="isLayerActive(item.id) ? 'subtle' : 'solid'"
+                :color="isLayerActive(item) ? 'neutral' : 'primary'"
+                :variant="isLayerActive(item) ? 'subtle' : 'solid'"
                 class="rounded-xl min-h-[44px] text-xs font-semibold cursor-pointer shadow-xs flex-1 md:flex-none justify-center"
                 @click="handleSelect(item)"
               />

@@ -182,11 +182,11 @@ class InfrastrukturSegmenController extends Controller
                 $bbox = [111.445, -7.452, 112.164, -6.981];
             }
 
-            $totalSegmen = (clone $baseQuery)->count();
+            $totalSegmen = (int) ($stats->total_segmen ?? 0);
 
             return response()->json([
                 'ok'                  => true,
-                'total_segmen'        => (int) $totalSegmen,
+                'total_segmen'        => $totalSegmen,
                 'total_panjang_meter' => (float) ($stats->total_panjang_meter ?? 0),
                 'total_panjang_km'    => (float) ($stats->total_panjang_km ?? 0),
                 'kondisi'             => $kondisiBreakdown,

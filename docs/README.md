@@ -65,6 +65,15 @@ Daftar modul fungsional dalam Melarosa GIS beserta status dokumentasi resminya:
 | **Monitoring Realisasi** | `docs/features/monitoring-realisasi.md` | 📝 Terencana | Pelaporan berkala progres fisik (%), serapan dana, & upload Berita Acara |
 | **Alur Verifikasi Bertingkat** | `docs/features/infrastruktur-verifikasi.md` | 📝 Terencana | Siklus approval berjenjang: Operator Desa ➔ Kecamatan ➔ Bappeda |
 
+### 5. Bantuan Keuangan Khusus Desa (BKKD)
+
+| Modul / Fitur | Berkas Dokumentasi | Status | Deskripsi Singkat |
+|---|---|:---:|---|
+| **Proposal Usulan BKKD** | [bkkd-proposal.md](./features/bkkd-proposal.md) | ✅ Lengkap | Pencatatan proposal desa, nomor registrasi, lampiran terproteksi, PostGIS |
+| **Hasil Verifikasi OPD** | [bkkd-verifikasi.md](./features/bkkd-verifikasi.md) | ✅ Lengkap | Telaah teknis dinas, rekomendasi pagu, catatan teknis, dan koreksi telaah |
+| **Rekapitulasi Desa & TAPD** | [bkkd-rekapitulasi-tapd.md](./features/bkkd-rekapitulasi-tapd.md) | ✅ Lengkap | Matriks usulan per desa, seleksi 1 desa 1 usulan, penyesuaian pagu APBD, Excel |
+| **Audit Trail & Versi BKKD** | [bkkd-audit-riwayat.md](./features/bkkd-audit-riwayat.md) | ✅ Lengkap | Snapshot mutasi data, optimistic locking (409), alasan perubahan, diff viewer |
+
 ---
 
 ## 📐 Standar 11 Komponen Dokumen Fitur

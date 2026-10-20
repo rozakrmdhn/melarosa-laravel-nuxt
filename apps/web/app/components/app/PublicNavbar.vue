@@ -259,7 +259,7 @@ onUnmounted(() => {
       <NuxtLink
         to="/"
         class="shrink-0 flex items-center mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-xl"
-        aria-label="Melarosa GIS"
+        aria-label="Melarosa"
         @click="closeSearch"
       >
         <AppLogo />
@@ -521,7 +521,7 @@ onUnmounted(() => {
           <!-- Logo pill (left) -->
           <NuxtLink
             to="/"
-            aria-label="Melarosa GIS"
+            aria-label="Melarosa"
             class="pointer-events-auto flex items-center rounded-2xl px-4 py-2.5 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             :class="isScrolled
               ? 'bg-white border border-slate-300/80 shadow-lg dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none'

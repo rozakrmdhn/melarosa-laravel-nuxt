@@ -52,6 +52,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(InfrastrukturSegmen::class, InfrastrukturSegmenPolicy::class);
         Gate::policy(PlottingAnggaran::class, PlottingAnggaranPolicy::class);
         Gate::policy(MonitoringRealisasi::class, MonitoringRealisasiPolicy::class);
+        Gate::policy(\App\Models\BkkdProposal::class, \App\Policies\BkkdProposalPolicy::class);
+        Gate::policy(\App\Models\BkkdVerifikasi::class, \App\Policies\BkkdVerifikasiPolicy::class);
 
         // Super-admin role bypass for all permissions
         Gate::before(static function ($user, $ability) {

@@ -26,7 +26,7 @@ const props = withDefaults(
   }>(),
   {
     open: false,
-    currentBasemap: "osm",
+    currentBasemap: "esri",
     clickedCoordinate: null,
     locationLabel: null,
     activeLayers: () => [],
@@ -185,7 +185,7 @@ function generateDefaultCaption(mode: ShareMode): string {
     : "Wilayah Kabupaten Bojonegoro, Jawa Timur";
 
   const layerInfo = props.activeLayers.length > 0
-    ? `\nLapisan Peta: ${props.activeLayers.map((l) => l.name || l.title).join(", ")}`
+    ? `\nLapisan Peta:\n` + props.activeLayers.map((l) => `• ${l.name || l.title}${l.instansi || l.attribution || l.agency ? ` (${l.instansi || l.attribution || l.agency})` : ""}`).join("\n")
     : "";
 
   const linkInfo = mode === "image_link"

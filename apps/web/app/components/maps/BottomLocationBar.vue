@@ -357,8 +357,16 @@ function copyCoordinate() {
               <span
                 v-if="primaryFeature?.layerTitle"
                 class="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 truncate max-w-[130px]"
+                :title="primaryFeature.layerInstansi || primaryFeature.layerAttribution ? `${primaryFeature.layerTitle} • ${primaryFeature.layerInstansi || primaryFeature.layerAttribution}` : primaryFeature.layerTitle"
               >
                 {{ primaryFeature.layerTitle }}
+              </span>
+              <span
+                v-if="primaryFeature?.layerInstansi || primaryFeature?.layerAttribution"
+                class="px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 truncate max-w-[110px]"
+                :title="primaryFeature.layerInstansi || primaryFeature.layerAttribution"
+              >
+                {{ primaryFeature.layerInstansi || primaryFeature.layerAttribution }}
               </span>
             </div>
             <span class="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate block">

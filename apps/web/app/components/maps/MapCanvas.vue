@@ -26,7 +26,7 @@ const props = withDefaults(
     mobileSheetSnap?: "min" | "peek" | "full";
   }>(),
   {
-    currentBasemap: "osm",
+    currentBasemap: "esri",
     clickedCoordinate: null,
     locationLabel: null,
     initialCenter: null,
@@ -154,6 +154,7 @@ let tileLayer: any = null;
 let pulseOverlay: any = null;
 let olModules: any = null;
 const wmsLayersMap = new Map<string, any>();
+const mvtLayersMap = new Map<string, any>();
 let isDismissing = false;
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -186,29 +187,32 @@ function getBasemapSource(key: BasemapKey) {
         attributions: "&copy; Esri, Maxar, Earthstar Geographics",
         maxZoom: 19,
       });
-    case "positron":
+    case "aerial":
       return new XYZ({
-        url: "https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
-        attributions: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        maxZoom: 19,
-      });
-    case "dark":
-      return new XYZ({
-        url: "https://cartodb-basemaps-a.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png",
-        attributions: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        maxZoom: 19,
+        url: "https://petadasar.meritech.cloud/tile/{z}/{x}/{y}.jpg",
+        attributions: "&copy; Peta Dasar ATR/BPN Aerial Orthophoto",
+        maxZoom: 21,
       });
     case "topo":
+    case "osm":
+      return new OSM();
+    case "rbi":
       return new XYZ({
-        url: "https://tile.opentopomap.org/{z}/{x}/{y}.png",
-        attributions: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a>',
-        maxZoom: 17,
+        url: "https://geoservices.big.go.id/rbi/rest/services/BASEMAP/Rupabumi_Indonesia/MapServer/tile/{z}/{y}/{x}",
+        attributions: "&copy; Badan Informasi Geospasial (BIG)",
+        maxZoom: 18,
       });
     case "none":
       return null;
-    case "osm":
+    case "esri":
+    case "positron":
+    case "dark":
     default:
-      return new OSM();
+      return new XYZ({
+        url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        attributions: "&copy; Esri, HERE, Garmin, FAO, NOAA, USGS, EPA, NPS, NRCan",
+        maxZoom: 19,
+      });
   }
 }
 
@@ -570,6 +574,9 @@ async function initMap() {
       { default: View },
       { default: TileLayer },
       { default: TileWMS },
+      { default: VectorTileLayer },
+      { default: VectorTileSource },
+      { default: MVT },
       { default: OSM },
       { default: XYZ },
       projPkg,
@@ -586,6 +593,7 @@ async function initMap() {
       { default: CircleStyle },
       { default: Fill },
       { default: Stroke },
+      { default: OlText },
       { default: RegularShape },
       { default: OlIcon },
     ] = await Promise.all([
@@ -593,6 +601,9 @@ async function initMap() {
       import("ol/View.js"),
       import("ol/layer/Tile.js"),
       import("ol/source/TileWMS.js"),
+      import("ol/layer/VectorTile.js"),
+      import("ol/source/VectorTile.js"),
+      import("ol/format/MVT.js"),
       import("ol/source/OSM.js"),
       import("ol/source/XYZ.js"),
       import("ol/proj.js"),
@@ -609,6 +620,7 @@ async function initMap() {
       import("ol/style/Circle.js"),
       import("ol/style/Fill.js"),
       import("ol/style/Stroke.js"),
+      import("ol/style/Text.js"),
       import("ol/style/RegularShape.js"),
       import("ol/style/Icon.js"),
     ]);
@@ -618,6 +630,13 @@ async function initMap() {
       View,
       TileLayer,
       TileWMS,
+      VectorTileLayer,
+      VectorTileSource,
+      MVT,
+      OlText,
+      OlStyle,
+      Fill,
+      Stroke,
       OSM,
       XYZ,
       fromLonLat: projPkg.fromLonLat,
@@ -839,26 +858,126 @@ async function initMap() {
 
 function syncActiveWmsLayers() {
   if (!mapInstance || !olModules) return;
-  const { TileLayer, TileWMS } = olModules;
+  const { TileLayer, TileWMS, VectorTileLayer, VectorTileSource, MVT, OlStyle, Stroke, Fill, OlText } = olModules;
   const currentLayers = props.activeLayers || [];
   const currentLayerIds = new Set(currentLayers.map((l) => l.id));
+  const config = useRuntimeConfig();
+  const martinBase = (config.public?.martinUrl as string) || "/martin";
 
-  // 1. Hapus layer WMS yang tidak lagi aktif
+  // 1. Hapus layer yang tidak lagi aktif
   for (const [id, olLayer] of wmsLayersMap.entries()) {
     if (!currentLayerIds.has(id)) {
       mapInstance.removeLayer(olLayer);
       wmsLayersMap.delete(id);
     }
   }
+  for (const [id, olLayer] of mvtLayersMap.entries()) {
+    if (!currentLayerIds.has(id)) {
+      mapInstance.removeLayer(olLayer);
+      mvtLayersMap.delete(id);
+    }
+  }
 
-  // 2. Tambahkan atau perbarui status layer WMS
+  // 2. Tambahkan atau perbarui status layer
   currentLayers.forEach((layer, index) => {
+    const isMvt =
+      layer.protocol?.toUpperCase() === "MVT" ||
+      layer.source_type === "martin" ||
+      Boolean(layer.mvtUrl) ||
+      Boolean(layer.martinSource) ||
+      (layer.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(layer.layer_name));
+
+    // A. Handle Martin MVT Layer
+    if (isMvt) {
+      const sourceName = layer.martinSource || layer.layer_name || (layer.id.includes("segmen") ? "infrastruktur_segmen" : "jalan_porosdesa");
+      const tileUrl = layer.mvtUrl || `${martinBase}/${sourceName}/{z}/{x}/{y}`;
+      const isSegmen = sourceName === "infrastruktur_segmen" || layer.id.includes("segmen");
+
+      // Infrastruktur Segmen dipastikan selalu layer paling atas (z-index tertinggi 40)
+      const mvtZIndex = isSegmen ? 40 : 20 + (currentLayers.length - index);
+      const effectiveOpacity = isSegmen ? (typeof layer.opacity === "number" ? layer.opacity : 1) : (layer.opacity ?? 1);
+
+      if (mvtLayersMap.has(layer.id)) {
+        const olLayer = mvtLayersMap.get(layer.id);
+        olLayer.setVisible(layer.visible ?? true);
+        olLayer.setOpacity(effectiveOpacity);
+        olLayer.setZIndex(mvtZIndex);
+      } else {
+        try {
+          const source = new VectorTileSource({
+            format: new MVT({ idProperty: "id" }),
+            url: tileUrl,
+            maxZoom: 20,
+            minZoom: 7,
+            cacheSize: 512,
+          });
+
+          // Style function disesuaikan untuk infrastruktur_segmen vs jalan_porosdesa
+          const styleFn = (feature: any) => {
+            const kondisi = String(feature.get("kondisi") || "").toLowerCase();
+            let strokeColor = isSegmen ? "#10b981" : "#2563eb";
+
+            if (kondisi.includes("rusak berat")) strokeColor = "#ef4444";
+            else if (kondisi.includes("rusak ringan")) strokeColor = "#f97316";
+            else if (kondisi.includes("sedang")) strokeColor = "#f59e0b";
+            else if (kondisi.includes("rusak")) strokeColor = "#f97316";
+            else if (kondisi.includes("baik")) strokeColor = "#10b981";
+
+            let textStyle: any = undefined;
+            const currentZoom = mapInstance?.getView()?.getZoom() || 0;
+            if (currentZoom >= 13.5) {
+              const labelText = String(feature.get(isSegmen ? "namobj" : "nama_ruas") || feature.get("nama_ruas") || feature.get("namobj") || "");
+              if (labelText && labelText !== "-") {
+                textStyle = new OlText({
+                  text: labelText,
+                  font: "600 11px Inter, sans-serif",
+                  fill: new Fill({ color: isSegmen ? "#064e3b" : "#1e3a8a" }),
+                  stroke: new Stroke({ color: "#ffffff", width: 3 }),
+                  placement: "line",
+                  overflow: false,
+                });
+              }
+            }
+
+            return new OlStyle({
+              stroke: new Stroke({
+                color: strokeColor,
+                width: currentZoom >= 14 ? (isSegmen ? 4 : 2.5) : (isSegmen ? 3 : 1.75),
+                lineCap: "round",
+                lineJoin: "round",
+              }),
+              text: textStyle,
+              zIndex: isSegmen ? 100 : 10,
+            });
+          };
+
+          const olLayer = new VectorTileLayer({
+            source,
+            style: styleFn,
+            renderMode: "hybrid",
+            declutter: true,
+            opacity: effectiveOpacity,
+            visible: layer.visible ?? true,
+            zIndex: mvtZIndex,
+          });
+
+          mapInstance.addLayer(olLayer);
+          mvtLayersMap.set(layer.id, olLayer);
+        } catch (err) {
+          console.error(`Gagal memuat layer Martin MVT [${layer.title}]:`, err);
+        }
+      }
+      return;
+    }
+
+    // B. Handle WMS Layer
     if (layer.wmsUrl && layer.wmsLayerName) {
+      const wmsZIndex = 5 + (currentLayers.length - index);
       if (wmsLayersMap.has(layer.id)) {
         const olLayer = wmsLayersMap.get(layer.id);
         olLayer.setVisible(layer.visible);
         olLayer.setOpacity(layer.opacity ?? 1);
-        olLayer.setZIndex(5 + index);
+        olLayer.setZIndex(wmsZIndex);
       } else {
         try {
           const source = new TileWMS({
@@ -879,7 +998,7 @@ function syncActiveWmsLayers() {
             source,
             opacity: layer.opacity ?? 1,
             visible: layer.visible ?? true,
-            zIndex: 5 + index,
+            zIndex: wmsZIndex,
           });
 
           mapInstance.addLayer(olLayer);
@@ -901,21 +1020,67 @@ async function performWmsIdentify(olCoord: any) {
 
   activeNamobj.value = null;
   isIdentifyingFeatures.value = true;
+  emit("identifying-features", true);
 
+  // 1. Cek fitur vektor langsung dari Martin MVT layer pada titik piksel klik
+  const vectorIdentified: IdentifiedFeature[] = [];
+  try {
+    const pixel = mapInstance.getPixelFromCoordinate(olCoord);
+    if (pixel) {
+      mapInstance.forEachFeatureAtPixel(
+        pixel,
+        (feature: any, layer: any) => {
+          for (const [id, olLayer] of mvtLayersMap.entries()) {
+            if (olLayer === layer) {
+              const match = currentLayers.find((l) => l.id === id);
+              if (match && match.visible !== false) {
+                const rawProps = feature.getProperties() || {};
+                const cleanProps: Record<string, any> = {};
+                for (const [k, v] of Object.entries(rawProps)) {
+                  if (k !== "geometry" && v !== undefined && v !== null && v !== "") {
+                    cleanProps[k] = v;
+                  }
+                }
+                vectorIdentified.push({
+                  id: String(feature.getId?.() || cleanProps.id || Math.random()),
+                  layerId: id,
+                  layerTitle: match.title || match.name || id,
+                  layerAttribution: match.instansi || match.attribution || match.agency,
+                  layerInstansi: match.instansi || match.attribution || match.agency,
+                  geometryType: feature.getGeometry?.()?.getType?.() || "LineString",
+                  properties: cleanProps,
+                  coordinate: olModules.toLonLat(olCoord),
+                });
+              }
+              break;
+            }
+          }
+        },
+        {
+          hitTolerance: 6,
+          layerFilter: (l: any) => l !== tileLayer && !wmsLayersMap.has(l),
+        }
+      );
+    }
+  } catch (err) {
+    console.warn("Gagal membaca fitur MVT at pixel:", err);
+  }
+
+  // Jika tidak ada layer WMS yang aktif dan fitur vektor sudah ditemukan atau kosong
   if (visibleWmsLayers.length === 0) {
-    emit("identifying-features", true);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (vectorIdentified.length > 0) {
+      activeNamobj.value = extractNamobj(vectorIdentified[0].properties);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
     isIdentifyingFeatures.value = false;
     emit("identifying-features", false);
-    emit("identify-features", []);
+    emit("identify-features", vectorIdentified);
     return;
   }
 
   const view = mapInstance.getView();
   const resolution = view.getResolution();
   const projection = view.getProjection();
-
-  emit("identifying-features", true);
 
   // Jalankan query seluruh layer WMS aktif secara paralel (Promise.allSettled)
   const queries = visibleWmsLayers.map(async (layer) => {
@@ -956,6 +1121,8 @@ async function performWmsIdentify(olCoord: any) {
           id: f.id,
           layerId: layer.id,
           layerTitle: layer.title || layer.name,
+          layerAttribution: layer.instansi || layer.attribution || layer.agency,
+          layerInstansi: layer.instansi || layer.attribution || layer.agency,
           geometryType: f.geometry?.type,
           properties: f.properties || {},
           coordinate: olModules.toLonLat(olCoord),
@@ -968,15 +1135,15 @@ async function performWmsIdentify(olCoord: any) {
     }
   });
 
-  // Berikan sedikit jeda animasi (320ms) agar efek visual radar & ripple pada peta serta status loading berjalan mulus tanpa flickering
-  const minDelayPromise = new Promise((resolve) => setTimeout(resolve, 320));
+  // Berikan sedikit jeda animasi (250ms) agar efek visual radar & ripple pada peta serta status loading berjalan mulus tanpa flickering
+  const minDelayPromise = new Promise((resolve) => setTimeout(resolve, 250));
 
   const [settled] = await Promise.all([
     Promise.allSettled(queries),
     minDelayPromise,
   ]);
 
-  const identifiedList: IdentifiedFeature[] = [];
+  const identifiedList: IdentifiedFeature[] = [...vectorIdentified];
 
   for (const item of settled) {
     if (item.status === "fulfilled" && Array.isArray(item.value)) {

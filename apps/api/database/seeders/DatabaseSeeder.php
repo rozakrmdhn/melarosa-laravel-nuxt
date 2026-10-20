@@ -88,6 +88,9 @@ class DatabaseSeeder extends Seeder
         $this->call([
             InfrastrukturPermissionSeeder::class,
             InfrastrukturMasterSeeder::class,
+            BkkdPermissionSeeder::class,
+            RefOpdSeeder::class,
+            RefBkkdBidangSeeder::class,
         ]);
     }
 }

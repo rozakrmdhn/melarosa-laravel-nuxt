@@ -4,6 +4,10 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BatasWilayahDesaController;
 use App\Http\Controllers\Admin\BatasWilayahKecamatanController;
+use App\Http\Controllers\Admin\BkkdAgregasiDesaController;
+use App\Http\Controllers\Admin\BkkdProposalController;
+use App\Http\Controllers\Admin\BkkdRekapitulasiController;
+use App\Http\Controllers\Admin\BkkdVerifikasiController;
 use App\Http\Controllers\Admin\InfrastrukturSegmenController;
 use App\Http\Controllers\Admin\InfrastrukturTipeController;
 use App\Http\Controllers\Admin\InfrastrukturVerifikasiController;
@@ -12,6 +16,7 @@ use App\Http\Controllers\Admin\LayerController;
 use App\Http\Controllers\Admin\MonitoringRealisasiController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\PlottingAnggaranController;
+use App\Http\Controllers\Admin\RefBkkdController;
 use App\Http\Controllers\Admin\RefSumberDanaController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\UserController;
@@ -45,6 +50,7 @@ Route::prefix('api/v1')->group(function () {
 
         Route::middleware(['throttle:uploads'])->group(function () {
             Route::post('upload', [UploadController::class, 'image'])->name('upload.image');
+            Route::post('upload/document', [UploadController::class, 'document'])->name('upload.document');
         });
 
         Route::prefix('admin')->group(function () {
@@ -164,6 +170,47 @@ Route::prefix('api/v1')->group(function () {
             Route::put('layers/{layer}', [LayerController::class, 'update'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.update');
             Route::delete('layers/{layer}', [LayerController::class, 'destroy'])->middleware('permission:layers-delete|layers-manage')->name('admin.layers.destroy');
             Route::patch('layers/{layer}/toggle-active', [LayerController::class, 'toggleActive'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.toggle-active');
+
+            // Master Referensi BKKD
+            Route::get('ref-bkkd/opd', [RefBkkdController::class, 'opd'])->name('admin.ref-bkkd.opd');
+            Route::get('ref-bkkd/bidang', [RefBkkdController::class, 'bidang'])->name('admin.ref-bkkd.bidang');
+
+            // BKKD Proposal
+            Route::get('bkkd/proposal', [BkkdProposalController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.proposal.index');
+            Route::post('bkkd/proposal', [BkkdProposalController::class, 'store'])->middleware('permission:bkkd-proposal-create')->name('admin.bkkd.proposal.store');
+            Route::get('bkkd/proposal/import/template', [BkkdProposalController::class, 'importTemplate'])->middleware('permission:bkkd-proposal-create')->name('admin.bkkd.proposal.import.template');
+            Route::post('bkkd/proposal/import', [BkkdProposalController::class, 'importExcel'])->middleware('permission:bkkd-proposal-create')->name('admin.bkkd.proposal.import');
+            Route::get('bkkd/proposal/{id}', [BkkdProposalController::class, 'show'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.proposal.show');
+            Route::put('bkkd/proposal/{id}', [BkkdProposalController::class, 'update'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.update');
+            Route::delete('bkkd/proposal/{id}', [BkkdProposalController::class, 'destroy'])->middleware('permission:bkkd-proposal-delete')->name('admin.bkkd.proposal.destroy');
+            Route::post('bkkd/proposal/{id}/restore', [BkkdProposalController::class, 'restore'])->middleware('permission:bkkd-proposal-delete')->name('admin.bkkd.proposal.restore');
+            Route::post('bkkd/proposal/{id}/ajukan', [BkkdProposalController::class, 'ajukanOpd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.ajukan');
+            Route::post('bkkd/proposal/{id}/batalkan', [BkkdProposalController::class, 'batalkan'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.batalkan');
+            Route::post('bkkd/proposal/{id}/ganti-papbd', [BkkdProposalController::class, 'gantiPapbd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.ganti-papbd');
+            Route::post('bkkd/proposal/{id}/lampiran', [BkkdProposalController::class, 'uploadLampiran'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lampiran.store');
+            Route::delete('bkkd/proposal/{id}/lampiran/{lampiranId}', [BkkdProposalController::class, 'deleteLampiran'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lampiran.destroy');
+            Route::get('bkkd/proposal/{id}/lampiran/{lampiranId}/download', [BkkdProposalController::class, 'downloadLampiran'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.proposal.lampiran.download');
+            Route::get('bkkd/proposal/{id}/riwayat', [BkkdProposalController::class, 'riwayat'])->middleware('permission:bkkd-riwayat-view')->name('admin.bkkd.proposal.riwayat');
+
+            // BKKD Hasil Verifikasi OPD
+            Route::get('bkkd/verifikasi', [BkkdVerifikasiController::class, 'index'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.index');
+            Route::post('bkkd/proposal/{id}/verifikasi', [BkkdVerifikasiController::class, 'store'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.store');
+            Route::put('bkkd/verifikasi/{id}', [BkkdVerifikasiController::class, 'update'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.update');
+            Route::get('bkkd/verifikasi/{id}/download', [BkkdVerifikasiController::class, 'download'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.download');
+            Route::get('bkkd/verifikasi/{id}/riwayat', [BkkdVerifikasiController::class, 'riwayat'])->middleware('permission:bkkd-riwayat-view')->name('admin.bkkd.verifikasi.riwayat');
+
+            // BKKD Rekapitulasi Desa & Penetapan TAPD
+            Route::get('bkkd/rekapitulasi-desa', [BkkdRekapitulasiController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.rekapitulasi.index');
+            Route::post('bkkd/rekapitulasi-desa/{id}/tetapkan-tapd', [BkkdRekapitulasiController::class, 'tetapkanTapd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.rekapitulasi.tetapkan-tapd');
+            Route::post('bkkd/rekapitulasi-desa/{id}/batalkan-tapd', [BkkdRekapitulasiController::class, 'batalkanTapd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.rekapitulasi.batalkan-tapd');
+            Route::get('bkkd/rekapitulasi-desa/export', [BkkdRekapitulasiController::class, 'exportExcel'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.rekapitulasi.export');
+
+            // BKKD Agregasi Wilayah Desa
+            Route::get('bkkd/agregasi-desa', [BkkdAgregasiDesaController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.agregasi-desa.index');
+            Route::get('bkkd/agregasi-desa/export', [BkkdAgregasiDesaController::class, 'export'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.agregasi-desa.export');
+
+            // BKKD Global Riwayat Log
+            Route::get('bkkd/riwayat', [BkkdProposalController::class, 'riwayatSemua'])->middleware('permission:bkkd-riwayat-view')->name('admin.bkkd.riwayat.index');
         });
     });
 

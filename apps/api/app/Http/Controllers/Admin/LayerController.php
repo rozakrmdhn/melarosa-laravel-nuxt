@@ -39,7 +39,13 @@ class LayerController extends Controller
                 $q->where('protocol', $protocol);
             })
             ->when($sourceType, function ($q, $sourceType) {
-                $q->where('source_type', $sourceType);
+                if ($sourceType === 'internal') {
+                    $q->internal();
+                } elseif ($sourceType === 'geoportal') {
+                    $q->geoportal();
+                } else {
+                    $q->where('source_type', $sourceType);
+                }
             })
             ->when($request->has('is_active') && $isActive !== null && $isActive !== '', function ($q) use ($isActive) {
                 $q->where('is_active', filter_var($isActive, FILTER_VALIDATE_BOOLEAN));

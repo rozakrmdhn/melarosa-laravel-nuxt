@@ -22,6 +22,12 @@ interface LayerItem {
   description: string | null;
   source_type: string;
   is_synced: boolean;
+  geoportal_id?: string | null;
+  category?: string | null;
+  opd_name?: string | null;
+  legend_url?: string | null;
+  csw_metadata?: Record<string, any> | null;
+  last_synced_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -48,6 +54,7 @@ const { can } = usePermission();
 const canCreate = computed(() => can("layers-create") || can("layers-manage"));
 const canEdit = computed(() => can("layers-update") || can("layers-manage"));
 const canDelete = computed(() => can("layers-delete") || can("layers-manage"));
+const canSyncGeoportal = computed(() => can("layers-manage") || can("layers-create") || can("layers-update"));
 const hasAnyAction = computed(() => canEdit.value || canDelete.value);
 
 // ─── Filter & State ─────────────────────────────────────────────────────────
@@ -58,6 +65,27 @@ const statusFilter = ref<string>("ALL");
 const defaultVisibleFilter = ref<string>("ALL");
 const page = ref(1);
 const perPage = ref(15);
+
+// Quick segmented source tabs: "Semua", "Internal Melarosa", "Geoportal Bojonegoro"
+const sourceTabs = [
+  { label: "Semua Sumber", value: "ALL" },
+  { label: "Internal Melarosa", value: "internal" },
+  { label: "Geoportal Bojonegoro", value: "geoportal" },
+];
+const activeSourceTab = ref("ALL");
+
+function handleSourceTabChange(val: string) {
+  activeSourceTab.value = val;
+  sourceTypeFilter.value = val;
+}
+
+watch(sourceTypeFilter, (newVal) => {
+  if (newVal === "geoportal" || newVal === "internal" || newVal === "ALL") {
+    activeSourceTab.value = newVal;
+  } else {
+    activeSourceTab.value = "ALL";
+  }
+});
 
 const queryParams = computed(() => ({
   page: page.value,
@@ -110,7 +138,9 @@ const formProtocolOptions = [
 
 const sourceTypeOptions = [
   { label: "Semua Sumber Data", value: "ALL" },
-  { label: "GeoServer", value: "geoserver" },
+  { label: "Geoportal Bojonegoro (CSW)", value: "geoportal" },
+  { label: "Internal Melarosa", value: "internal" },
+  { label: "GeoServer (Palapa)", value: "geoserver" },
   { label: "External WMS / GIS", value: "external_wms" },
   { label: "XYZ Tiles Provider", value: "xyz_tiles" },
   { label: "Local GeoJSON", value: "local_geojson" },
@@ -118,6 +148,7 @@ const sourceTypeOptions = [
 ];
 
 const formSourceTypeOptions = [
+  { label: "Geoportal Bojonegoro (CSW OGC)", value: "geoportal" },
   { label: "GeoServer (Internal / Palapa)", value: "geoserver" },
   { label: "External WMS / GIS Server", value: "external_wms" },
   { label: "XYZ Tiles Provider", value: "xyz_tiles" },
@@ -436,6 +467,8 @@ function getProtocolBadgeColor(protocol: string): "success" | "info" | "warning"
 
 function getSourceTypeLabel(type: string): string {
   switch (type) {
+    case "geoportal":
+      return "Geoportal Bojonegoro";
     case "geoserver":
       return "GeoServer";
     case "external_wms":
@@ -448,6 +481,104 @@ function getSourceTypeLabel(type: string): string {
       return "Basemap";
     default:
       return type;
+  }
+}
+
+// ─── Geoportal CSW Sync & History State ─────────────────────────────────────
+const isSyncModalOpen = ref(false);
+const isSyncHistoryModalOpen = ref(false);
+const isMetadataModalOpen = ref(false);
+const selectedGeoportalLayer = ref<LayerItem | null>(null);
+
+const syncingGeoportal = ref(false);
+const syncResult = ref<{
+  records_found: number;
+  records_inserted: number;
+  records_updated: number;
+  records_skipped: number;
+  duration_seconds: number;
+} | null>(null);
+
+const {
+  data: syncHistoryData,
+  status: syncHistoryStatus,
+  refresh: refreshSyncHistory,
+} = useHttp<{
+  ok: boolean;
+  data: Array<{
+    id: string;
+    triggered_by: string;
+    status: string;
+    records_found: number;
+    records_inserted: number;
+    records_updated: number;
+    records_skipped: number;
+    error_message: string | null;
+    duration_seconds: number;
+    created_at: string;
+    user?: { name: string } | null;
+  }>;
+}>("admin/layers/geoportal/sync-history", {
+  lazy: true,
+  immediate: false,
+});
+
+function openSyncModal() {
+  syncResult.value = null;
+  isSyncModalOpen.value = true;
+}
+
+function openSyncHistoryModal() {
+  refreshSyncHistory();
+  isSyncHistoryModalOpen.value = true;
+}
+
+function openMetadataModal(layer: LayerItem) {
+  selectedGeoportalLayer.value = layer;
+  isMetadataModalOpen.value = true;
+}
+
+async function handleSyncGeoportal() {
+  syncingGeoportal.value = true;
+  syncResult.value = null;
+  try {
+    const res = await $http<{
+      ok: boolean;
+      message: string;
+      data: {
+        records_found: number;
+        records_inserted: number;
+        records_updated: number;
+        records_skipped: number;
+        duration_seconds: number;
+      };
+    }>("admin/layers/geoportal/sync", {
+      method: "POST",
+    });
+
+    if (res?.ok) {
+      syncResult.value = res.data;
+      toast.add({
+        icon: "i-heroicons-check-circle",
+        title: res.message || "Sinkronisasi Geoportal berhasil.",
+        description: `${res.data.records_found} layer dipanen (${res.data.records_inserted} baru, ${res.data.records_updated} diperbarui) dalam ${res.data.duration_seconds}s.`,
+        color: "success",
+      });
+      await refresh();
+    }
+  } catch (err: any) {
+    const msg =
+      err?.response?._data?.message ||
+      err?.message ||
+      "Gagal menyinkronkan data katalog Geoportal.";
+    toast.add({
+      icon: "i-heroicons-exclamation-circle",
+      title: "Sinkronisasi Gagal",
+      description: msg,
+      color: "error",
+    });
+  } finally {
+    syncingGeoportal.value = false;
   }
 }
 </script>
@@ -468,7 +599,26 @@ function getSourceTypeLabel(type: string): string {
         </p>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <UButton
+          v-if="canSyncGeoportal"
+          label="Sinkronkan Geoportal"
+          icon="i-lucide-refresh-cw"
+          color="info"
+          variant="subtle"
+          :loading="syncingGeoportal"
+          class="cursor-pointer"
+          @click="openSyncModal"
+        />
+        <UButton
+          v-if="canSyncGeoportal"
+          label="Riwayat Sync"
+          icon="i-lucide-history"
+          color="neutral"
+          variant="outline"
+          class="cursor-pointer hidden sm:inline-flex"
+          @click="openSyncHistoryModal"
+        />
         <UButton
           v-if="canCreate"
           label="Tambah Layer"
@@ -547,6 +697,26 @@ function getSourceTypeLabel(type: string): string {
 
     <!-- Filter & Search Toolbar -->
     <div class="p-4 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] space-y-3">
+      <!-- Quick Source Tabs Filter -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs border-b border-gray-100 dark:border-white/[0.04]">
+        <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 mr-1 shrink-0">Filter Sumber:</span>
+        <button
+          v-for="tab in sourceTabs"
+          :key="tab.value"
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+          :class="activeSourceTab === tab.value
+            ? 'bg-blue-600 text-white shadow-xs font-semibold'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+          @click="handleSourceTabChange(tab.value)"
+        >
+          <UIcon v-if="tab.value === 'geoportal'" name="i-lucide-globe-2" class="size-3.5" />
+          <UIcon v-else-if="tab.value === 'internal'" name="i-lucide-database" class="size-3.5" />
+          <UIcon v-else name="i-lucide-layers" class="size-3.5" />
+          <span>{{ tab.label }}</span>
+        </button>
+      </div>
+
       <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <!-- Search Input -->
         <div class="sm:col-span-2 md:col-span-1">
@@ -670,16 +840,43 @@ function getSourceTypeLabel(type: string): string {
 
               <!-- Name & Technical layer_name -->
               <td class="py-3 px-4">
-                <div class="space-y-0.5">
-                  <div class="font-semibold text-gray-900 dark:text-white text-sm">
-                    {{ layer.name }}
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold text-gray-900 dark:text-white text-sm">
+                      {{ layer.name }}
+                    </span>
+                    <UBadge
+                      v-if="layer.source_type === 'geoportal'"
+                      label="Geoportal"
+                      color="info"
+                      variant="subtle"
+                      size="xs"
+                      class="font-semibold text-[10px] flex items-center gap-1"
+                    >
+                      <UIcon name="i-lucide-globe-2" class="size-3" />
+                      <span>Geoportal Bojonegoro</span>
+                    </UBadge>
+                    <UBadge
+                      v-if="layer.category"
+                      :label="layer.category"
+                      color="neutral"
+                      variant="outline"
+                      size="xs"
+                      class="text-[10px]"
+                    />
                   </div>
                   <div v-if="layer.layer_name" class="font-mono text-[11px] text-gray-500 dark:text-gray-400 truncate max-w-md">
                     {{ layer.layer_name }}
                   </div>
-                  <div v-if="layer.attribution" class="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                    <UIcon name="i-lucide-building-2" class="size-3 text-gray-400 shrink-0" />
-                    <span>{{ layer.attribution }}</span>
+                  <div class="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 flex-wrap">
+                    <span v-if="layer.opd_name || layer.attribution" class="flex items-center gap-1">
+                      <UIcon name="i-lucide-building-2" class="size-3 text-gray-400 shrink-0" />
+                      <span>{{ layer.opd_name || layer.attribution }}</span>
+                    </span>
+                    <span v-if="layer.last_synced_at" class="flex items-center gap-1 text-[10px] text-gray-400 font-mono">
+                      <UIcon name="i-lucide-refresh-cw" class="size-2.5" />
+                      <span>Sync: {{ new Date(layer.last_synced_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) }}</span>
+                    </span>
                   </div>
                 </div>
               </td>
@@ -744,6 +941,16 @@ function getSourceTypeLabel(type: string): string {
               <!-- Actions -->
               <td v-if="hasAnyAction" class="py-3 px-4 text-right">
                 <div class="flex items-center justify-end gap-1">
+                  <UTooltip text="Lihat Rincian Metadata">
+                    <UButton
+                      icon="i-lucide-info"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      class="hover:text-sky-600 dark:hover:text-sky-400 cursor-pointer"
+                      @click="openMetadataModal(layer)"
+                    />
+                  </UTooltip>
                   <UTooltip v-if="canEdit" text="Edit Konfigurasi Layer">
                     <UButton
                       icon="i-heroicons-pencil"
@@ -995,6 +1202,280 @@ function getSourceTypeLabel(type: string): string {
             :loading="deleting"
             class="cursor-pointer"
             @click="handleDeleteLayer"
+          />
+        </div>
+      </template>
+    </UModal>
+    <!-- Geoportal CSW Sync Modal -->
+    <UModal
+      v-model:open="isSyncModalOpen"
+      title="Sinkronisasi Katalog Geoportal Bojonegoro"
+      description="Pemanenan metadata spasial resmi langsung dari layanan OGC CSW Geoportal Kabupaten Bojonegoro."
+      :ui="{ content: 'sm:max-w-xl' }"
+    >
+      <template #body>
+        <div class="space-y-4 text-xs sm:text-sm text-gray-600 dark:text-gray-300">
+          <div class="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/20 text-blue-800 dark:text-blue-300 space-y-1.5">
+            <div class="flex items-center gap-2 font-semibold">
+              <UIcon name="i-lucide-globe-2" class="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span>Simpul Jaringan Geoportal Daerah</span>
+            </div>
+            <p class="text-xs text-blue-700/90 dark:text-blue-300/80 leading-relaxed">
+              Endpoint CSW: <code class="font-mono text-[11px] bg-blue-100 dark:bg-blue-900/40 px-1 py-0.5 rounded">https://geoportal.bojonegorokab.go.id/csw/</code>
+            </p>
+            <p class="text-xs text-blue-700/80 dark:text-blue-300/70 leading-relaxed">
+              Sistem akan membaca seluruh metadata standar Dublin Core OGC CSW 2.0.2 dan memperbarui daftar layer tematik secara idempoten tanpa menghapus layer internal.
+            </p>
+          </div>
+
+          <!-- Loading state -->
+          <div v-if="syncingGeoportal" class="py-6 flex flex-col items-center justify-center space-y-3">
+            <UIcon name="i-lucide-loader-2" class="size-8 text-blue-600 animate-spin" />
+            <p class="text-xs font-medium text-gray-700 dark:text-gray-300">
+              Menghubungi endpoint CSW Geoportal & menguraikan rekaman XML...
+            </p>
+            <p class="text-[11px] text-gray-400">Proses ini membutuhkan waktu beberapa detik.</p>
+          </div>
+
+          <!-- Result KPI summary if completed -->
+          <div v-else-if="syncResult" class="space-y-3">
+            <div class="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
+              <UIcon name="i-lucide-check-circle" class="size-4" />
+              <span>Sinkronisasi Terakhir Berhasil Selesai!</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div class="p-2.5 rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02] text-center">
+                <span class="text-[10px] text-gray-500 block">Total Ditemukan</span>
+                <span class="text-lg font-bold text-gray-900 dark:text-white font-mono">{{ syncResult.records_found }}</span>
+              </div>
+              <div class="p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20 text-center">
+                <span class="text-[10px] text-emerald-600 dark:text-emerald-400 block">Baru Masuk</span>
+                <span class="text-lg font-bold text-emerald-600 dark:text-emerald-400 font-mono">{{ syncResult.records_inserted }}</span>
+              </div>
+              <div class="p-2.5 rounded-lg border border-blue-200 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 text-center">
+                <span class="text-[10px] text-blue-600 dark:text-blue-400 block">Diperbarui</span>
+                <span class="text-lg font-bold text-blue-600 dark:text-blue-400 font-mono">{{ syncResult.records_updated }}</span>
+              </div>
+              <div class="p-2.5 rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.02] text-center">
+                <span class="text-[10px] text-gray-500 block">Durasi</span>
+                <span class="text-lg font-bold text-gray-900 dark:text-white font-mono">{{ syncResult.duration_seconds }}s</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+            <p>Jadwal sinkronisasi otomatis harian aktif pada pukul <strong>02:00 WIB</strong>.</p>
+            <p>Klik tombol di bawah untuk menjalankan sinkronisasi manual sekarang.</p>
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex items-center justify-between w-full">
+          <UButton
+            label="Riwayat Log"
+            icon="i-lucide-history"
+            size="xs"
+            color="neutral"
+            variant="outline"
+            @click="() => { isSyncModalOpen = false; openSyncHistoryModal(); }"
+          />
+          <div class="flex items-center gap-2">
+            <UButton
+              label="Batal"
+              color="neutral"
+              variant="ghost"
+              :disabled="syncingGeoportal"
+              @click="isSyncModalOpen = false"
+            />
+            <UButton
+              label="Mulai Sinkronisasi"
+              icon="i-lucide-refresh-cw"
+              color="primary"
+              :loading="syncingGeoportal"
+              @click="handleSyncGeoportal"
+            />
+          </div>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Geoportal Sync History Modal -->
+    <UModal
+      v-model:open="isSyncHistoryModalOpen"
+      title="Riwayat Eksekusi Sinkronisasi Geoportal"
+      description="Audit log pencatatan sinkronisasi otomatis harian dan manual admin."
+      :ui="{ content: 'sm:max-w-3xl' }"
+    >
+      <template #body>
+        <div class="space-y-3">
+          <div v-if="syncHistoryStatus === 'pending'" class="py-8 text-center text-xs text-gray-500">
+            <UIcon name="i-lucide-loader-2" class="size-6 text-blue-600 animate-spin mx-auto mb-2" />
+            <span>Memuat data riwayat sinkronisasi...</span>
+          </div>
+
+          <div
+            v-else-if="!syncHistoryData?.data || syncHistoryData.data.length === 0"
+            class="py-8 text-center text-xs text-gray-500 dark:text-gray-400"
+          >
+            Belum ada riwayat sinkronisasi yang tercatat di basis data.
+          </div>
+
+          <div v-else class="overflow-x-auto max-h-[55vh]">
+            <table class="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+              <thead class="bg-gray-50 dark:bg-[#070b14] text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/[0.08]">
+                <tr>
+                  <th scope="col" class="py-2.5 px-3">Waktu</th>
+                  <th scope="col" class="py-2.5 px-3">Pemicu</th>
+                  <th scope="col" class="py-2.5 px-3 text-center">Status</th>
+                  <th scope="col" class="py-2.5 px-3 text-center">Rekaman</th>
+                  <th scope="col" class="py-2.5 px-3 text-right">Durasi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-white/[0.04]">
+                <tr
+                  v-for="log in syncHistoryData.data"
+                  :key="log.id"
+                  class="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]"
+                >
+                  <td class="py-2.5 px-3 font-mono text-[11px]">
+                    {{ new Date(log.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) }}
+                  </td>
+                  <td class="py-2.5 px-3">
+                    <span class="capitalize font-medium">{{ log.triggered_by.replace('_', ' ') }}</span>
+                    <span v-if="log.user?.name" class="text-[10px] text-gray-400 block">oleh {{ log.user.name }}</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-center">
+                    <UBadge
+                      :label="log.status.toUpperCase()"
+                      :color="log.status === 'success' ? 'success' : log.status === 'failed' ? 'error' : 'warning'"
+                      size="xs"
+                      variant="subtle"
+                      class="font-mono text-[10px]"
+                    />
+                  </td>
+                  <td class="py-2.5 px-3 text-center font-mono text-[11px]">
+                    <span class="text-emerald-600 font-semibold">+{{ log.records_inserted }}</span> /
+                    <span class="text-blue-600 font-semibold">~{{ log.records_updated }}</span>
+                    <span class="text-gray-400 block text-[10px]">Total: {{ log.records_found }}</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-right font-mono text-[11px]">
+                    {{ log.duration_seconds }}s
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex justify-between items-center w-full">
+          <UButton
+            icon="i-heroicons-arrow-path"
+            size="xs"
+            color="neutral"
+            variant="outline"
+            :loading="syncHistoryStatus === 'pending'"
+            @click="() => refreshSyncHistory()"
+          >
+            Muat Ulang
+          </UButton>
+          <UButton
+            label="Tutup"
+            color="neutral"
+            variant="ghost"
+            @click="isSyncHistoryModalOpen = false"
+          />
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Geoportal Layer Metadata Modal -->
+    <UModal
+      v-model:open="isMetadataModalOpen"
+      :title="selectedGeoportalLayer?.name || 'Metadata Layer Geoportal'"
+      description="Rincian informasi Dublin Core OGC CSW resmi dari Geoportal Bojonegoro."
+      :ui="{ content: 'sm:max-w-2xl' }"
+    >
+      <template #body>
+        <div v-if="selectedGeoportalLayer" class="space-y-4 max-h-[70vh] overflow-y-auto text-xs pr-1">
+          <!-- Overview Cards -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="p-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50/50 dark:bg-white/[0.02] space-y-1">
+              <span class="text-[10px] font-semibold text-gray-500 uppercase">Kategori / Urusan</span>
+              <p class="font-medium text-gray-900 dark:text-white">
+                {{ selectedGeoportalLayer.category || 'Belum Terkategori' }}
+              </p>
+            </div>
+            <div class="p-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50/50 dark:bg-white/[0.02] space-y-1">
+              <span class="text-[10px] font-semibold text-gray-500 uppercase">Wali Data / Instansi</span>
+              <p class="font-medium text-gray-900 dark:text-white">
+                {{ selectedGeoportalLayer.opd_name || selectedGeoportalLayer.attribution || '-' }}
+              </p>
+            </div>
+          </div>
+
+          <!-- Description / Abstract -->
+          <div class="p-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-1">
+            <span class="text-[10px] font-semibold text-gray-500 uppercase">Abstrak / Deskripsi</span>
+            <p class="text-gray-700 dark:text-gray-300 leading-relaxed">
+              {{ selectedGeoportalLayer.description || 'Tidak ada abstrak yang disertakan dalam rekaman katalog.' }}
+            </p>
+          </div>
+
+          <!-- Technical Details -->
+          <div class="p-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-2">
+            <span class="text-[10px] font-semibold text-gray-500 uppercase block">Identitas Teknis Service</span>
+            <div class="space-y-1.5 font-mono text-[11px]">
+              <div class="flex items-start justify-between gap-2 border-b border-gray-100 dark:border-white/5 pb-1">
+                <span class="text-gray-400">Protokol:</span>
+                <span class="font-bold text-blue-600 dark:text-blue-400">{{ selectedGeoportalLayer.protocol.toUpperCase() }}</span>
+              </div>
+              <div class="flex items-start justify-between gap-2 border-b border-gray-100 dark:border-white/5 pb-1">
+                <span class="text-gray-400">Layer Name:</span>
+                <span class="text-gray-800 dark:text-gray-200 truncate max-w-sm" :title="selectedGeoportalLayer.layer_name || ''">
+                  {{ selectedGeoportalLayer.layer_name || '-' }}
+                </span>
+              </div>
+              <div class="flex items-start justify-between gap-2 border-b border-gray-100 dark:border-white/5 pb-1">
+                <span class="text-gray-400">CSW Identifier:</span>
+                <span class="text-gray-800 dark:text-gray-200 truncate max-w-sm">
+                  {{ selectedGeoportalLayer.geoportal_id || '-' }}
+                </span>
+              </div>
+              <div class="flex items-start justify-between gap-2 pt-0.5">
+                <span class="text-gray-400">WMS Endpoint:</span>
+                <span class="text-gray-600 dark:text-gray-300 truncate max-w-sm" :title="selectedGeoportalLayer.url">
+                  {{ selectedGeoportalLayer.url }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Legend Preview -->
+          <div v-if="selectedGeoportalLayer.legend_url" class="p-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-2">
+            <span class="text-[10px] font-semibold text-gray-500 uppercase block">Pratinjau Simbol Legenda Resmi</span>
+            <div class="p-2 rounded-lg bg-gray-50 dark:bg-white/[0.02] border border-gray-100 dark:border-white/5 inline-block">
+              <img
+                :src="selectedGeoportalLayer.legend_url"
+                alt="Legenda Resmi Geoportal"
+                class="max-h-32 object-contain"
+                loading="lazy"
+                onerror="this.style.display='none'"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex justify-end w-full">
+          <UButton
+            label="Tutup"
+            color="neutral"
+            variant="ghost"
+            @click="isMetadataModalOpen = false"
           />
         </div>
       </template>

@@ -44,4 +44,9 @@ return [
     'martin' => [
         'url' => env('MARTIN_URL', 'http://localhost:9090'),
     ],
+
+    'geoportal' => [
+        'csw_url' => env('GEOPORTAL_CSW_URL', 'https://geoportal.bojonegorokab.go.id/csw/'),
+        'wms_url' => env('GEOPORTAL_WMS_URL', 'https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms'),
+    ],
 ];

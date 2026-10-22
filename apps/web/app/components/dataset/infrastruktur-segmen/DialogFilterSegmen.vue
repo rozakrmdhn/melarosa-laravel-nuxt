@@ -6,9 +6,14 @@ interface Props {
   open?: boolean;
   tipeList?: InfrastrukturTipe[];
   selectedTipe?: string | null;
+  selectedTahunPembangunan?: number | string | null;
   selectedKondisi?: string | null;
   selectedStatusVerifikasi?: string | null;
   selectedPerkerasan?: string | null;
+  selectedStatusJalan?: string | null;
+  selectedStatusKondisi?: string | null;
+  selectedStatusAset?: string | null;
+  selectedSumberDana?: string | null;
   modelKecamatan?: number | null;
   modelDesa?: number | null;
 }
@@ -17,9 +22,14 @@ withDefaults(defineProps<Props>(), {
   open: false,
   tipeList: () => [],
   selectedTipe: null,
+  selectedTahunPembangunan: null,
   selectedKondisi: null,
   selectedStatusVerifikasi: null,
   selectedPerkerasan: null,
+  selectedStatusJalan: null,
+  selectedStatusKondisi: null,
+  selectedStatusAset: null,
+  selectedSumberDana: null,
   modelKecamatan: null,
   modelDesa: null,
 });
@@ -27,9 +37,19 @@ withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'update:open', val: boolean): void;
   (e: 'update:selectedTipe', val: string | null): void;
+  (e: 'update:selectedTahunPembangunan', val: number | string | null): void;
+  (e: 'update:selected-tahun-pembangunan', val: number | string | null): void;
   (e: 'update:selectedKondisi', val: string | null): void;
   (e: 'update:selectedStatusVerifikasi', val: string | null): void;
   (e: 'update:selectedPerkerasan', val: string | null): void;
+  (e: 'update:selectedStatusJalan', val: string | null): void;
+  (e: 'update:selected-status-jalan', val: string | null): void;
+  (e: 'update:selectedStatusKondisi', val: string | null): void;
+  (e: 'update:selected-status-kondisi', val: string | null): void;
+  (e: 'update:selectedStatusAset', val: string | null): void;
+  (e: 'update:selected-status-aset', val: string | null): void;
+  (e: 'update:selectedSumberDana', val: string | null): void;
+  (e: 'update:selected-sumber-dana', val: string | null): void;
   (e: 'update:modelKecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
   (e: 'apply'): void;
@@ -58,16 +78,26 @@ function handleApply() {
         layer-title="Segmen Fisik Infrastruktur"
         :tipe-list="tipeList"
         :selected-tipe="selectedTipe"
+        :selected-tahun-pembangunan="selectedTahunPembangunan"
         :selected-kondisi="selectedKondisi"
         :selected-status-verifikasi="selectedStatusVerifikasi"
         :selected-perkerasan="selectedPerkerasan"
+        :selected-status-jalan="selectedStatusJalan"
+        :selected-status-kondisi="selectedStatusKondisi"
+        :selected-status-aset="selectedStatusAset"
+        :selected-sumber-dana="selectedSumberDana"
         :model-kecamatan="modelKecamatan"
         :model-desa="modelDesa"
         :is-mobile="false"
         @update:selected-tipe="emit('update:selectedTipe', $event)"
+        @update:selected-tahun-pembangunan="emit('update:selectedTahunPembangunan', $event)"
         @update:selected-kondisi="emit('update:selectedKondisi', $event)"
         @update:selected-status-verifikasi="emit('update:selectedStatusVerifikasi', $event)"
         @update:selected-perkerasan="emit('update:selectedPerkerasan', $event)"
+        @update:selected-status-jalan="emit('update:selectedStatusJalan', $event); emit('update:selected-status-jalan', $event)"
+        @update:selected-status-kondisi="emit('update:selectedStatusKondisi', $event); emit('update:selected-status-kondisi', $event)"
+        @update:selected-status-aset="emit('update:selectedStatusAset', $event); emit('update:selected-status-aset', $event)"
+        @update:selected-sumber-dana="emit('update:selectedSumberDana', $event); emit('update:selected-sumber-dana', $event)"
         @update:model-kecamatan="emit('update:modelKecamatan', $event)"
         @update:model-desa="emit('update:modelDesa', $event)"
         @apply="handleApply"

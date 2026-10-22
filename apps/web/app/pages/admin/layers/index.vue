@@ -538,6 +538,41 @@ function openMetadataModal(layer: LayerItem) {
   isMetadataModalOpen.value = true;
 }
 
+import { useGeoportalStatus } from "~/composables/useGeoportalLayers";
+
+const {
+  connectionStatus: geoportalStatus,
+  checking: checkingGeoportalStatus,
+  checkConnection: refreshGeoportalStatus,
+} = useGeoportalStatus();
+
+function formatLastSync(iso?: string | null): string {
+  if (!iso) return "Belum pernah disinkronkan";
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function timeAgo(iso?: string | null): string {
+  if (!iso) return "Belum pernah";
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return "-";
+  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffSec < 60) return "Baru saja";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} menit lalu`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} jam lalu`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} hari lalu`;
+}
+
 async function handleSyncGeoportal() {
   syncingGeoportal.value = true;
   syncResult.value = null;
@@ -565,6 +600,7 @@ async function handleSyncGeoportal() {
         color: "success",
       });
       await refresh();
+      await refreshGeoportalStatus(true);
     }
   } catch (err: any) {
     const msg =
@@ -595,14 +631,14 @@ async function handleSyncGeoportal() {
           </h1>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          Katalog data spasial WMS, WFS, XYZ, dan Vector Tiles untuk visualisasi peta sistem.
+          Katalog data spasial WMS, WFS, XYZ, dan Vector Tiles.
         </p>
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
         <UButton
           v-if="canSyncGeoportal"
-          label="Sinkronkan Geoportal"
+          label="Sync Geoportal"
           icon="i-lucide-refresh-cw"
           color="info"
           variant="subtle"
@@ -621,7 +657,7 @@ async function handleSyncGeoportal() {
         />
         <UButton
           v-if="canCreate"
-          label="Tambah Layer"
+          label="Layer"
           icon="i-heroicons-plus"
           color="primary"
           class="cursor-pointer"
@@ -635,6 +671,145 @@ async function handleSyncGeoportal() {
           class="cursor-pointer"
           @click="() => refresh()"
         />
+      </div>
+    </div>
+
+    <!-- ═══ Kartu Simpul Jaringan Geoportal Bojonegoro (Ringkas & Terarah) ═══ -->
+    <div
+      class="p-4 sm:p-4.5 rounded-xl border transition-all shadow-2xs"
+      :class="[
+        geoportalStatus?.status === 'online'
+          ? 'border-emerald-500/25 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/20'
+          : geoportalStatus?.status === 'fallback'
+          ? 'border-amber-500/30 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20'
+          : 'border-red-500/30 dark:border-red-500/20 bg-red-50/50 dark:bg-red-950/20'
+      ]"
+    >
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+        <!-- Kolom Kiri: Ikon, Judul, Status & Metadata Singkat -->
+        <div class="flex items-center gap-3 min-w-0">
+          <div
+            class="size-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
+            :class="[
+              geoportalStatus?.status === 'online'
+                ? 'bg-emerald-600 text-white'
+                : geoportalStatus?.status === 'fallback'
+                ? 'bg-amber-500 text-white'
+                : 'bg-red-600 text-white'
+            ]"
+          >
+            <UIcon name="i-lucide-globe-2" class="size-5" />
+          </div>
+
+          <div class="min-w-0 space-y-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h2 class="text-sm font-bold text-gray-900 dark:text-white">
+                Simpul Jaringan Geoportal Bojonegoro (JIGN)
+              </h2>
+
+              <!-- Status Dot & Badge -->
+              <span
+                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                :class="[
+                  geoportalStatus?.status === 'online'
+                    ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
+                    : geoportalStatus?.status === 'fallback'
+                    ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
+                    : 'bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300'
+                ]"
+              >
+                <span class="relative flex size-2">
+                  <span
+                    v-if="geoportalStatus?.status === 'online'"
+                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
+                  />
+                  <span
+                    class="relative inline-flex rounded-full size-2"
+                    :class="[
+                      geoportalStatus?.status === 'online'
+                        ? 'bg-emerald-500'
+                        : geoportalStatus?.status === 'fallback'
+                        ? 'bg-amber-500'
+                        : 'bg-red-500'
+                    ]"
+                  />
+                </span>
+                <span>
+                  {{
+                    checkingGeoportalStatus
+                      ? 'Memeriksa status...'
+                      : geoportalStatus?.status === 'online'
+                      ? 'Terhubung'
+                      : geoportalStatus?.status === 'fallback'
+                      ? 'Data Cadangan Aktif'
+                      : 'Koneksi Terputus'
+                  }}
+                </span>
+              </span>
+
+              <span
+                v-if="geoportalStatus?.response_time_ms && geoportalStatus.status === 'online'"
+                class="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40"
+              >
+                {{ geoportalStatus.response_time_ms }} ms
+              </span>
+
+              <span
+                class="text-[11px] font-medium text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-200/60 dark:border-blue-900/40"
+              >
+                {{ geoportalStatus?.remote_matched ?? geoportalStatus?.total_local_layers ?? 0 }} Layer Live
+              </span>
+            </div>
+
+            <!-- Metadata Singkat: Waktu Sinkron & Tautan CSW -->
+            <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+              <span>Waktu Sinkron: <strong class="font-semibold text-gray-700 dark:text-gray-300">{{ formatLastSync(geoportalStatus?.last_synced_at) }}</strong> ({{ timeAgo(geoportalStatus?.last_synced_at) }})</span>
+              <span class="text-gray-300 dark:text-gray-700">•</span>
+              <a
+                :href="geoportalStatus?.csw_url || 'https://geoportal.bojonegorokab.go.id/csw/'"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+              >
+                <span>pyCSW 2.6.0</span>
+                <UIcon name="i-lucide-external-link" class="size-3" />
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Kolom Kanan: Aksi Cepat Ringkas -->
+        <div class="flex items-center gap-2 shrink-0 self-end sm:self-center flex-wrap">
+          <UButton
+            label="Cek Status"
+            icon="i-heroicons-arrow-path"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            :loading="checkingGeoportalStatus"
+            class="cursor-pointer text-xs"
+            @click="refreshGeoportalStatus(true)"
+          />
+          <UButton
+            v-if="canSyncGeoportal"
+            label="Sinkronkan"
+            icon="i-lucide-refresh-cw"
+            color="primary"
+            size="xs"
+            :loading="syncingGeoportal"
+            class="cursor-pointer text-xs font-semibold"
+            @click="openSyncModal"
+          />
+        </div>
+      </div>
+
+      <!-- Alert Ringan jika Mode Cadangan -->
+      <div
+        v-if="geoportalStatus?.status === 'fallback'"
+        class="mt-3 pt-3 border-t border-amber-200/60 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2"
+      >
+        <UIcon name="i-lucide-alert-triangle" class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <span>Layanan server Geoportal sedang lambat. Melarosa menyajikan {{ geoportalStatus?.total_local_layers ?? 0 }} layer dari data cadangan lokal.</span>
       </div>
     </div>
 

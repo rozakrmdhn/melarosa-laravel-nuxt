@@ -98,6 +98,33 @@ const googleMapsUrl = computed(() => {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 });
 
+function toDms(dec: number, isLng: boolean): string {
+  const abs = Math.abs(dec);
+  const degrees = Math.floor(abs);
+  const minutesDec = (abs - degrees) * 60;
+  const minutes = Math.floor(minutesDec);
+  const seconds = ((minutesDec - minutes) * 60).toFixed(1);
+  const dir = isLng ? (dec >= 0 ? "E" : "W") : (dec >= 0 ? "N" : "S");
+  return `${degrees}°${minutes.toString().padStart(2, "0")}'${seconds.padStart(4, "0")}" ${dir}`;
+}
+
+const coordFormat = ref<"dd" | "dms">("dd");
+
+const formattedDmsLat = computed(() => {
+  if (!props.clickedCoordinate) return "-";
+  return toDms(props.clickedCoordinate[1], false);
+});
+
+const formattedDmsLng = computed(() => {
+  if (!props.clickedCoordinate) return "-";
+  return toDms(props.clickedCoordinate[0], true);
+});
+
+const formattedDms = computed(() => {
+  if (!props.clickedCoordinate) return "-";
+  return `${formattedDmsLat.value}, ${formattedDmsLng.value}`;
+});
+
 function fallbackCopy(text: string) {
   const textArea = document.createElement("textarea");
   textArea.value = text;
@@ -117,7 +144,7 @@ function fallbackCopy(text: string) {
 function copyCoordinate() {
   if (!props.clickedCoordinate) return;
   const [lng, lat] = props.clickedCoordinate;
-  const text = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  const text = coordFormat.value === "dms" ? formattedDms.value : `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 
   if (navigator?.clipboard?.writeText && window.isSecureContext) {
     navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
@@ -128,7 +155,7 @@ function copyCoordinate() {
   copied.value = true;
   toast.add({
     title: "Koordinat Disalin",
-    description: `${text} berhasil disalin ke clipboard`,
+    description: `${text} (${coordFormat.value.toUpperCase()}) berhasil disalin ke clipboard`,
     color: "success",
     icon: "i-lucide-check",
   });
@@ -146,38 +173,32 @@ function copyCoordinate() {
   <!-- ═══════════════════════════════════════════════════════════════════════ -->
   <div
     v-if="isMobileDrawer"
-    class="h-full flex flex-col p-4 overflow-y-auto space-y-3.5 select-none"
+    class="flex flex-col px-4 sm:px-5 py-3.5 space-y-3.5 select-none"
   >
-    <!-- Tab Switcher Nav (Fitur WMS vs Koordinat) -->
-    <div class="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 shrink-0">
+    <!-- Tab Switcher Nav (Atribut Fitur vs Info Lokasi: Pure Pill 100% Radius) -->
+    <div class="flex items-center gap-1 p-1 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 shrink-0">
       <button
         type="button"
-        class="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[36px]"
+        class="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-semibold transition-all cursor-pointer min-h-[40px] select-none text-center"
         :class="activeTab === 'features'
-          ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 shadow-xs'
+          ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
         @click="activeTab = 'features'"
       >
         <UIcon name="i-lucide-info" class="size-3.5" />
-        <span>Atribut Fitur WMS</span>
-        <span
-          v-if="identifiedFeatures && identifiedFeatures.length > 0"
-          class="size-4.5 rounded-full text-[10px] flex items-center justify-center bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold"
-        >
-          {{ identifiedFeatures.length }}
-        </span>
+        <span>Atribut Fitur</span>
       </button>
 
       <button
         type="button"
-        class="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[36px]"
+        class="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-semibold transition-all cursor-pointer min-h-[40px] select-none text-center"
         :class="activeTab === 'coordinates'
-          ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 shadow-xs'
+          ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
         @click="activeTab = 'coordinates'"
       >
         <UIcon name="i-lucide-crosshair" class="size-3.5" />
-        <span>Koordinat Titik</span>
+        <span>Info Lokasi</span>
       </button>
     </div>
 
@@ -186,6 +207,7 @@ function copyCoordinate() {
       <IdentifyFeatures
         :features="identifiedFeatures"
         :loading="isIdentifying"
+        @select-feature="(f) => emit('select-feature', f)"
       />
     </div>
 
@@ -232,19 +254,46 @@ function copyCoordinate() {
               <UIcon name="i-lucide-crosshair" class="size-3.5 text-blue-600 dark:text-blue-400" />
               Koordinat Geografis
             </span>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
-              EPSG:4326
-            </span>
+            <div class="flex items-center gap-1.5">
+              <!-- Format Toggle Button (DD / DMS) -->
+              <button
+                type="button"
+                class="min-h-[26px] px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer active:scale-95"
+                :class="coordFormat === 'dd'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/15'"
+                :title="`Beralih ke format ${coordFormat === 'dd' ? 'DMS' : 'DD'}`"
+                @click="coordFormat = coordFormat === 'dd' ? 'dms' : 'dd'"
+              >
+                {{ coordFormat.toUpperCase() }}
+              </button>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
+                EPSG:4326
+              </span>
+            </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-2 text-xs">
+          <!-- Koordinat DD -->
+          <div v-if="coordFormat === 'dd'" class="grid grid-cols-2 gap-2 text-xs">
             <div class="p-2.5 rounded-xl bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
               <p class="text-[10px] text-slate-400 font-medium">Latitude (Lintang)</p>
-              <p class="font-mono font-bold text-slate-900 dark:text-slate-100 mt-0.5">{{ formattedLat }}</p>
+              <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5">{{ formattedLat }}</p>
             </div>
             <div class="p-2.5 rounded-xl bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
               <p class="text-[10px] text-slate-400 font-medium">Longitude (Bujur)</p>
-              <p class="font-mono font-bold text-slate-900 dark:text-slate-100 mt-0.5">{{ formattedLng }}</p>
+              <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5">{{ formattedLng }}</p>
+            </div>
+          </div>
+
+          <!-- Koordinat DMS -->
+          <div v-else class="grid grid-cols-2 gap-2 text-xs">
+            <div class="p-2.5 rounded-xl bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
+              <p class="text-[10px] text-slate-400 font-medium">Lintang (DMS)</p>
+              <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5 text-[11px] truncate">{{ formattedDmsLat }}</p>
+            </div>
+            <div class="p-2.5 rounded-xl bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
+              <p class="text-[10px] text-slate-400 font-medium">Bujur (DMS)</p>
+              <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5 text-[11px] truncate">{{ formattedDmsLng }}</p>
             </div>
           </div>
 
@@ -252,41 +301,41 @@ function copyCoordinate() {
           <div v-if="webMercatorCoords" class="p-2.5 rounded-xl bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10 space-y-1">
             <div class="flex justify-between items-center text-[10px] text-slate-400">
               <span class="font-medium">Proyeksi Web Mercator</span>
-              <span class="font-mono font-bold text-slate-600 dark:text-slate-400">EPSG:3857</span>
+              <span class="font-bold tabular-nums text-slate-600 dark:text-slate-400">EPSG:3857</span>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-300">
+            <div class="grid grid-cols-2 gap-2 text-[11px] tabular-nums font-semibold text-slate-700 dark:text-slate-300">
               <div>X: {{ webMercatorCoords.x }} m</div>
               <div>Y: {{ webMercatorCoords.y }} m</div>
             </div>
           </div>
 
-          <!-- Action Buttons -->
-          <div class="flex items-center gap-2 pt-1">
+          <!-- Action Buttons (Responsive 3-Column Grid) -->
+          <div class="grid grid-cols-3 gap-2 pt-1">
             <button
               type="button"
-              class="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 active:scale-95 shadow-xs transition-all cursor-pointer min-h-[44px]"
+              class="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 active:scale-95 shadow-xs transition-all cursor-pointer min-h-[44px] min-w-0 focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
               @click="copyCoordinate"
             >
-              <UIcon :name="copied ? 'i-lucide-check' : 'i-lucide-copy'" class="size-4" />
-              <span>{{ copied ? 'Tersalin' : 'Salin Koordinat' }}</span>
+              <UIcon :name="copied ? 'i-lucide-check' : 'i-lucide-copy'" class="size-4 shrink-0" />
+              <span class="truncate">{{ copied ? 'Tersalin' : 'Salin' }}</span>
             </button>
             <a
               :href="googleMapsUrl"
               target="_blank"
               rel="noopener noreferrer"
-              class="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] active:scale-95 transition-all cursor-pointer min-h-[44px]"
+              class="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] active:scale-95 transition-all cursor-pointer min-h-[44px] min-w-0 focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
             >
-              <UIcon name="i-lucide-external-link" class="size-4 text-slate-400" />
-              <span>Google Maps</span>
+              <UIcon name="i-lucide-external-link" class="size-4 text-slate-400 shrink-0" />
+              <span class="truncate">Maps</span>
             </a>
             <button
               type="button"
-              class="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] hover:text-blue-600 dark:hover:text-blue-400 active:scale-95 transition-all cursor-pointer min-h-[44px]"
+              class="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] hover:text-blue-600 dark:hover:text-blue-400 active:scale-95 transition-all cursor-pointer min-h-[44px] min-w-0 focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
               aria-label="Bagikan Peta Lokasi"
               @click="emit('share')"
             >
-              <UIcon name="i-lucide-share-2" class="size-4 text-slate-400" />
-              <span>Bagikan</span>
+              <UIcon name="i-lucide-share-2" class="size-4 text-slate-400 shrink-0" />
+              <span class="truncate">Bagikan</span>
             </button>
           </div>
         </div>
@@ -299,11 +348,11 @@ function copyCoordinate() {
           <div class="space-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
             <div class="flex justify-between">
               <span>Datum Geodetik:</span>
-              <span class="font-mono font-medium text-slate-800 dark:text-slate-200">WGS 84 (EPSG:4326)</span>
+              <span class="font-medium tabular-nums text-slate-800 dark:text-slate-200">WGS 84 (EPSG:4326)</span>
             </div>
             <div class="flex justify-between">
               <span>Sistem Proyeksi:</span>
-              <span class="font-mono font-medium text-slate-800 dark:text-slate-200">Web Mercator (EPSG:3857)</span>
+              <span class="font-medium tabular-nums text-slate-800 dark:text-slate-200">Web Mercator (EPSG:3857)</span>
             </div>
             <div class="flex justify-between">
               <span>Cakupan Wilayah:</span>
@@ -369,7 +418,7 @@ function copyCoordinate() {
                 {{ primaryFeature.layerInstansi || primaryFeature.layerAttribution }}
               </span>
             </div>
-            <span class="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate block">
+            <span class="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums truncate block">
               {{ formattedLat }}, {{ formattedLng }}
             </span>
           </div>
@@ -379,7 +428,7 @@ function copyCoordinate() {
             <span class="text-xs font-bold text-slate-900 dark:text-slate-100 truncate block">
               {{ locationLabel }}
             </span>
-            <span class="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate block">
+            <span class="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums truncate block">
               {{ formattedLat }}, {{ formattedLng }}
             </span>
           </div>
@@ -389,7 +438,7 @@ function copyCoordinate() {
             <span class="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
               {{ isIdentifying ? 'Memeriksa Fitur...' : 'Koordinat Titik' }}
             </span>
-            <span class="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono truncate block">
+            <span class="text-xs font-bold text-blue-600 dark:text-blue-400 tabular-nums truncate block">
               {{ formattedLat }}, {{ formattedLng }}
             </span>
           </div>
@@ -449,36 +498,30 @@ function copyCoordinate() {
         v-show="isExpanded"
         class="border-t border-slate-100 dark:border-white/10 p-3.5 space-y-3 max-h-[420px] overflow-y-auto"
       >
-        <!-- Tab Selector: Fitur WMS vs Koordinat -->
-        <div class="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200/80 dark:border-white/10">
+        <!-- Tab Selector: Atribut Fitur vs Info Lokasi (Pure Pill 100% Radius) -->
+        <div class="flex items-center gap-1 p-1 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200/80 dark:border-white/10">
           <button
             type="button"
-            class="flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[32px]"
+            class="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-full text-xs font-semibold transition-all cursor-pointer min-h-[36px] select-none text-center"
             :class="activeTab === 'features'
-              ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 shadow-xs'
+              ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
             @click="activeTab = 'features'"
           >
             <UIcon name="i-lucide-info" class="size-3.5" />
-            <span>Atribut WMS</span>
-            <span
-              v-if="identifiedFeatures && identifiedFeatures.length > 0"
-              class="size-4 rounded-full text-[9px] flex items-center justify-center bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold"
-            >
-              {{ identifiedFeatures.length }}
-            </span>
+            <span>Atribut Fitur</span>
           </button>
 
           <button
             type="button"
-            class="flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[32px]"
+            class="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-full text-xs font-semibold transition-all cursor-pointer min-h-[36px] select-none text-center"
             :class="activeTab === 'coordinates'
-              ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 shadow-xs'
+              ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
             @click="activeTab = 'coordinates'"
           >
             <UIcon name="i-lucide-crosshair" class="size-3.5" />
-            <span>Koordinat Titik</span>
+            <span>Info Lokasi</span>
           </button>
         </div>
 
@@ -500,22 +543,51 @@ function copyCoordinate() {
                 <UIcon name="i-lucide-crosshair" class="size-3.5 text-blue-500" />
                 Sistem Koordinat Geografis
               </span>
-              <span class="px-1.5 py-0.2 rounded-md text-[9px] font-mono font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
-                EPSG:4326
-              </span>
+              <div class="flex items-center gap-1.5">
+                <!-- Format Toggle Button (DD / DMS) -->
+                <button
+                  type="button"
+                  class="min-h-[24px] px-1.5 py-0.2 rounded-md text-[9px] font-bold transition-all cursor-pointer active:scale-95"
+                  :class="coordFormat === 'dd'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/15'"
+                  :title="`Beralih ke format ${coordFormat === 'dd' ? 'DMS' : 'DD'}`"
+                  @click="coordFormat = coordFormat === 'dd' ? 'dms' : 'dd'"
+                >
+                  {{ coordFormat.toUpperCase() }}
+                </button>
+                <span class="px-1.5 py-0.2 rounded-md text-[9px] font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
+                  EPSG:4326
+                </span>
+              </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-2 text-xs">
+            <div v-if="coordFormat === 'dd'" class="grid grid-cols-2 gap-2 text-xs">
               <div class="p-2 rounded-lg bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
                 <p class="text-[10px] text-slate-400 font-medium">Latitude (Lintang)</p>
-                <p class="font-mono font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5">
                   {{ formattedLat }}
                 </p>
               </div>
               <div class="p-2 rounded-lg bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
                 <p class="text-[10px] text-slate-400 font-medium">Longitude (Bujur)</p>
-                <p class="font-mono font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5">
                   {{ formattedLng }}
+                </p>
+              </div>
+            </div>
+
+            <div v-else class="grid grid-cols-2 gap-2 text-xs">
+              <div class="p-2 rounded-lg bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
+                <p class="text-[10px] text-slate-400 font-medium">Lintang (DMS)</p>
+                <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5 text-[10.5px] truncate">
+                  {{ formattedDmsLat }}
+                </p>
+              </div>
+              <div class="p-2 rounded-lg bg-white dark:bg-[#070b14] border border-slate-200/80 dark:border-white/10">
+                <p class="text-[10px] text-slate-400 font-medium">Bujur (DMS)</p>
+                <p class="font-bold tabular-nums text-slate-900 dark:text-slate-100 mt-0.5 text-[10.5px] truncate">
+                  {{ formattedDmsLng }}
                 </p>
               </div>
             </div>
@@ -527,9 +599,9 @@ function copyCoordinate() {
             >
               <div class="flex justify-between items-center text-[10px] text-slate-400">
                 <span class="font-medium">Proyeksi Web Mercator</span>
-                <span class="font-mono font-bold text-slate-600 dark:text-slate-400">EPSG:3857</span>
+                <span class="font-bold tabular-nums text-slate-600 dark:text-slate-400">EPSG:3857</span>
               </div>
-              <div class="grid grid-cols-2 gap-2 text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-300">
+              <div class="grid grid-cols-2 gap-2 text-[11px] tabular-nums font-semibold text-slate-700 dark:text-slate-300">
                 <div>X: {{ webMercatorCoords.x }} m</div>
                 <div>Y: {{ webMercatorCoords.y }} m</div>
               </div>
@@ -565,11 +637,11 @@ function copyCoordinate() {
             <div class="space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
               <div class="flex justify-between">
                 <span>Datum:</span>
-                <span class="font-mono font-medium text-slate-800 dark:text-slate-200">WGS 84 (EPSG:4326)</span>
+                <span class="font-medium tabular-nums text-slate-800 dark:text-slate-200">WGS 84 (EPSG:4326)</span>
               </div>
               <div class="flex justify-between">
                 <span>Proyeksi:</span>
-                <span class="font-mono font-medium text-slate-800 dark:text-slate-200">Web Mercator (EPSG:3857)</span>
+                <span class="font-medium tabular-nums text-slate-800 dark:text-slate-200">Web Mercator (EPSG:3857)</span>
               </div>
               <div class="flex justify-between">
                 <span>Wilayah:</span>

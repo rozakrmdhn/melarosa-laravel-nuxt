@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import MapCanvas, { type BasemapKey } from "~/components/maps/MapCanvas.vue";
 import LeftPanel from "~/components/maps/LeftPanel.vue";
+import BasemapPanel from "~/components/maps/BasemapPanel.vue";
+import MapBasemapBottomSheet from "~/components/maps/MapBasemapBottomSheet.vue";
 import BottomLocationBar from "~/components/maps/BottomLocationBar.vue";
 import MapMobileBottomSheet, { type SnapLevel } from "~/components/maps/MapMobileBottomSheet.vue";
 import MapShareModal from "~/components/maps/MapShareModal.vue";
+import MapShareBottomSheet from "~/components/maps/MapShareBottomSheet.vue";
 import type { ActiveLayerItem } from "~/types/map-layers";
 
 definePageMeta({
@@ -159,15 +162,168 @@ const clickedCoordinate = ref<[number, number] | null>(
 );
 
 // Floating panels toggles
+// Di desktop, panel kiri terbuka secara default
 const leftPanelOpen = ref(false);
 const locationBarOpen = ref(hasExplicitSearchOrPin);
 const selectedKecamatanFilter = ref<string | null>(null);
 const isShareModalOpen = ref(false);
+const isBasemapBottomSheetOpen = ref(false);
+
+// Shared state: lebar sidebar dikirim ke app.vue agar navbar bisa geser
+const mapsSidebarWidth = useState<number>("maps_sidebar_width", () => 0);
+const SIDEBAR_WIDTH = 400;
+
+// Fitur On-Loading Progresif Kanvas Peta (Fast LeftPanel + Map Canvas Loader)
+const isMapCanvasLoaded = ref(false);
+const loadingProgress = ref(18);
+const loadingStageText = ref("Menyiapkan kanvas peta spasial Bojonegoro...");
+let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+function startLoadingSimulation() {
+  loadingProgress.value = 22;
+  loadingStageText.value = "Menghubungkan layanan geospasial Bojonegoro...";
+
+  let tick = 0;
+  progressTimer = setInterval(() => {
+    tick++;
+    if (tick === 1) {
+      loadingProgress.value = 48;
+      loadingStageText.value = "Mengunduh modul kartografi OpenLayers...";
+    } else if (tick === 2) {
+      loadingProgress.value = 76;
+      loadingStageText.value = "Menyiapkan layer tematik & batas wilayah...";
+    } else if (tick === 3) {
+      loadingProgress.value = 92;
+      loadingStageText.value = "Merender data spasial ke kanvas...";
+    }
+  }, 260);
+}
+
+function handleMapLoaded() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+  loadingProgress.value = 100;
+  loadingStageText.value = "Peta spasial siap digunakan";
+  setTimeout(() => {
+    isMapCanvasLoaded.value = true;
+  }, 220);
+}
+
+// Mobile drawers & screen detection
+type MobileDrawerTab = "layer" | "dataset" | "geopark" | "geoportal";
+const mobileDrawerOpen = ref(false);
+const mobileDrawerTab = ref<MobileDrawerTab>("layer");
+const mobileSheetSnap = ref<SnapLevel>("min");
+const isMobileScreen = ref(false);
+
+function updateIsMobile() {
+  if (typeof window !== "undefined") {
+    const isMobile = window.innerWidth < 768;
+    isMobileScreen.value = isMobile;
+    if (!isMobile) {
+      mobileDrawerOpen.value = false;
+      // Buka panel kiri secara default di desktop
+      if (!leftPanelOpen.value) {
+        leftPanelOpen.value = true;
+      }
+    } else {
+      // Di mobile, sidebar tidak pernah full-height
+      mapsSidebarWidth.value = 0;
+    }
+    syncSidebarWidth();
+  }
+}
+
+function syncSidebarWidth() {
+  if (isMobileScreen.value || !leftPanelOpen.value) {
+    mapsSidebarWidth.value = 0;
+  } else {
+    const w = typeof window !== "undefined" && window.innerWidth < 1024 ? 350 : SIDEBAR_WIDTH;
+    mapsSidebarWidth.value = w;
+  }
+}
+
+watch(leftPanelOpen, () => syncSidebarWidth());
+
+const isLeftPanelActive = computed(() => {
+  if (isMobileScreen.value) {
+    return mobileDrawerOpen.value && mobileDrawerTab.value === "layer" && mobileSheetSnap.value !== "min";
+  }
+  return leftPanelOpen.value;
+});
+
+function handleToggleBasemapSheet() {
+  if (isBasemapBottomSheetOpen.value) {
+    isBasemapBottomSheetOpen.value = false;
+    return;
+  }
+  if (isMobileScreen.value) {
+    if (isShareModalOpen.value) {
+      isShareModalOpen.value = false;
+    }
+    if (mobileDrawerOpen.value && mobileSheetSnap.value !== "min") {
+      mobileSheetSnap.value = "min";
+    }
+  }
+  isBasemapBottomSheetOpen.value = true;
+}
+
+function handleToggleLeftPanelOrMobileDrawer() {
+  if (isMobileScreen.value) {
+    if (isBasemapBottomSheetOpen.value) {
+      isBasemapBottomSheetOpen.value = false;
+    }
+    if (!mobileDrawerOpen.value) {
+      openMobileTab("layer");
+    } else if (mobileSheetSnap.value === "min") {
+      mobileDrawerTab.value = "layer";
+      mobileSheetSnap.value = "peek";
+    } else {
+      mobileSheetSnap.value = "min";
+    }
+    return;
+  }
+  toggleLeftPanel();
+}
 
 async function getMapSnapshot(): Promise<string | null> {
   if (!mapCanvasRef.value) return null;
   return mapCanvasRef.value.getMapSnapshot();
 }
+
+function handleOpenShare() {
+  if (isMobileScreen.value) {
+    // Tutup bottom sheet peta terlebih dahulu dengan transisi lembut
+    mobileDrawerOpen.value = false;
+    isBasemapBottomSheetOpen.value = false;
+  }
+  isShareModalOpen.value = true;
+}
+
+function handleShareSheetClosed() {
+  if (isMobileScreen.value) {
+    // Beri jeda halus (60ms) setelah sheet bagikan tertutup sempurna, lalu buka kembali panel peta ke separuh layar
+    mobileSheetSnap.value = "peek";
+    setTimeout(() => {
+      mobileDrawerOpen.value = true;
+    }, 60);
+  }
+}
+
+watch(isShareModalOpen, (isOpen) => {
+  if (isOpen && isMobileScreen.value) {
+    mobileDrawerOpen.value = false;
+    isBasemapBottomSheetOpen.value = false;
+  }
+});
+
+watch([mobileDrawerOpen, mobileSheetSnap], ([open, snap]) => {
+  if (open && snap !== "min" && isBasemapBottomSheetOpen.value) {
+    isBasemapBottomSheetOpen.value = false;
+  }
+});
 
 // WMS Feature identification state
 import type { IdentifiedFeature } from "~/components/maps/IdentifyFeatures.vue";
@@ -285,6 +441,12 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
 const activeLayers = ref<ActiveLayerItem[]>([...FALLBACK_DEFAULT_LAYERS]);
 const hasInitializedLayersFromApi = ref(false);
 
+const activeLayersSummary = computed(() => {
+  const layers = activeLayers.value || [];
+  const visible = layers.filter((l) => Boolean(l && l.visible)).length;
+  return `${visible}/${layers.length} Layer Aktif`;
+});
+
 function applyLayersFromApi(feed: any) {
   const list = feed?.data || (Array.isArray(feed) ? feed : null);
   if (!Array.isArray(list) || list.length === 0) return;
@@ -337,16 +499,6 @@ const BASEMAP_OPTIONS: BasemapOption[] = [
   { key: "satellite", name: "Satelit", tagline: "Citra Resolusi Tinggi" },
   { key: "aerial", name: "Aerial", tagline: "Foto Udara Resolusi Tinggi" },
 ];
-
-// Mobile drawers
-type MobileDrawerTab = "layer" | "geoportal" | "kecamatan" | "inspector";
-const mobileDrawerOpen = ref(false);
-const mobileDrawerTab = ref<MobileDrawerTab>("layer");
-const mobileSheetSnap = ref<SnapLevel>("min");
-
-const isLeftPanelActive = computed(() => {
-  return leftPanelOpen.value || (mobileDrawerOpen.value && mobileDrawerTab.value !== "inspector");
-});
 
 let urlUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -451,6 +603,15 @@ watch(
       mobileDrawerOpen.value = false;
     }
 
+    // Filter layer MVT jika terdapat parameter kecamatan atau nama pencarian kecamatan
+    const targetKecParam = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
+      ? route.query.kecamatan.trim()
+      : (searchLabel && /^kecamatan\s+/i.test(searchLabel) ? searchLabel.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim() : null);
+
+    if (targetKecParam) {
+      handleFilterWilayah(targetKecParam);
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const basemapParam = urlParams.get("basemap") || (route.query.basemap as string);
     if (basemapParam && validBasemaps.includes(basemapParam as BasemapKey)) {
@@ -459,21 +620,49 @@ watch(
   }
 );
 
-// Sinkronisasi penutupan bottomsheet di mobile saat tab inspector aktif agar popup marker di peta ikut tertutup
+// Sinkronisasi penutupan bottomsheet di mobile: saat drawer ditutup dan ada koordinat aktif, bersihkan
 watch(mobileDrawerOpen, (isOpen) => {
-  if (!isOpen && mobileDrawerTab.value === "inspector" && (clickedCoordinate.value || locationBarOpen.value)) {
+  if (!isOpen && (clickedCoordinate.value || locationBarOpen.value)) {
     handleCloseInspector();
   }
 });
 
 onMounted(async () => {
+  if (import.meta.client) {
+    startLoadingSimulation();
+    setTimeout(() => {
+      if (!isMapCanvasLoaded.value) {
+        handleMapLoaded();
+      }
+    }, 4500);
+  }
   window.addEventListener("popstate", handlePopState);
+  updateIsMobile();
+  window.addEventListener("resize", updateIsMobile, { passive: true });
+  if (typeof window !== "undefined" && window.innerWidth < 768) {
+    mobileDrawerOpen.value = true;
+    mobileSheetSnap.value = "min";
+  } else {
+    // Buka panel kiri secara default di desktop
+    leftPanelOpen.value = true;
+    syncSidebarWidth();
+  }
   try {
     const saved = localStorage.getItem("melarosa_active_basemap");
     if (saved && validBasemaps.includes(saved as BasemapKey) && !route.query.basemap) {
       currentBasemap.value = saved as BasemapKey;
     }
   } catch {}
+
+  // Filter layer MVT pada inisialisasi jika query kecamatan tersedia
+  const initialKec = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
+    ? route.query.kecamatan.trim()
+    : (searchedLocationLabel.value && /^kecamatan\s+/i.test(searchedLocationLabel.value)
+        ? searchedLocationLabel.value.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
+        : null);
+  if (initialKec) {
+    handleFilterWilayah(initialKec);
+  }
 
   // Pastikan fitbound by data spasial Martin saat pertama kali dibuka (tanpa url search/pin/coord)
   if (!pathView && !route.query.bbox && !hasExplicitSearchOrPin) {
@@ -509,20 +698,25 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (progressTimer) clearInterval(progressTimer);
   if (urlUpdateTimer) clearTimeout(urlUpdateTimer);
   window.removeEventListener("popstate", handlePopState);
+  window.removeEventListener("resize", updateIsMobile);
 });
 
 function handleMapClick(coordinate: [number, number]) {
   clickedCoordinate.value = coordinate;
   searchedLocationLabel.value = null;
-  // Reset fitur sebelumnya agar skeleton loading & transisi animasi data fitur baru terlihat jelas
   identifiedFeatures.value = [];
   locationBarOpen.value = true;
   if (typeof window !== "undefined" && window.innerWidth < 768) {
-    mobileDrawerTab.value = "inspector";
-    mobileSheetSnap.value = "min";
+    // Mobile: buka bottom sheet di tab layer ke posisi peek (50% vh) agar hasil identifikasi fitur langsung tampak
+    mobileDrawerTab.value = "layer";
+    mobileSheetSnap.value = "peek";
     mobileDrawerOpen.value = true;
+  } else {
+    // Desktop: pastikan panel kiri terbuka
+    leftPanelOpen.value = true;
   }
 }
 
@@ -532,10 +726,11 @@ function handleSelectLocation(payload: { name: string; coordinate: [number, numb
   mapCanvasRef.value?.flyTo(payload.coordinate, payload.zoom ?? 14);
   locationBarOpen.value = true;
   if (typeof window !== "undefined" && window.innerWidth < 768) {
-    mobileDrawerTab.value = "inspector";
-    mobileSheetSnap.value = "min";
+    mobileDrawerTab.value = "layer";
+    mobileSheetSnap.value = "peek";
     mobileDrawerOpen.value = true;
   } else {
+    leftPanelOpen.value = true;
     mobileDrawerOpen.value = false;
   }
 
@@ -552,12 +747,9 @@ function handleSelectLocation(payload: { name: string; coordinate: [number, numb
 
 function handleSelectKecamatan(payload: { name: string; coordinate: [number, number]; zoom?: number }) {
   mapCanvasRef.value?.flyTo(payload.coordinate, payload.zoom ?? 13.5);
-  // Di mobile drawer, jangan paksa pindah tab inspector agar pengguna tetap berada di Tab Wilayah
-  if (!mobileDrawerOpen.value) {
-    clickedCoordinate.value = payload.coordinate;
-    searchedLocationLabel.value = payload.name;
-    locationBarOpen.value = true;
-  }
+  // Simpan koordinat dan label wilayah tanpa membuka paksa inspector agar SearchItemAboutView tetap aktif
+  clickedCoordinate.value = payload.coordinate;
+  searchedLocationLabel.value = payload.name;
 }
 
 function extractNamobj(props: Record<string, any> | undefined): string | null {
@@ -613,38 +805,40 @@ function handleSelectFeature(feature: IdentifiedFeature) {
 
 let isClosingInspector = false;
 
+function handleClearPin() {
+  clickedCoordinate.value = null;
+  searchedLocationLabel.value = null;
+  identifiedFeatures.value = [];
+  locationBarOpen.value = false;
+  if (import.meta.client) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("search");
+    url.searchParams.delete("name");
+    url.searchParams.delete("pin");
+    window.history.replaceState(window.history.state, "", url.toString());
+  }
+}
+
 function handleCloseInspector() {
   if (isClosingInspector) return;
   isClosingInspector = true;
   try {
     locationBarOpen.value = false;
+    clickedCoordinate.value = null;
+    searchedLocationLabel.value = null;
+    identifiedFeatures.value = [];
     mapCanvasRef.value?.dismissPulse?.();
-    if (mobileDrawerOpen.value && mobileDrawerTab.value === "inspector") {
-      mobileDrawerOpen.value = false;
-    }
-    // Hapus query search dari URL saat inspector ditutup, tetap pertahankan basemap
     if (import.meta.client) {
       const url = new URL(window.location.href);
       url.searchParams.delete("search");
       url.searchParams.delete("name");
+      url.searchParams.delete("pin");
       if (currentBasemap.value && currentBasemap.value !== "esri") {
         url.searchParams.set("basemap", currentBasemap.value);
       } else {
         url.searchParams.delete("basemap");
       }
       window.history.replaceState(window.history.state, "", url.toString());
-
-      // Di mobile di mana BottomLocationBar (desktop) tidak ter-render / hidden,
-      // bersihkan koordinat setelah jeda 320ms (agar animasi slide-down bottomsheet 280ms selesai sempurna tanpa flicker)
-      if (window.innerWidth < 768) {
-        setTimeout(() => {
-          if (!locationBarOpen.value && !mobileDrawerOpen.value) {
-            clickedCoordinate.value = null;
-            searchedLocationLabel.value = null;
-            identifiedFeatures.value = [];
-          }
-        }, 320);
-      }
     }
   } finally {
     isClosingInspector = false;
@@ -661,20 +855,24 @@ function handleInspectorAfterLeave() {
 
 function openMobileTab(tab: MobileDrawerTab) {
   mobileDrawerTab.value = tab;
-  mobileSheetSnap.value = tab === "inspector" ? "min" : "peek";
+  mobileSheetSnap.value = "peek";
   mobileDrawerOpen.value = true;
 }
 
-function toggleLeftPanel() {
-  if (typeof window !== "undefined" && window.innerWidth < 768) {
-    if (mobileDrawerOpen.value && (mobileDrawerTab.value === "layer" || mobileDrawerTab.value === "geoportal" || mobileDrawerTab.value === "kecamatan")) {
-      mobileDrawerOpen.value = false;
-    } else {
-      openMobileTab("layer");
-    }
-  } else {
-    leftPanelOpen.value = !leftPanelOpen.value;
+function handleMobileSearchFocus() {
+  if (mobileDrawerOpen.value && mobileSheetSnap.value === "min") {
+    mobileSheetSnap.value = "peek";
   }
+}
+
+function handleMobileSearchClose() {
+  if (mobileDrawerOpen.value && !locationBarOpen.value && mobileSheetSnap.value === "peek") {
+    mobileSheetSnap.value = "min";
+  }
+}
+
+function toggleLeftPanel() {
+  leftPanelOpen.value = !leftPanelOpen.value;
 }
 
 function handleZoomToLayer(layer: ActiveLayerItem) {
@@ -683,6 +881,9 @@ function handleZoomToLayer(layer: ActiveLayerItem) {
     searchedLocationLabel.value = layer.title;
     mapCanvasRef.value?.flyTo(layer.coordinates, layer.zoom || 12);
     locationBarOpen.value = true;
+    if (!isMobileScreen.value) {
+      leftPanelOpen.value = true;
+    }
   }
 }
 
@@ -735,7 +936,7 @@ function handleReorderLayers(newLayers: ActiveLayerItem[]) {
 }
 
 function handleRemoveLayer(layerId: string) {
-  activeLayers.value = activeLayers.value.filter((l) => l.id !== layerId);
+  activeLayers.value = (activeLayers.value || []).filter((l) => l.id !== layerId);
 }
 
 function handleSelectDataset(dataset: any) {
@@ -755,48 +956,270 @@ function handleSelectDataset(dataset: any) {
 </script>
 
 <template>
-  <div class="relative w-full h-full overflow-hidden bg-gray-100 dark:bg-[#070b14] select-none font-sans antialiased text-gray-900 dark:text-gray-100">
-    <!-- ═══ 1. BACKGROUND FULL-BLEED INTERACTIVE MAP ═════════════════════════════ -->
-    <ClientOnly>
-      <MapCanvas
-        ref="mapCanvasRef"
-        :current-basemap="currentBasemap"
+  <div
+    class="wrapper-maps flex w-full h-full relative overflow-hidden bg-gray-100 dark:bg-[#070b14] select-none font-sans antialiased text-gray-900 dark:text-gray-100"
+  >
+    <!-- Panel Kiri: Desktop Split (lebar standar 400px, responsif 350px pada tablet) -->
+    <aside
+      class="hidden md:flex flex-col w-[350px] lg:w-[400px] shrink-0 h-full relative z-20 bg-white dark:bg-[#09111e] border-r border-slate-200 dark:border-white/8 shadow-lg overflow-hidden transition-[width] duration-200 ease-out"
+      aria-label="Panel Navigasi Spasial Kiri"
+    >
+      <LeftPanel
+        :active-layers="activeLayers"
+        :selected-kecamatan-filter="selectedKecamatanFilter"
         :clicked-coordinate="clickedCoordinate"
         :location-label="searchedLocationLabel"
-        :initial-center="initialCenter"
-        :initial-bbox="initialBbox"
-        :initial-zoom="initialZoom"
-        :active-layers="activeLayers"
-        :mobile-drawer-open="mobileDrawerOpen"
-        :mobile-sheet-snap="mobileSheetSnap"
-        @map-click="handleMapClick"
-        @identify-features="handleIdentifyFeatures"
-        @identifying-features="isIdentifyingFeatures = $event"
-        @update:viewport="handleViewportUpdate"
-        @dismiss-popup="handleCloseInspector"
-        @share="isShareModalOpen = true"
+        :identified-features="identifiedFeatures"
+        :is-identifying="isIdentifyingFeatures"
+        :inspector-open="locationBarOpen"
+        @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView()"
+        @select-kecamatan="handleSelectKecamatan"
+        @filter-wilayah="handleFilterWilayah"
+        @reorder-layers="handleReorderLayers"
+        @zoom-to-layer="handleZoomToLayer"
+        @toggle-layer-visibility="handleToggleLayerVisibility"
+        @update-layer-opacity="handleUpdateLayerOpacity"
+        @update-layer-filter="handleUpdateLayerFilter"
+        @remove-layer="handleRemoveLayer"
+        @add-layer="handleSelectDataset"
+        @close-inspector="handleCloseInspector"
+        @clear-pin="handleClearPin"
+        @select-feature="handleSelectFeature"
+        @share="handleOpenShare"
       />
-      <template #fallback>
-        <div class="w-full h-full flex flex-col items-center justify-center bg-gray-100 dark:bg-[#070b14] text-gray-400 gap-3">
-          <UIcon name="i-lucide-loader-2" class="size-8 animate-spin text-blue-500" />
-          <p class="text-sm font-medium text-gray-600 dark:text-gray-300">Memuat Peta Spasial...</p>
-          <p class="text-xs text-gray-400 dark:text-gray-500">Membutuhkan koneksi internet dan WebGL</p>
+    </aside>
+
+    <!-- Panel Kanan: Map Canvas Container (mengisi sisa layar penuh) -->
+    <main
+      class="flex-1 h-full min-w-0 relative overflow-hidden bg-gray-100 dark:bg-[#070b14]"
+      aria-label="Kanvas Peta Interaktif"
+    >
+      <ClientOnly>
+        <MapCanvas
+          ref="mapCanvasRef"
+          :current-basemap="currentBasemap"
+          :clicked-coordinate="clickedCoordinate"
+          :location-label="searchedLocationLabel"
+          :initial-center="initialCenter"
+          :initial-bbox="initialBbox"
+          :initial-zoom="initialZoom"
+          :active-layers="activeLayers"
+          :mobile-drawer-open="mobileDrawerOpen"
+          :mobile-sheet-snap="mobileSheetSnap"
+          @map-click="handleMapClick"
+          @identify-features="handleIdentifyFeatures"
+          @identifying-features="isIdentifyingFeatures = $event"
+          @update:viewport="handleViewportUpdate"
+          @dismiss-popup="handleCloseInspector"
+          @share="handleOpenShare"
+          @loaded="handleMapLoaded"
+        />
+        <template #fallback>
+          <div class="absolute inset-0 z-30 flex flex-col items-center justify-center select-none bg-slate-50 dark:bg-[#070c16] text-slate-800 dark:text-slate-100 p-6 overflow-hidden">
+            <div class="absolute inset-0 opacity-[0.035] dark:opacity-[0.06] pointer-events-none [background-image:radial-gradient(#2563eb_1px,transparent_1px)] [background-size:24px_24px]" />
+
+            <div class="relative z-10 flex flex-col items-center text-center max-w-sm w-full space-y-4">
+              <div class="relative size-14 rounded-2xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-xl shadow-blue-500/10">
+                <UIcon name="i-lucide-compass" class="size-7 animate-spin" style="animation-duration: 4s;" />
+                <span class="absolute -top-1 -right-1 size-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#070c16] animate-pulse" />
+              </div>
+
+              <div class="space-y-1">
+                <h3 class="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white">
+                  Memuat Peta Spasial
+                </h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  Menyiapkan kanvas peta Bojonegoro...
+                </p>
+              </div>
+
+              <div class="w-full max-w-[240px] space-y-2">
+                <div class="h-1.5 w-full bg-slate-200/80 dark:bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    class="h-full bg-blue-600 dark:bg-blue-500 rounded-full animate-pulse"
+                    style="width: 35%;"
+                  />
+                </div>
+              </div>
+
+              <p class="text-[10px] font-mono tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+                WebGIS Kabupaten Bojonegoro
+              </p>
+            </div>
+          </div>
+        </template>
+      </ClientOnly>
+
+      <!-- Map Canvas Loading Progress Overlay (Smooth Transition, Active on first load) -->
+      <Transition
+        enter-active-class="transition-opacity duration-200 ease-out"
+        leave-active-class="transition-opacity duration-400 ease-in"
+        leave-to-class="opacity-0 pointer-events-none"
+      >
+        <div
+          v-if="!isMapCanvasLoaded"
+          class="absolute inset-0 z-30 flex flex-col items-center justify-center select-none bg-slate-50/95 dark:bg-[#070c16]/95 backdrop-blur-xs text-slate-800 dark:text-slate-100 p-6 overflow-hidden"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="absolute inset-0 opacity-[0.035] dark:opacity-[0.06] pointer-events-none [background-image:radial-gradient(#2563eb_1px,transparent_1px)] [background-size:24px_24px]" />
+
+          <div class="relative z-10 flex flex-col items-center text-center max-w-sm w-full space-y-4">
+            <div class="relative size-14 rounded-2xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-xl shadow-blue-500/10">
+              <UIcon name="i-lucide-compass" class="size-7 animate-spin" style="animation-duration: 4s;" />
+              <span class="absolute -top-1 -right-1 size-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#070c16] animate-pulse" />
+            </div>
+
+            <div class="space-y-1">
+              <h3 class="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white">
+                Memuat Peta Spasial
+              </h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                {{ loadingStageText }}
+              </p>
+            </div>
+
+            <div class="w-full max-w-[240px] space-y-1.5">
+              <div class="h-1.5 w-full bg-slate-200/80 dark:bg-white/10 rounded-full overflow-hidden">
+                <div
+                  class="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-all duration-300 ease-out"
+                  :style="{ width: `${loadingProgress}%` }"
+                />
+              </div>
+              <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 dark:text-slate-500 px-0.5">
+                <span>Inisialisasi</span>
+                <span class="font-bold text-blue-600 dark:text-blue-400 tabular-nums">
+                  {{ loadingProgress }}%
+                </span>
+              </div>
+            </div>
+
+            <p class="text-[10px] font-mono tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+              WebGIS Kabupaten Bojonegoro
+            </p>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- Floating Basemap Panel (Kiri Bawah di dalam Kanvas Peta) -->
+      <div
+        class="absolute z-20 pointer-events-auto select-none flex flex-col items-start gap-2 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-3 sm:left-4"
+        :class="[
+          mobileDrawerOpen && mobileSheetSnap === 'full'
+            ? 'opacity-0 pointer-events-none translate-y-4 md:opacity-100 md:pointer-events-auto md:translate-y-0 md:bottom-4'
+            : mobileDrawerOpen && mobileSheetSnap === 'peek'
+              ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4'
+              : mobileDrawerOpen && mobileSheetSnap === 'min'
+                ? 'bottom-[calc(200px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
+                : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
+        ]"
+      >
+        <BasemapPanel
+          v-model:current-basemap="currentBasemap"
+          :is-mobile="isMobileScreen"
+          :is-mobile-sheet-open="isBasemapBottomSheetOpen"
+          @open-mobile-sheet="handleToggleBasemapSheet"
+        />
+      </div>
+    </main>
+
+    <!-- ═══ 4. [DIHAPUS] Floating BottomLocationBar desktop dipindahkan ke dalam LeftPanel sub-view identify ═══ -->
+
+    <!-- ═══ 5. MOBILE BOTTOM SHEET DRAWER ═════════════════════════════════════ -->
+    <MapMobileBottomSheet
+      v-model:open="mobileDrawerOpen"
+      v-model:snap="mobileSheetSnap"
+      :title="
+        mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+          ? 'Katalog Dataset'
+          : mobileDrawerTab === 'geopark'
+            ? 'Geopark Bojonegoro'
+            : locationBarOpen && clickedCoordinate
+              ? 'Identifikasi Fitur'
+              : 'Panel Lapisan Peta'
+      "
+      :subtitle="
+        mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+          ? 'Katalog Layer Resmi JIGN Bojonegoro'
+          : mobileDrawerTab === 'geopark'
+            ? 'Warisan Geologi, Hayati & Cagar Alam'
+            : locationBarOpen && clickedCoordinate
+              ? (searchedLocationLabel || `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`)
+              : `${activeLayers.length} Layer Aktif · Bojonegoro`
+      "
+      :icon="
+        mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+          ? 'i-lucide-database'
+          : mobileDrawerTab === 'geopark'
+            ? 'i-lucide-mountain-snow'
+            : locationBarOpen
+              ? 'i-lucide-crosshair'
+              : 'i-lucide-layers'
+      "
+    >
+      <!-- Tab Switcher: 3 tab teks murni radius 100% tanpa garis atas/bawah -->
+      <template #tabs>
+        <div class="px-2.5 sm:px-3 pt-2 pb-1.5 bg-slate-50/70 dark:bg-[#070b14]/50">
+          <div class="grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10" role="tablist" aria-label="Navigasi Panel Mobile">
+            <!-- Tab 1: Peta -->
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="mobileDrawerTab === 'layer'"
+              class="py-2 px-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              :class="mobileDrawerTab === 'layer'
+                ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+              @click="mobileDrawerTab = 'layer'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+            >
+              Peta
+            </button>
+
+            <!-- Tab 2: Dataset -->
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'"
+              class="py-2 px-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              :class="mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+                ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+              @click="mobileDrawerTab = 'dataset'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+            >
+              Dataset
+            </button>
+
+            <!-- Tab 3: Geopark -->
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="mobileDrawerTab === 'geopark'"
+              class="py-2 px-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              :class="mobileDrawerTab === 'geopark'
+                ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+              @click="mobileDrawerTab = 'geopark'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+            >
+              Geopark
+            </button>
+          </div>
         </div>
       </template>
-    </ClientOnly>
 
-    <!-- ═══ 2. FLOATING LEFT PANEL (Desktop - Proportional above bottom-left trigger) ═══ -->
-    <Transition name="panel-pop">
-      <div
-        v-if="leftPanelOpen"
-        class="hidden md:block absolute bottom-[72px] sm:bottom-[80px] left-3 sm:left-4 lg:left-5 z-20 pointer-events-auto"
-      >
+      <!-- Content Body: satu LeftPanel instance persisten dengan v-show -->
+      <div class="min-h-full flex flex-col min-h-0">
         <LeftPanel
-          v-model:current-basemap="currentBasemap"
+          :is-mobile-drawer="true"
           :active-layers="activeLayers"
+          :active-tab="mobileDrawerTab === 'geopark' ? 'geopark' : (mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal') ? 'dataset' : 'layers'"
           :selected-kecamatan-filter="selectedKecamatanFilter"
-          @close="leftPanelOpen = false"
-          @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView()"
+          :clicked-coordinate="clickedCoordinate"
+          :location-label="searchedLocationLabel"
+          :identified-features="identifiedFeatures"
+          :is-identifying="isIdentifyingFeatures"
+          :inspector-open="locationBarOpen"
+          @close="mobileSheetSnap = 'min'"
+          @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView(); mobileSheetSnap = 'min'"
           @select-kecamatan="handleSelectKecamatan"
           @filter-wilayah="handleFilterWilayah"
           @reorder-layers="handleReorderLayers"
@@ -806,267 +1229,27 @@ function handleSelectDataset(dataset: any) {
           @update-layer-filter="handleUpdateLayerFilter"
           @remove-layer="handleRemoveLayer"
           @add-layer="handleSelectDataset"
+          @close-inspector="handleCloseInspector"
+          @clear-pin="handleClearPin"
+          @select-feature="handleSelectFeature"
+          @share="handleOpenShare"
+          @search-focus="handleMobileSearchFocus"
+          @search-close="handleMobileSearchClose"
         />
-      </div>
-    </Transition>
-
-    <!-- ═══ 3. FLOATING CONTROL (BOTTOM LEFT): TOMBOL TUNGGAL LAPISAN PETA ═══ -->
-    <div
-      class="absolute left-3 sm:left-4 lg:left-5 z-20 pointer-events-auto select-none transition-all duration-300 ease-out"
-      :class="[
-        mobileDrawerOpen && (mobileSheetSnap === 'peek' || mobileSheetSnap === 'full')
-          ? 'opacity-0 pointer-events-none translate-y-4'
-          : mobileDrawerOpen && mobileSheetSnap === 'min'
-            ? 'bottom-[calc(86px+env(safe-area-inset-bottom,0px))] md:bottom-4 sm:md:bottom-5 opacity-100'
-            : 'bottom-4 sm:bottom-5 opacity-100'
-      ]"
-    >
-      <UTooltip text="Lapisan Peta (Peta Dasar & Layer Tematik)">
-        <button
-          type="button"
-          class="group relative flex items-center gap-2.5 h-12 px-3 rounded-2xl bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-slate-200/90 dark:border-white/10 shadow-lg hover:shadow-xl transition-all duration-200 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95"
-          :class="isLeftPanelActive
-            ? 'ring-2 ring-blue-500/80 border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 shadow-blue-500/10'
-            : 'hover:border-slate-300 dark:hover:border-white/20'"
-          :aria-expanded="isLeftPanelActive"
-          aria-label="Buka Lapisan Peta dan Peta Dasar"
-          @click="toggleLeftPanel"
-        >
-          <!-- Icon Badge (Layer Icon) -->
-          <div
-            class="size-7.5 rounded-xl flex items-center justify-center transition-colors shadow-xs"
-            :class="isLeftPanelActive
-              ? 'bg-blue-600 text-white'
-              : 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/40'"
-          >
-            <UIcon name="i-lucide-layers" class="size-4 stroke-[2.25]" />
-          </div>
-
-          <!-- Label Text & Active Status Indicator -->
-          <div class="flex flex-col text-left pr-0.5">
-            <span class="text-xs font-bold text-slate-900 dark:text-slate-100 tracking-tight leading-tight">
-              Lapisan Peta
-            </span>
-            <span class="text-[10px] text-slate-400 dark:text-slate-500 font-medium leading-tight capitalize">
-              {{ currentBasemap }} • {{ activeLayers.length }} Layer
-            </span>
-          </div>
-
-          <!-- Chevron Indicator -->
-          <UIcon
-            name="i-lucide-chevron-up"
-            class="size-3.5 text-slate-400 dark:text-slate-500 transition-transform duration-200"
-            :class="isLeftPanelActive ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''"
-          />
-        </button>
-      </UTooltip>
-    </div>
-
-    <!-- ═══ 4. FLOATING BOTTOM-CENTER LOCATION BAR (Desktop) ═══════════════════ -->
-    <div
-      class="hidden md:block absolute bottom-4 sm:bottom-5 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-    >
-      <Transition
-        enter-active-class="transition-all duration-300 ease-out"
-        enter-from-class="opacity-0 translate-y-12 scale-95"
-        enter-to-class="opacity-100 translate-y-0 scale-100"
-        leave-active-class="transition-all duration-200 ease-in"
-        leave-from-class="opacity-100 translate-y-0 scale-100"
-        leave-to-class="opacity-0 translate-y-12 scale-95"
-        @after-leave="handleInspectorAfterLeave"
-      >
-        <div
-          v-if="locationBarOpen && (clickedCoordinate || identifiedFeatures.length > 0)"
-          class="pointer-events-auto"
-        >
-          <BottomLocationBar
-            :clicked-coordinate="clickedCoordinate"
-            :location-label="searchedLocationLabel"
-            :identified-features="identifiedFeatures"
-            :is-identifying="isIdentifyingFeatures"
-            @close="handleCloseInspector"
-            @select-feature="handleSelectFeature"
-            @share="isShareModalOpen = true"
-          />
-        </div>
-      </Transition>
-    </div>
-
-    <!-- ═══ 5. MOBILE BOTTOM SHEET DRAWER ═════════════════════════════════════ -->
-    <MapMobileBottomSheet
-      v-model:open="mobileDrawerOpen"
-      v-model:snap="mobileSheetSnap"
-      :title="
-        mobileDrawerTab === 'layer'
-          ? 'Panel Lapisan Peta'
-          : mobileDrawerTab === 'geoportal'
-            ? 'Katalog Geoportal'
-            : mobileDrawerTab === 'kecamatan'
-              ? 'Wilayah Bojonegoro'
-              : (searchedLocationLabel || 'Informasi Lokasi & Titik')
-      "
-      :subtitle="
-        mobileDrawerTab === 'layer'
-          ? `${activeLayers.length} Layer Aktif · Bojonegoro`
-          : mobileDrawerTab === 'geoportal'
-            ? 'Katalog Layer Resmi JIGN Bojonegoro'
-            : mobileDrawerTab === 'kecamatan'
-              ? (selectedKecamatanFilter ? `Filter Aktif: Kec. ${selectedKecamatanFilter}` : '28 Wilayah Kecamatan Terdata')
-              : (searchedLocationLabel && clickedCoordinate
-                  ? `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`
-                  : (clickedCoordinate
-                      ? `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`
-                      : 'Ketuk area peta untuk info detail'))
-      "
-      :icon="
-        mobileDrawerTab === 'layer'
-          ? 'i-lucide-layers'
-          : mobileDrawerTab === 'geoportal'
-            ? 'i-lucide-globe-2'
-            : mobileDrawerTab === 'kecamatan'
-              ? 'i-lucide-compass'
-              : 'i-lucide-map-pin'
-      "
-    >
-      <!-- Action Header Button: Bagikan Peta -->
-      <template #header-actions>
-        <button
-          type="button"
-          class="size-8 rounded-lg border border-slate-200/90 dark:border-white/10 bg-white dark:bg-[#0b0f19] text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-50 dark:hover:bg-white/[0.04] flex items-center justify-center cursor-pointer transition-colors active:scale-95 mr-1"
-          aria-label="Bagikan Peta & Postingan Media Sosial"
-          title="Bagikan Peta"
-          @click="isShareModalOpen = true"
-        >
-          <UIcon name="i-lucide-share-2" class="size-4" />
-        </button>
-      </template>
-
-      <!-- Quick Tab Switcher inside Sheet (4 tabs: Layer, Geoportal, Wilayah, Lokasi) -->
-      <template #tabs>
-        <div class="px-2 sm:px-3 pt-1 pb-2 border-b border-gray-100 dark:border-gray-800/80 bg-gray-50/50 dark:bg-gray-900/30">
-          <div class="grid grid-cols-4 gap-1 p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl">
-            <!-- Tab 1: Layer -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[40px] select-none"
-              :class="mobileDrawerTab === 'layer'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'layer'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
-            >
-              <UIcon name="i-lucide-layers" class="size-3.5 shrink-0" />
-              <span class="truncate text-[11px] sm:text-xs">Layer</span>
-              <span
-                v-if="activeLayers.length > 0"
-                class="hidden sm:inline-block px-1.5 py-0.2 rounded-full text-[9px] font-mono leading-tight shrink-0"
-                :class="mobileDrawerTab === 'layer'
-                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
-              >
-                {{ activeLayers.length }}
-              </span>
-            </button>
-
-            <!-- Tab 2: Geoportal -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[40px] select-none"
-              :class="mobileDrawerTab === 'geoportal'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'geoportal'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
-            >
-              <UIcon name="i-lucide-globe-2" class="size-3.5 shrink-0" />
-              <span class="truncate text-[11px] sm:text-xs">Geoportal</span>
-            </button>
-
-            <!-- Tab 3: Wilayah -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[40px] select-none"
-              :class="mobileDrawerTab === 'kecamatan'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'kecamatan'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
-            >
-              <UIcon name="i-lucide-compass" class="size-3.5 shrink-0" />
-              <span class="truncate text-[11px] sm:text-xs">Wilayah</span>
-              <span
-                v-if="selectedKecamatanFilter"
-                class="size-1.5 rounded-full bg-blue-500 shrink-0"
-                title="Filter Aktif"
-              />
-            </button>
-
-            <!-- Tab 4: Detail / Lokasi -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all relative cursor-pointer min-h-[40px] select-none"
-              :class="mobileDrawerTab === 'inspector'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'inspector'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
-            >
-              <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
-              <span class="truncate text-[11px] sm:text-xs">Lokasi</span>
-              <span
-                v-if="clickedCoordinate"
-                class="size-1.5 rounded-full bg-blue-500 shrink-0"
-              />
-            </button>
-          </div>
-        </div>
-      </template>
-
-      <!-- Content Body inside Sheet (Persistent with v-show to avoid unmounting & refetching) -->
-      <div class="h-full flex flex-col min-h-0">
-        <!-- 1, 2 & 3. Layer, Geoportal & Wilayah (Kecamatan) Tabs (Unified single persistent LeftPanel instance) -->
-        <div
-          v-show="mobileDrawerTab === 'layer' || mobileDrawerTab === 'geoportal' || mobileDrawerTab === 'kecamatan'"
-          class="h-full flex flex-col min-h-0"
-        >
-          <LeftPanel
-            v-model:current-basemap="currentBasemap"
-            :is-mobile-drawer="true"
-            :active-layers="activeLayers"
-            :active-tab="mobileDrawerTab === 'geoportal' ? 'geoportal' : mobileDrawerTab === 'kecamatan' ? 'kecamatan' : 'layers'"
-            :selected-kecamatan-filter="selectedKecamatanFilter"
-            @close="mobileDrawerOpen = false"
-            @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView(); mobileDrawerOpen = false"
-            @select-kecamatan="handleSelectKecamatan"
-            @filter-wilayah="handleFilterWilayah"
-            @reorder-layers="handleReorderLayers"
-            @zoom-to-layer="handleZoomToLayer"
-            @toggle-layer-visibility="handleToggleLayerVisibility"
-            @update-layer-opacity="handleUpdateLayerOpacity"
-            @update-layer-filter="handleUpdateLayerFilter"
-            @remove-layer="handleRemoveLayer"
-            @add-layer="handleSelectDataset"
-          />
-        </div>
-
-        <!-- 4. Lokasi / Detail Tab (Persistent BottomLocationBar) -->
-        <div
-          v-show="mobileDrawerTab === 'inspector'"
-          class="h-full flex flex-col min-h-0"
-        >
-          <BottomLocationBar
-            :is-mobile-drawer="true"
-            :clicked-coordinate="clickedCoordinate"
-            :location-label="searchedLocationLabel"
-            :identified-features="identifiedFeatures"
-            :is-identifying="isIdentifyingFeatures"
-            @close="handleCloseInspector"
-            @select-feature="handleSelectFeature"
-            @share="isShareModalOpen = true"
-          />
-        </div>
       </div>
     </MapMobileBottomSheet>
 
+    <!-- ═══ 6. FITUR BASEMAP: MOBILE BOTTOM SHEET MANDIRI ═══ -->
+    <MapBasemapBottomSheet
+      v-model:open="isBasemapBottomSheetOpen"
+      v-model:current-basemap="currentBasemap"
+    />
 
-    <!-- ═══ 10. DIALOG BAGIKAN PETA & POSTINGAN SOSIAL MEDIA ═══════════════════ -->
+
+    <!-- ═══ 10. FITUR BAGIKAN PETA: DESKTOP MODAL & MOBILE BOTTOM SHEET MANDIRI ═══ -->
+    <!-- Desktop Modal Dialog -->
     <MapShareModal
+      v-if="!isMobileScreen"
       v-model:open="isShareModalOpen"
       :current-basemap="currentBasemap"
       :clicked-coordinate="clickedCoordinate"
@@ -1076,20 +1259,33 @@ function handleSelectDataset(dataset: any) {
       :map-zoom="initialZoom"
       :get-map-snapshot="getMapSnapshot"
     />
+
+    <!-- Mobile Bottom Sheet Mandiri (Tinggi Separuh Layar ~52vh, Expandable ke Full) -->
+    <MapShareBottomSheet
+      v-if="isMobileScreen"
+      v-model:open="isShareModalOpen"
+      :current-basemap="currentBasemap"
+      :clicked-coordinate="clickedCoordinate"
+      :location-label="searchedLocationLabel"
+      :active-layers="activeLayers"
+      :map-center="clickedCoordinate || initialCenter"
+      :map-zoom="initialZoom"
+      :get-map-snapshot="getMapSnapshot"
+      @after-close="handleShareSheetClosed"
+    />
   </div>
 </template>
 
 <style scoped>
-/* Smooth popup transition for LeftPanel originating from toggle button */
-.panel-pop-enter-active,
-.panel-pop-leave-active {
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  transform-origin: left bottom;
+/* Full-height sidebar: slide dari kiri saat buka/tutup */
+.sidebar-slide-enter-active,
+.sidebar-slide-leave-active {
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.panel-pop-enter-from,
-.panel-pop-leave-to {
+.sidebar-slide-enter-from,
+.sidebar-slide-leave-to {
   opacity: 0;
-  transform: translateY(12px) scale(0.96);
+  transform: translateX(-100%);
 }
 
 /* Smooth slide transitions for floating panels */

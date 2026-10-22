@@ -61,6 +61,13 @@ class InfrastrukturSegmenController extends Controller
             $baseQuery->where('infrastruktur_segmen.tipe_kode', $request->input('tipe_kode'));
         }
 
+        // Filter tahun pembangunan
+        if ($request->filled('tahun_pembangunan')) {
+            $baseQuery->where('infrastruktur_segmen.tahun_pembangunan', $request->input('tahun_pembangunan'));
+        } elseif ($request->filled('tahun')) {
+            $baseQuery->where('infrastruktur_segmen.tahun_pembangunan', $request->input('tahun'));
+        }
+
         // Filter kondisi fisik
         if ($request->filled('kondisi')) {
             $baseQuery->where('infrastruktur_segmen.kondisi', $request->input('kondisi'));
@@ -75,12 +82,34 @@ class InfrastrukturSegmenController extends Controller
 
         // Filter status jalan
         if ($request->filled('status_jalan')) {
-            $baseQuery->where('infrastruktur_segmen.status_jalan', $request->input('status_jalan'));
+            $val = $request->input('status_jalan');
+            $baseQuery->where(function ($q) use ($val) {
+                $q->where('infrastruktur_segmen.status_jalan', $val)
+                  ->orWhere('infrastruktur_segmen.status_jalan', 'ilike', '%' . $val . '%');
+            });
         }
 
         // Filter status kondisi (Eksisting / Riwayat)
         if ($request->filled('status_kondisi')) {
             $baseQuery->where('infrastruktur_segmen.status_kondisi', $request->input('status_kondisi'));
+        }
+
+        // Filter status aset
+        if ($request->filled('status_aset')) {
+            $val = $request->input('status_aset');
+            $baseQuery->where(function ($q) use ($val) {
+                $q->where('infrastruktur_segmen.status_aset', $val)
+                  ->orWhere('infrastruktur_segmen.status_aset', 'ilike', '%' . $val . '%');
+            });
+        }
+
+        // Filter sumber dana
+        if ($request->filled('sumber_dana')) {
+            $val = $request->input('sumber_dana');
+            $baseQuery->where(function ($q) use ($val) {
+                $q->where('infrastruktur_segmen.sumber_dana', $val)
+                  ->orWhere('infrastruktur_segmen.sumber_dana', 'ilike', '%' . $val . '%');
+            });
         }
 
         // Filter status verifikasi

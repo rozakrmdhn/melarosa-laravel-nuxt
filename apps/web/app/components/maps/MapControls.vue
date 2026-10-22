@@ -81,7 +81,7 @@ const locationTooltip = computed(() => {
             >
               <!-- Speed number on top, unit label below (no icon) -->
               <div class="flex flex-col items-center justify-center min-w-[28px] text-center leading-none">
-                <span class="font-mono text-xs font-bold text-slate-800 dark:text-slate-100 tabular-nums">
+                <span class="text-xs font-bold text-slate-800 dark:text-slate-100 tabular-nums">
                   {{ speed }}
                 </span>
                 <span class="text-[8px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-tight mt-0.5">

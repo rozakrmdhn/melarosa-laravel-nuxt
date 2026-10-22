@@ -221,6 +221,7 @@ Route::prefix('api/v1')->group(function () {
     // Map Viewer Active Layers Feed (Public / Map accessible)
     Route::get('layers', [LayerController::class, 'activeLayers'])->name('layers.active');
     Route::get('layers/geoportal', [GeoportalPublicLayerController::class, 'index'])->name('layers.geoportal.index');
+    Route::get('layers/geoportal/status', [GeoportalPublicLayerController::class, 'status'])->name('layers.geoportal.status');
     Route::get('layers/geoportal/{layer}/metadata', [GeoportalPublicLayerController::class, 'metadata'])->name('layers.geoportal.metadata');
     Route::get('layers/geoportal/{layer}/attributes', [GeoportalPublicLayerController::class, 'attributes'])->name('layers.geoportal.attributes');
     Route::get('layers/geoportal/{layer}/csw-xml', [GeoportalPublicLayerController::class, 'cswXml'])->name('layers.geoportal.cswXml');
@@ -303,5 +304,42 @@ Route::prefix('api/v1')->group(function () {
             'data' => $data,
         ]);
     })->name('kugi.feature-type');
+
+    // Geopark Bojonegoro API Proxy dengan Cache 15 Menit & Direct Hit ke Endpoint Resmi
+    Route::get('geopark/sites', function (\Illuminate\Http\Request $request) {
+        $force = (bool) $request->query('refresh', false);
+        $cacheKey = 'geopark_bojonegoro_sites_list_v2';
+
+        if ($force) {
+            \Illuminate\Support\Facades\Cache::forget($cacheKey);
+        }
+
+        $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 900, function () {
+            try {
+                $response = \Illuminate\Support\Facades\Http::withoutVerifying()
+                    ->timeout(12)
+                    ->withHeaders([
+                        'Accept' => 'application/json',
+                        'User-Agent' => 'MelarosaWebGIS/1.0',
+                    ])
+                    ->get('https://geopark.bojonegorokab.go.id/api/diversity/list-diversity-site-list');
+
+                if ($response->successful()) {
+                    $json = $response->json();
+                    return $json['data'] ?? [];
+                }
+                return [];
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Geopark API fetch error: ' . $e->getMessage());
+                return [];
+            }
+        });
+
+        return response()->json([
+            'ok' => true,
+            'count' => count($data),
+            'data' => $data,
+        ]);
+    })->name('geopark.sites');
 });
 

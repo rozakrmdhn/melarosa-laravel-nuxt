@@ -4,14 +4,19 @@ import type { BasemapKey } from "~/components/maps/MapCanvas.vue";
 const props = withDefaults(
   defineProps<{
     currentBasemap?: BasemapKey;
+    isMobile?: boolean;
+    isMobileSheetOpen?: boolean;
   }>(),
   {
     currentBasemap: "esri",
+    isMobile: false,
+    isMobileSheetOpen: false,
   }
 );
 
 const emit = defineEmits<{
   (e: "update:currentBasemap", val: BasemapKey): void;
+  (e: "open-mobile-sheet"): void;
 }>();
 
 interface BasemapDef {
@@ -60,13 +65,17 @@ const isClickedOpen = ref(false);
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
 const HOVER_CLOSE_DELAY_MS = 500;
 
-const isOpen = computed(() => isHovered.value || isClickedOpen.value);
+const isOpen = computed(() => {
+  if (props.isMobile) return props.isMobileSheetOpen ?? false;
+  return isHovered.value || isClickedOpen.value;
+});
 
 const activeBasemap = computed(() => {
   return basemapList.find((b) => b.key === props.currentBasemap) || basemapList[0];
 });
 
 function handleMouseEnter() {
+  if (props.isMobile) return;
   if (closeTimer) {
     clearTimeout(closeTimer);
     closeTimer = null;
@@ -75,6 +84,7 @@ function handleMouseEnter() {
 }
 
 function handleMouseLeave() {
+  if (props.isMobile) return;
   if (closeTimer) clearTimeout(closeTimer);
   closeTimer = setTimeout(() => {
     isHovered.value = false;
@@ -82,6 +92,10 @@ function handleMouseLeave() {
 }
 
 function toggleClicked() {
+  if (props.isMobile) {
+    emit("open-mobile-sheet");
+    return;
+  }
   isClickedOpen.value = !isClickedOpen.value;
 }
 
@@ -132,16 +146,18 @@ onUnmounted(() => {
     @mouseleave="handleMouseLeave"
   >
     <!-- ═══ 1. SQUARE TOGGLE BUTTON (Google Maps Style) ═══ -->
-    <button
-      type="button"
-      class="relative size-14 sm:size-16 rounded-xl sm:rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-200 cursor-pointer border bg-white dark:bg-slate-900 shrink-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ring-offset-white dark:ring-offset-slate-950 z-20 group-hover:scale-102"
-      :class="isOpen
-        ? 'border-blue-500 ring-2 ring-blue-500/30'
-        : 'border-gray-200/90 dark:border-slate-700/80 hover:border-blue-400/80'"
-      :aria-expanded="isOpen"
-      aria-label="Pilihan Peta Dasar (Basemap)"
-      @click="toggleClicked"
-    >
+    <UTooltip text="Pilihan Peta Dasar (Basemap)">
+      <button
+        type="button"
+        data-basemap-toggle="true"
+        class="relative size-12 sm:size-14 rounded-xl sm:rounded-2xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer border bg-white dark:bg-slate-900 shrink-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ring-offset-white dark:ring-offset-slate-950 z-20 group-hover:scale-102 active:scale-95"
+        :class="isOpen
+          ? 'border-blue-500 ring-2 ring-blue-500/30'
+          : 'border-slate-200/90 dark:border-slate-700/80 hover:border-blue-400/80'"
+        :aria-expanded="isOpen"
+        aria-label="Pilihan Peta Dasar (Basemap)"
+        @click="toggleClicked"
+      >
       <!-- Preview Visual of the currently active basemap -->
       <div class="absolute inset-0 w-full h-full pointer-events-none">
         <!-- Esri World Topo Preview (Default) -->
@@ -267,11 +283,12 @@ onUnmounted(() => {
         <UIcon name="i-lucide-chevron-right" class="size-2.5 stroke-[3]" />
       </div>
     </button>
+    </UTooltip>
 
-    <!-- ═══ 2. HORIZONTAL FLYOUT DRAWER (Expands to the Right on Hover) ═══ -->
+    <!-- ═══ 2. HORIZONTAL FLYOUT DRAWER (Expands to the Right on Hover - Only Desktop) ═══ -->
     <Transition name="drawer-right">
       <div
-        v-show="isOpen"
+        v-if="!isMobile && isOpen"
         class="absolute left-full bottom-0 pl-2.5 z-30 flex items-center pointer-events-auto"
         @mouseenter="handleMouseEnter"
         @mouseleave="handleMouseLeave"

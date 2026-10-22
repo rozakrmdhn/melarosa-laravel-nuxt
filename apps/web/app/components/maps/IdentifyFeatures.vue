@@ -389,7 +389,7 @@ function copyValue(key: string, val: string) {
                 <!-- Badge Kode FCODE -->
                 <span
                   v-if="currentFcode"
-                  class="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-medium bg-blue-100/80 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
+                  class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wide bg-blue-100/80 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
                 >
                   FCODE: {{ currentFcode }}
                 </span>
@@ -481,7 +481,7 @@ function copyValue(key: string, val: string) {
                   {{ prop.label }}
                 </span>
                 <!-- Kode field teknis GIS -->
-                <span class="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                <span class="text-[10px] font-medium text-slate-400 dark:text-slate-500">
                   [{{ prop.key }}]
                 </span>
                 <!-- Indikator validasi KUGI -->
@@ -493,7 +493,7 @@ function copyValue(key: string, val: string) {
                   KUGI
                 </span>
               </div>
-              <p class="text-xs font-semibold text-slate-900 dark:text-slate-100 break-words font-mono mt-0.5">
+              <p class="text-xs font-semibold text-slate-900 dark:text-slate-100 break-words tabular-nums mt-0.5">
                 {{ prop.value }}
               </p>
             </div>

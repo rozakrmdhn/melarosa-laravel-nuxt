@@ -24,6 +24,7 @@ Pusat dokumentasi arsitektur, panduan teknis, dan katalog modul untuk proyek **M
 | [docs/issues/](./issues/) | Rencana tahapan pengerjaan fase implementasi sistem (Fase 1 s.d. Fase 5) |
 | [docs/laravel-13-features-doc-prompt.md](./laravel-13-features-doc-prompt.md) | Master AI Prompt dan panduan standar 11 poin dokumentasi fitur Laravel 13 |
 | [docs/laravel-13-testing-prompt.md](./laravel-13-testing-prompt.md) | Master AI Prompt dan standar penulisan Automated Testing (Unit & Feature Tests) |
+| [docs/php-extensions-setup.md](./php-extensions-setup.md) | Panduan konfigurasi ekstensi PHP dan direktif php.ini untuk backend API |
 
 ---
 

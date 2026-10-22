@@ -106,11 +106,97 @@ export interface GeoportalLayerItem {
   updated_at?: string;
 }
 
+export interface GeoportalSyncTimelineItem {
+  date: string;
+  date_label: string;
+  total_layers: number;
+  added: number;
+  removed: number;
+  updated: number;
+  net_change: number;
+  status: string;
+}
+
+export interface GeoportalConnectionStatus {
+  ok: boolean;
+  connected: boolean;
+  status: "online" | "fallback" | "offline";
+  message: string;
+  node_name: string;
+  csw_url: string;
+  remote_matched?: number | null;
+  total_local_layers: number;
+  active_local_layers: number;
+  last_synced_at: string | null;
+  response_time_ms?: number | null;
+  error_detail?: string | null;
+  checked_at: string;
+  last_sync_log?: {
+    id: string;
+    status: string;
+    records_found: number;
+    records_inserted: number;
+    records_updated: number;
+    duration_seconds: number;
+    created_at: string;
+  } | null;
+  sync_timeline?: GeoportalSyncTimelineItem[];
+}
+
+export function useGeoportalStatus() {
+  const {
+    data: statusResponse,
+    status: requestStatus,
+    refresh,
+    error,
+  } = useHttp<{ ok: boolean; data: GeoportalConnectionStatus }>("layers/geoportal/status", {
+    key: "melarosa-geoportal-status",
+    lazy: true,
+  });
+
+  const connectionStatus = computed<GeoportalConnectionStatus | null>(
+    () => statusResponse.value?.data || null
+  );
+
+  const checking = computed(() => requestStatus.value === "pending");
+
+  async function checkConnection(forceRefresh = true) {
+    if (forceRefresh) {
+      try {
+        const res = await $http<{ ok: boolean; data: GeoportalConnectionStatus }>("layers/geoportal/status", {
+          query: { refresh: 1 },
+        });
+        if (res?.data && statusResponse.value) {
+          statusResponse.value.data = res.data;
+        }
+        return res?.data;
+      } catch {
+        await refresh();
+      }
+    } else {
+      await refresh();
+    }
+  }
+
+  return {
+    connectionStatus,
+    checking,
+    error,
+    refresh,
+    checkConnection,
+  };
+}
+
 export type GeoportalGroupedMap = Record<string, GeoportalLayerItem[]>;
 
 export function useGeoportalLayers() {
   const searchQuery = ref("");
   const selectedCategory = ref<string>("ALL");
+  const {
+    connectionStatus,
+    checking: checkingStatus,
+    checkConnection,
+  } = useGeoportalStatus();
 
   const {
     data: rawData,
@@ -257,6 +343,9 @@ export function useGeoportalLayers() {
     loading,
     error,
     refresh,
+    connectionStatus,
+    checkingStatus,
+    checkConnection,
     toActiveLayerItem,
     fetchLayerMetadata,
     fetchLayerAttributes,

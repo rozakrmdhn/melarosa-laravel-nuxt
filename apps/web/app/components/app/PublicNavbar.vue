@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import { parseCoordinateString } from "~/utils/gis-helpers";
+
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
@@ -25,7 +27,10 @@ function handleScroll() {
   scrollY.value = window.scrollY;
 }
 
-// ═══ SEARCH FEATURE WITH ELONGATING NAVBAR ANIMATION ════════════════════════
+// Fitur pencarian navbar hanya aktif pada halaman utama beranda (/)
+const isHomePage = computed(() => route.path === "/");
+
+// ═══ SEARCH FEATURE (HANYA AKTIF PADA BERANDA /) ═════════════════════════════
 const isSearchOpen = ref(false);
 const searchQuery = ref("");
 const selectedIndex = ref(0);
@@ -85,10 +90,9 @@ const PAGE_ITEMS: SearchItem[] = [
   { id: "page-katalog", title: "Katalog Data Spasial", category: "halaman", desc: "Daftar dataset shapefile, batas desa, dan jaringan jalan", icon: "i-lucide-database", to: "/katalog-data" },
 ];
 
-import { parseCoordinateString } from "~/utils/gis-helpers";
-
 // Deteksi koordinat WGS 84 (format Desimal DD atau DMS)
 const coordinateMatch = computed<SearchItem | null>(() => {
+  if (!isHomePage.value || !searchQuery.value) return null;
   const parsed = parseCoordinateString(searchQuery.value);
   if (!parsed) return null;
 
@@ -114,6 +118,7 @@ const defaultSuggestions = computed<SearchItem[]>(() => [
 
 // Hasil pencarian terfilter
 const searchResults = computed<SearchItem[]>(() => {
+  if (!isHomePage.value) return [];
   const q = searchQuery.value.trim().toLowerCase();
   if (!q) {
     return defaultSuggestions.value;
@@ -142,6 +147,7 @@ const searchResults = computed<SearchItem[]>(() => {
 });
 
 function openSearch() {
+  if (!isHomePage.value) return;
   isSearchOpen.value = true;
   selectedIndex.value = 0;
   nextTick(() => {
@@ -158,6 +164,36 @@ function closeSearch() {
   searchQuery.value = "";
   selectedIndex.value = 0;
 }
+
+const colorMode = useColorMode();
+
+const mobileNavItems = [
+  {
+    label: "Beranda",
+    desc: "Portal geospasial Kabupaten Bojonegoro",
+    icon: "i-lucide-home",
+    to: "/",
+    exact: true,
+  },
+  {
+    label: "Peta Interaktif",
+    desc: "Batas wilayah, basemap, dan layer jalan poros",
+    icon: "i-lucide-map",
+    to: "/maps",
+  },
+  {
+    label: "GeoStory",
+    desc: "Narasi spasial tematik sejarah dan wilayah",
+    icon: "i-lucide-book-open",
+    to: "/geostory",
+  },
+  {
+    label: "Katalog Data",
+    desc: "Pusat direktori dataset resmi JIGN",
+    icon: "i-lucide-database",
+    to: "/katalog-data",
+  },
+];
 
 function handleSelectResult(item: SearchItem) {
   closeSearch();
@@ -178,7 +214,16 @@ function handleSelectResult(item: SearchItem) {
       } catch {}
     }
 
-    navigateTo(`/maps/@${lat.toFixed(5)},${lng.toFixed(5)},${z}z?search=${encodedSearch}${basemapParam}`);
+    let kecamatanParam = "";
+    if (item.category === "kecamatan") {
+      const cleanKecamatan = item.title
+        .replace(/^Kecamatan\s+/i, "")
+        .replace(/\s*\(Kota\)$/i, "")
+        .trim();
+      kecamatanParam = `&kecamatan=${encodeURIComponent(cleanKecamatan)}`;
+    }
+
+    navigateTo(`/maps/@${lat.toFixed(5)},${lng.toFixed(5)},${z}z?search=${encodedSearch}${kecamatanParam}${basemapParam}`);
   }
 }
 
@@ -200,8 +245,17 @@ watch(searchQuery, () => {
   selectedIndex.value = 0;
 });
 
-// Shortcut keyboard global: Ctrl+K / Cmd+K untuk buka pencarian, Escape untuk tutup
+// Tutup pencarian otomatis saat rute berpindah keluar dari beranda
+watch(
+  () => route.path,
+  () => {
+    closeSearch();
+  }
+);
+
+// Shortcut keyboard global: Ctrl+K / Cmd+K untuk buka pencarian (Hanya di Beranda)
 function handleGlobalKeydown(e: KeyboardEvent) {
+  if (!isHomePage.value) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
     if (isSearchOpen.value) {
@@ -217,7 +271,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
 // Deteksi klik di luar navbar untuk menutup pencarian secara otomatis
 function handleClickOutside(e: MouseEvent) {
-  if (!isSearchOpen.value) return;
+  if (!isHomePage.value || !isSearchOpen.value) return;
   const target = e.target as Node;
   const inDesktop = desktopNavRef.value?.contains(target);
   const inMobile = mobileSearchRef.value?.contains(target);
@@ -241,7 +295,10 @@ onUnmounted(() => {
 
 <template>
   <!-- ═══ DESKTOP FLOATING NAV (lg+) ═══════════════════════════════════════ -->
-  <div class="pointer-events-none fixed inset-x-0 top-0 z-50 hidden justify-center pt-5 lg:flex">
+  <div
+    class="pointer-events-none fixed top-0 z-50 hidden justify-center pt-5 lg:flex transition-[left] duration-300"
+    :class="route.path.startsWith('/maps') ? 'left-0 md:left-[350px] lg:left-[400px] right-0' : 'inset-x-0'"
+  >
     <nav
       ref="desktopNavRef"
       aria-label="Navigasi Utama"
@@ -250,7 +307,7 @@ onUnmounted(() => {
         isScrolled
           ? 'bg-white border border-slate-300/80 shadow-lg shadow-slate-900/8 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none'
           : 'bg-white border border-slate-200/80 shadow-md shadow-slate-900/5 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none',
-        isSearchOpen
+        isHomePage && isSearchOpen
           ? 'px-4 py-2.5 shadow-2xl ring-1 ring-blue-500/20 dark:ring-white/20'
           : 'px-5 py-2.5 gap-1.5'
       ]"
@@ -283,11 +340,16 @@ onUnmounted(() => {
         </NuxtLink>
       </div>
 
-      <!-- Divider tengah pemisah menu dan search -->
-      <span class="mx-2 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0" aria-hidden="true" />
+      <!-- Divider tengah pemisah menu dan search (Hanya tampil di Halaman Beranda) -->
+      <span
+        v-if="isHomePage"
+        class="mx-2 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0"
+        aria-hidden="true"
+      />
 
-      <!-- ─── SEARCH CONTAINER (Melebar secara animasi dan memperlebar navbar) ─── -->
+      <!-- ─── SEARCH CONTAINER (Hanya ditampilkan pada Halaman Utama Beranda) ─── -->
       <div
+        v-if="isHomePage"
         class="relative flex items-center transition-[width,background-color,border-color,box-shadow] duration-500 ease-out rounded-xl overflow-hidden"
         :class="isSearchOpen
           ? 'w-72 sm:w-80 lg:w-[340px] xl:w-[380px] bg-slate-100/90 dark:bg-white/10 px-3 py-1.5 ring-1 ring-blue-500/30 dark:ring-white/20'
@@ -391,7 +453,7 @@ onUnmounted(() => {
         </NuxtLink>
       </div>
 
-      <!-- ─── DESKTOP SEARCH DROPDOWN SUGGESTIONS ─────────────────────── -->
+      <!-- ─── DESKTOP SEARCH DROPDOWN SUGGESTIONS (Hanya di Beranda) ──── -->
       <Transition
         enter-active-class="transition duration-200 ease-out"
         enter-from-class="opacity-0 -translate-y-2 scale-[0.99]"
@@ -401,7 +463,7 @@ onUnmounted(() => {
         leave-to-class="opacity-0 -translate-y-2 scale-[0.99]"
       >
         <div
-          v-if="isSearchOpen"
+          v-if="isHomePage && isSearchOpen"
           class="absolute top-[calc(100%+8px)] right-0 w-[480px] sm:w-[540px] max-w-[92vw] rounded-2xl overflow-hidden border shadow-2xl backdrop-blur-xl z-50 bg-white/95 border-slate-200/90 shadow-slate-900/10 dark:bg-[#09111e]/95 dark:border-white/15 dark:shadow-black/70"
         >
           <!-- Header info / hint -->
@@ -485,8 +547,8 @@ onUnmounted(() => {
   </div>
 
   <!-- ═══ MOBILE FLOATING NAV (below lg) ═══════════════════════════════════ -->
-  <div class="pointer-events-none fixed inset-x-0 top-0 z-50 lg:hidden">
-    <!-- Backdrop Overlay on Mobile when Search is Open -->
+  <div class="pointer-events-none fixed inset-x-0 top-0 z-[60] lg:hidden">
+    <!-- Backdrop Overlay on Mobile when Search is Open (Hanya di Beranda) -->
     <Transition
       enter-active-class="transition-opacity duration-300 ease-out"
       enter-from-class="opacity-0"
@@ -496,15 +558,15 @@ onUnmounted(() => {
       leave-to-class="opacity-0"
     >
       <div
-        v-if="isSearchOpen"
-        class="pointer-events-auto fixed inset-0 bg-slate-900/40 dark:bg-black/60 backdrop-blur-xs z-10"
+        v-if="isHomePage && isSearchOpen"
+        class="pointer-events-auto fixed inset-0 z-[65] bg-black/40 dark:bg-black/60 transition-opacity duration-300"
         aria-hidden="true"
         @click="closeSearch"
       />
     </Transition>
 
-    <!-- Nav container with proper padding -->
-    <div class="relative z-20 px-4 pt-4">
+    <!-- Nav container with safe padding (z-[66] above search backdrop) -->
+    <div class="relative z-[66] px-3 sm:px-4 pt-3 sm:pt-4">
       <!-- Default Collapsed Mobile Bar -->
       <Transition
         enter-active-class="transition-all duration-250 ease-out delay-75"
@@ -516,41 +578,78 @@ onUnmounted(() => {
       >
         <div
           v-if="!isSearchOpen"
-          class="flex items-center justify-between"
+          class="flex items-center justify-between gap-2"
         >
-          <!-- Logo pill (left) -->
+          <!-- Logo Pill (Left): Professional & Compact with Logo Bojonegoro -->
           <NuxtLink
             to="/"
-            aria-label="Melarosa"
-            class="pointer-events-auto flex items-center rounded-2xl px-4 py-2.5 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            aria-label="Melarosa WebGIS Bojonegoro"
+            class="pointer-events-auto flex items-center gap-2 rounded-2xl px-3 py-2 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-h-[44px] shrink-0 active:scale-[0.98] cursor-pointer"
             :class="isScrolled
               ? 'bg-white border border-slate-300/80 shadow-lg dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none'
               : 'bg-white border border-slate-200/80 shadow-md dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none'"
           >
-            <AppLogo />
+            <!-- Logo Kabupaten Bojonegoro -->
+            <img
+              src="/logo-kabupaten.png"
+              alt="Logo Kabupaten Bojonegoro"
+              class="size-7 w-auto h-7 object-contain drop-shadow-xs shrink-0 select-none"
+            />
+            <!-- Brand Text & GIS Badge -->
+            <div class="flex items-center gap-1 select-none leading-none">
+              <span class="font-black text-[15px] sm:text-base tracking-tight text-slate-900 dark:text-white">
+                MELAROSA
+              </span>
+              <span class="text-[9px] font-bold font-mono tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/70 border border-blue-200/60 dark:border-blue-800/40 px-1 py-0.5 rounded uppercase leading-none">
+                GIS
+              </span>
+            </div>
           </NuxtLink>
 
-          <!-- Right controls (Search + Hamburger) -->
-          <div class="pointer-events-auto flex items-center gap-2">
-            <!-- Search Trigger Button on Mobile -->
+          <!-- Right Action Controls (Search + Theme + Hamburger) -->
+          <div class="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+            <!-- 1. Search Trigger Button on Mobile (Hanya tampil di Halaman Beranda) -->
             <button
+              v-if="isHomePage"
               type="button"
-              aria-label="Buka pencarian"
-              class="flex items-center justify-center size-11 rounded-2xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
+              aria-label="Buka pencarian kecamatan dan wilayah"
+              class="relative flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
               :class="isScrolled
                 ? 'bg-white border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none dark:text-slate-200 dark:hover:text-white'
                 : 'bg-white border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none dark:text-slate-200 dark:hover:text-white'"
               @click="openSearch"
             >
               <UIcon name="i-lucide-search" class="size-5" />
+              <!-- Dot indicator if route has active search or kecamatan filter -->
+              <span
+                v-if="route.query.search || route.query.kecamatan"
+                class="absolute top-2 right-2 size-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-2 ring-white dark:ring-[#09111e]"
+              />
             </button>
 
-            <!-- Hamburger button -->
+            <!-- 2. Theme Toggle Button on Mobile (min 44x44px) -->
+            <button
+              type="button"
+              :aria-label="colorMode.value === 'dark' ? 'Beralih ke mode terang' : 'Beralih ke mode gelap'"
+              class="flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
+              :class="isScrolled
+                ? 'bg-white border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none dark:text-slate-200 dark:hover:text-white'
+                : 'bg-white border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none dark:text-slate-200 dark:hover:text-white'"
+              @click="colorMode.preference = colorMode.value === 'dark' ? 'light' : 'dark'"
+            >
+              <UIcon
+                :name="colorMode.value === 'dark' ? 'i-lucide-sun' : 'i-lucide-moon'"
+                class="size-5 transition-transform duration-300"
+                :class="colorMode.value === 'dark' ? 'rotate-90 text-amber-400' : 'rotate-0 text-slate-700 dark:text-slate-200'"
+              />
+            </button>
+
+            <!-- 3. Hamburger Navigation Menu Button (min 44x44px) -->
             <button
               type="button"
               :aria-label="isMobileMenuOpen ? 'Tutup menu' : 'Buka menu navigasi'"
               :aria-expanded="isMobileMenuOpen"
-              class="flex items-center justify-center size-11 rounded-2xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
+              class="relative flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
               :class="isScrolled
                 ? 'bg-white border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none dark:text-slate-200 dark:hover:text-white'
                 : 'bg-white border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none dark:text-slate-200 dark:hover:text-white'"
@@ -561,12 +660,18 @@ onUnmounted(() => {
                 class="size-5 transition-transform duration-200"
                 :class="isMobileMenuOpen ? 'rotate-90' : 'rotate-0'"
               />
+              <!-- Auth indicator dot -->
+              <span
+                v-if="auth.logged"
+                class="absolute top-2 right-2 size-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#09111e]"
+                title="Staf Terautentikasi"
+              />
             </button>
           </div>
         </div>
       </Transition>
 
-      <!-- Expanded Mobile Search Bar -->
+      <!-- Expanded Mobile Search Bar (Hanya tampil di Beranda) -->
       <Transition
         enter-active-class="transition-all duration-300 cubic-bezier(0.16, 1, 0.3, 1)"
         enter-from-class="opacity-0 -translate-y-4 scale-[0.98]"
@@ -576,20 +681,20 @@ onUnmounted(() => {
         leave-to-class="opacity-0 -translate-y-4 scale-[0.98]"
       >
         <div
-          v-if="isSearchOpen"
+          v-if="isHomePage && isSearchOpen"
           ref="mobileSearchRef"
-          class="pointer-events-auto absolute inset-x-4 top-4 rounded-2xl transition-all duration-300 ease-out border shadow-2xl overflow-hidden"
+          class="pointer-events-auto absolute inset-x-3 sm:inset-x-4 top-3 sm:top-4 rounded-2xl transition-all duration-300 ease-out border shadow-2xl overflow-hidden"
           :class="isScrolled
             ? 'bg-white/95 border-slate-300/80 shadow-xl dark:bg-[#09111e]/95 dark:backdrop-blur-2xl dark:border-white/15'
             : 'bg-white/95 border-slate-200/80 shadow-lg dark:bg-[#09111e]/95 dark:backdrop-blur-2xl dark:border-white/10'"
         >
           <div class="flex items-center gap-2 px-3 py-2.5">
-            <UIcon name="i-lucide-search" class="size-4 text-blue-500 shrink-0 ml-1" />
+            <UIcon name="i-lucide-search" class="size-5 text-blue-500 shrink-0 ml-0.5" />
             <input
               ref="mobileSearchInputRef"
               v-model="searchQuery"
               type="text"
-              placeholder="Cari kecamatan, koordinat, atau halaman..."
+              placeholder="Cari 28 kecamatan Bojonegoro..."
               class="w-full bg-transparent text-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-0 border-0 p-0"
               @keydown.enter.prevent="selectActiveResult"
               @keydown.esc.prevent="closeSearch"
@@ -597,7 +702,7 @@ onUnmounted(() => {
             <button
               v-if="searchQuery"
               type="button"
-              class="size-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white active:scale-95 transition-transform"
+              class="size-11 min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white active:scale-95 transition-transform cursor-pointer"
               aria-label="Hapus teks pencarian"
               @click="searchQuery = ''; mobileSearchInputRef?.focus()"
             >
@@ -605,7 +710,7 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="size-8 flex items-center justify-center rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white bg-slate-100 dark:bg-white/10 active:scale-95 transition-transform"
+              class="size-11 min-w-[44px] flex items-center justify-center rounded-xl text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white bg-slate-100 hover:bg-slate-200/70 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
               aria-label="Tutup pencarian"
               @click="closeSearch"
             >
@@ -615,18 +720,23 @@ onUnmounted(() => {
 
           <!-- Mobile Suggestions Dropdown -->
           <div class="max-h-[60vh] overflow-y-auto overscroll-contain border-t border-slate-100 dark:border-white/10 p-2 space-y-1">
+            <div class="px-2 py-1 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
+              <span>{{ searchQuery ? `Hasil: ${searchResults.length}` : 'Daftar Kecamatan Bojonegoro' }}</span>
+              <span>Ketuk untuk filter layer MVT</span>
+            </div>
+
             <template v-if="searchResults.length > 0">
               <button
                 v-for="(item, idx) in searchResults"
                 :key="item.id"
                 type="button"
-                class="w-full min-h-[44px] flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-left transition-colors cursor-pointer active:scale-[0.99]"
+                class="w-full min-h-[44px] flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left transition-colors cursor-pointer active:scale-[0.99]"
                 :class="selectedIndex === idx
                   ? 'bg-blue-50 text-blue-900 dark:bg-white/15 dark:text-white font-medium'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'"
                 @click="handleSelectResult(item)"
               >
-                <div class="flex items-center gap-3 min-w-0">
+                <div class="flex items-center gap-2.5 min-w-0">
                   <div
                     class="size-8 rounded-lg flex items-center justify-center shrink-0"
                     :class="item.category === 'kecamatan'
@@ -639,23 +749,29 @@ onUnmounted(() => {
                   </div>
                   <div class="min-w-0">
                     <p class="text-sm font-semibold truncate">{{ item.title }}</p>
-                    <p class="text-xs text-slate-500 dark:text-slate-400 truncate">{{ item.desc }}</p>
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate">{{ item.desc }}</p>
                   </div>
                 </div>
                 <span
-                  class="text-[10px] uppercase font-mono px-2 py-0.5 rounded-md border shrink-0"
+                  class="text-[9px] uppercase font-mono px-2 py-0.5 rounded-md border shrink-0 font-medium"
                   :class="item.category === 'kecamatan'
                     ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10 dark:border-blue-400/20 dark:text-blue-300'
                     : item.category === 'koordinat'
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-500/10 dark:border-emerald-400/20 dark:text-emerald-300'
                       : 'bg-slate-100 border-slate-200 text-slate-600 dark:bg-white/10 dark:border-white/10 dark:text-slate-300'"
                 >
-                  {{ item.category }}
+                  {{ item.category === 'kecamatan' ? 'Kecamatan' : item.category }}
                 </span>
               </button>
             </template>
-            <div v-else class="py-6 px-3 text-center text-xs text-slate-500 dark:text-slate-400">
-              Tidak ditemukan hasil untuk "{{ searchQuery }}"
+            <div v-else class="py-6 px-3 text-center">
+              <div class="size-9 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center mx-auto mb-2 text-slate-400">
+                <UIcon name="i-lucide-search-x" class="size-4" />
+              </div>
+              <p class="text-xs font-semibold text-slate-800 dark:text-white">Tidak ada kecamatan yang cocok</p>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Ketik nama kecamatan di Kabupaten Bojonegoro (misal: Kapas, Dander, Temayang).
+              </p>
             </div>
           </div>
         </div>
@@ -668,49 +784,190 @@ onUnmounted(() => {
     v-model:open="isMobileMenuOpen"
     side="right"
     title="Menu Navigasi"
-    description="Navigasi portal publik"
+    description="Portal WebGIS Bojonegoro"
+    :ui="{
+      overlay: 'fixed inset-0 z-[70] bg-black/40 dark:bg-black/60 transition-opacity duration-300',
+      content: 'z-[80] max-w-[340px] sm:max-w-sm bg-white dark:bg-[#09111e] border-l border-slate-200/80 dark:border-white/10 flex flex-col shadow-2xl focus:outline-none',
+      header: 'p-4 border-b border-slate-100 dark:border-white/10',
+      body: 'p-4 flex-1 flex flex-col gap-4 overflow-y-auto overscroll-contain',
+      footer: 'p-4 border-t border-slate-100 dark:border-white/10 bg-slate-50/50 dark:bg-white/[0.02]'
+    }"
   >
-    <template #body>
-      <div class="flex flex-col gap-1.5 p-2">
-        <!-- Quick Search Link in Drawer -->
+    <!-- Header with Brand & Close -->
+    <template #header>
+      <div class="flex items-center justify-between w-full">
+        <div class="flex items-center gap-2.5">
+          <!-- Logo Kabupaten Bojonegoro -->
+          <img
+            src="/logo-kabupaten.png"
+            alt="Logo Kabupaten Bojonegoro"
+            class="size-8 w-auto h-8 object-contain drop-shadow-xs shrink-0 select-none"
+          />
+          <div>
+            <h2 class="font-black text-base text-slate-900 dark:text-white tracking-tight leading-none">
+              MELAROSA GIS
+            </h2>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+              Kabupaten Bojonegoro
+            </p>
+          </div>
+        </div>
+
         <button
           type="button"
-          class="px-4 py-3 min-h-[44px] flex items-center gap-3 rounded-xl text-sm font-medium bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white transition-all text-left cursor-pointer mb-1"
-          @click="isMobileMenuOpen = false; openSearch()"
-        >
-          <UIcon name="i-lucide-search" class="size-4 text-blue-500" />
-          <span>Pencarian Wilayah & Data...</span>
-        </button>
-
-        <NuxtLink
-          v-for="link in navTree"
-          :key="link.to"
-          :to="link.to"
-          class="px-4 py-3 min-h-[44px] flex items-center rounded-xl text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          :class="isPathActive(link.to, link.exact)
-            ? 'text-blue-600 bg-blue-50/70 font-semibold dark:text-white dark:bg-white/10'
-            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'"
+          class="size-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+          aria-label="Tutup menu"
           @click="isMobileMenuOpen = false"
         >
-          {{ link.label }}
-        </NuxtLink>
+          <UIcon name="i-lucide-x" class="size-5" />
+        </button>
+      </div>
+    </template>
 
-        <div class="mt-3 pt-3 border-t border-slate-200/70 dark:border-slate-800">
-          <div v-if="auth.logged" class="px-4 py-2 space-y-1">
-            <p class="text-xs text-slate-500">Masuk sebagai</p>
-            <p class="text-sm font-semibold text-slate-900 dark:text-white truncate">{{ auth.user?.email }}</p>
+    <!-- Body Content -->
+    <template #body>
+      <!-- Quick Search Bar in Drawer (Hanya tampil di Beranda) -->
+      <button
+        v-if="isHomePage"
+        type="button"
+        class="w-full px-3.5 py-2.5 min-h-[44px] flex items-center gap-2.5 rounded-xl text-xs sm:text-sm font-medium bg-slate-100/90 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:border-blue-400/50 transition-all text-left cursor-pointer"
+        @click="isMobileMenuOpen = false; openSearch()"
+      >
+        <UIcon name="i-lucide-search" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
+        <span class="truncate">Cari 28 Kecamatan Bojonegoro...</span>
+        <span class="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded bg-white dark:bg-white/10 text-slate-400 border border-slate-200 dark:border-white/10">Cari</span>
+      </button>
+
+      <!-- Primary Navigation Links (Beranda, Geostory, Katalog Data, Peta) -->
+      <div class="space-y-1">
+        <p class="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">
+          Navigasi Utama
+        </p>
+
+        <!-- Nav Item Component / Links -->
+        <NuxtLink
+          v-for="item in mobileNavItems"
+          :key="item.to"
+          :to="item.to"
+          class="group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all cursor-pointer min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          :class="isPathActive(item.to, item.exact)
+            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 font-semibold ring-1 ring-blue-500/20'
+            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-white/5'"
+          @click="isMobileMenuOpen = false"
+        >
+          <div
+            class="size-9 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+            :class="isPathActive(item.to, item.exact)
+              ? 'bg-blue-600 text-white shadow-xs shadow-blue-500/30'
+              : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'"
+          >
+            <UIcon :name="item.icon" class="size-4.5" />
           </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-semibold truncate">{{ item.label }}</span>
+              <UIcon
+                name="i-lucide-chevron-right"
+                class="size-4 text-slate-400 dark:text-slate-500 transition-transform group-hover:translate-x-0.5"
+                :class="isPathActive(item.to, item.exact) ? 'text-blue-600 dark:text-blue-400' : ''"
+              />
+            </div>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate">{{ item.desc }}</p>
+          </div>
+        </NuxtLink>
+      </div>
+
+      <!-- Theme Switcher Segment in Drawer -->
+      <div class="mt-2 pt-3 border-t border-slate-100 dark:border-white/10">
+        <p class="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">
+          Mode Tampilan (Tema)
+        </p>
+        <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200/70 dark:border-white/10">
+          <button
+            type="button"
+            class="flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold min-h-[44px] transition-all cursor-pointer"
+            :class="colorMode.value === 'light'
+              ? 'bg-white text-slate-900 shadow-xs ring-1 ring-slate-900/5'
+              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+            @click="colorMode.preference = 'light'"
+          >
+            <UIcon name="i-lucide-sun" class="size-4 text-amber-500" />
+            <span>Terang</span>
+          </button>
+          <button
+            type="button"
+            class="flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold min-h-[44px] transition-all cursor-pointer"
+            :class="colorMode.value === 'dark'
+              ? 'bg-[#0b0f19] text-white shadow-xs ring-1 ring-white/15'
+              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+            @click="colorMode.preference = 'dark'"
+          >
+            <UIcon name="i-lucide-moon" class="size-4 text-blue-400" />
+            <span>Gelap</span>
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- Drawer Footer: Auth Status / Profile or Login -->
+    <template #footer>
+      <div class="w-full">
+        <!-- Logged in state -->
+        <div v-if="auth.logged" class="space-y-3">
+          <div class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-100/70 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
+            <UAvatar
+              icon="i-heroicons-user"
+              class="rounded-lg shrink-0"
+              size="md"
+              :src="$storage(auth.user.avatar)"
+              :alt="auth.user.name"
+            />
+            <div class="min-w-0 flex-1">
+              <p class="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                {{ auth.user.name || 'Staf Geoportal' }}
+              </p>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                {{ auth.user.email }}
+              </p>
+            </div>
+            <span class="size-2 rounded-full bg-emerald-500 shrink-0" title="Aktif" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <NuxtLink
+              to="/admin"
+              class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all min-h-[44px] cursor-pointer"
+              @click="isMobileMenuOpen = false"
+            >
+              <UIcon name="i-heroicons-squares-2x2" class="size-4" />
+              <span>Dashboard</span>
+            </NuxtLink>
+            <button
+              type="button"
+              class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold bg-slate-200 hover:bg-slate-300/80 dark:bg-white/10 dark:hover:bg-white/20 text-slate-700 dark:text-slate-200 transition-all min-h-[44px] cursor-pointer"
+              @click="auth.logout(); isMobileMenuOpen = false"
+            >
+              <UIcon name="i-heroicons-arrow-left-on-rectangle" class="size-4" />
+              <span>Keluar</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Not logged in state -->
+        <div v-else class="space-y-2">
           <NuxtLink
-            v-else
             to="/auth/login"
-            class="px-4 py-3 min-h-[44px] flex items-center justify-center rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-sm shadow-blue-600/25 transition-all"
+            class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white shadow-sm shadow-blue-600/25 transition-all min-h-[44px] cursor-pointer"
             @click="isMobileMenuOpen = false"
           >
-            Masuk sebagai Staf
+            <UIcon name="i-lucide-log-in" class="size-4.5" />
+            <span>Masuk ke Portal</span>
           </NuxtLink>
+          <p class="text-center text-[10px] text-slate-400 dark:text-slate-500">
+            Akses khusus staf pengelola dan administrator GIS
+          </p>
         </div>
       </div>
     </template>
   </USlideover>
 </template>
-

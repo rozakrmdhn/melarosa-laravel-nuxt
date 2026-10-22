@@ -28,8 +28,13 @@ interface Props {
   // Filter Props
   tipeList?: InfrastrukturTipe[];
   selectedTipe?: string | null;
+  selectedTahunPembangunan?: number | string | null;
   selectedKondisi?: string | null;
   selectedStatusVerifikasi?: string | null;
+  selectedStatusJalan?: string | null;
+  selectedStatusKondisi?: string | null;
+  selectedStatusAset?: string | null;
+  selectedSumberDana?: string | null;
   modelKecamatan?: number | null;
   modelDesa?: number | null;
   kecamatanName?: string | null;
@@ -65,8 +70,13 @@ const props = withDefaults(defineProps<Props>(), {
   symbology: () => ({ ...DEFAULT_SYMBOLOGY }),
   tipeList: () => [],
   selectedTipe: null,
+  selectedTahunPembangunan: null,
   selectedKondisi: null,
   selectedStatusVerifikasi: null,
+  selectedStatusJalan: null,
+  selectedStatusKondisi: null,
+  selectedStatusAset: null,
+  selectedSumberDana: null,
   modelKecamatan: null,
   modelDesa: null,
   kecamatanName: null,
@@ -109,10 +119,20 @@ const emit = defineEmits<{
   (e: 'update:symbology', val: LayerSymbology): void;
   (e: 'update:selectedTipe', val: string | null): void;
   (e: 'update:selected-tipe', val: string | null): void;
+  (e: 'update:selectedTahunPembangunan', val: number | string | null): void;
+  (e: 'update:selected-tahun-pembangunan', val: number | string | null): void;
   (e: 'update:selectedKondisi', val: string | null): void;
   (e: 'update:selected-kondisi', val: string | null): void;
   (e: 'update:selectedStatusVerifikasi', val: string | null): void;
   (e: 'update:selected-status-verifikasi', val: string | null): void;
+  (e: 'update:selectedStatusJalan', val: string | null): void;
+  (e: 'update:selected-status-jalan', val: string | null): void;
+  (e: 'update:selectedStatusKondisi', val: string | null): void;
+  (e: 'update:selected-status-kondisi', val: string | null): void;
+  (e: 'update:selectedStatusAset', val: string | null): void;
+  (e: 'update:selected-status-aset', val: string | null): void;
+  (e: 'update:selectedSumberDana', val: string | null): void;
+  (e: 'update:selected-sumber-dana', val: string | null): void;
   (e: 'update:modelKecamatan', val: number | null): void;
   (e: 'update:model-kecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
@@ -131,9 +151,14 @@ const emit = defineEmits<{
 // ─── Filter Counter for Primary Layer ─────────────────────────────────────────
 const activeFiltersCount = computed(() => {
   let count = 0;
-  if (props.selectedTipe) count++;
+  if (props.selectedTahunPembangunan) count++;
+  else if (props.selectedTipe) count++;
   if (props.selectedKondisi) count++;
   if (props.selectedStatusVerifikasi) count++;
+  if (props.selectedStatusJalan) count++;
+  if (props.selectedStatusKondisi) count++;
+  if (props.selectedStatusAset) count++;
+  if (props.selectedSumberDana) count++;
   if (props.modelKecamatan) count++;
   if (props.modelDesa) count++;
   return count;
@@ -272,15 +297,8 @@ function handleSelectLayer(layerId: string) {
         <div v-if="!collapsed" class="flex items-center gap-2 overflow-hidden">
           <UIcon name="i-lucide-layers" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
           <span class="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">
-            Daftar Layer & Data
+            Daftar Layer
           </span>
-          <UBadge
-            :label="`${effectiveLayers.length} Layer`"
-            color="neutral"
-            variant="subtle"
-            size="xs"
-            class="text-[10px] px-1.5 py-0 h-4 font-mono ml-auto"
-          />
         </div>
       </Transition>
 

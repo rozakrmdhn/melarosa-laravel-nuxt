@@ -111,16 +111,82 @@ const { data: segmenSummary, status: segmenStatus, refresh: refreshSegmen } = us
   immediate: canViewSegmen.value,
 });
 
+// ─── 4. Simpul Jaringan Geoportal Bojonegoro ──────────────────────────────────
+import { useGeoportalStatus } from "~/composables/useGeoportalLayers";
+
+const {
+  connectionStatus: geoportalStatus,
+  checking: checkingGeoportalStatus,
+  checkConnection: refreshGeoportalStatus,
+} = useGeoportalStatus();
+
+function formatLastSync(iso?: string | null): string {
+  if (!iso) return "Belum pernah disinkronkan";
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function timeAgo(iso?: string | null): string {
+  if (!iso) return "Belum pernah";
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return "-";
+  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffSec < 60) return "Baru saja";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} menit lalu`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} jam lalu`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} hari lalu`;
+}
+
+function formatTimelineDate(isoDate: string): string {
+  if (!isoDate) return "-";
+  const d = new Date(isoDate + "T00:00:00");
+  if (isNaN(d.getTime())) return isoDate;
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "short",
+  }).format(d);
+}
+
+const syncTimeline = computed(() => geoportalStatus.value?.sync_timeline || []);
+
+const maxTimelineLayers = computed(() => {
+  const items = syncTimeline.value;
+  if (!items.length) return 20;
+  const max = Math.max(...items.map((i) => i.total_layers), 1);
+  return Math.max(max, 16);
+});
+
+const maxTimelineChange = computed(() => {
+  const items = syncTimeline.value;
+  if (!items.length) return 10;
+  const maxAdded = Math.max(...items.map((i) => i.added), 0);
+  const maxRemoved = Math.max(...items.map((i) => i.removed), 0);
+  return Math.max(maxAdded, maxRemoved, 4);
+});
+
 // ─── Loading & Global Refresh ─────────────────────────────────────────────────
 const loading = computed(() =>
   kecStatus.value === "pending" ||
   desaStatus.value === "pending" ||
   jalanPorosStatus.value === "pending" ||
-  segmenStatus.value === "pending"
+  segmenStatus.value === "pending" ||
+  checkingGeoportalStatus.value
 );
 
 async function handleRefreshAll() {
-  const promises: Promise<any>[] = [];
+  const promises: Promise<any>[] = [
+    refreshGeoportalStatus(true),
+  ];
   if (canViewBatas.value) {
     promises.push(refreshKec());
     promises.push(refreshDesa());
@@ -343,7 +409,255 @@ const segmenKondisiList = computed(() => {
       </div>
     </div>
 
-    <!-- ═══ 2. TIGA PILAR UTAMA (BATAS WILAYAH, JALAN POROS, SEGMEN FISIK) ═══ -->
+    <!-- ═══ 2. SIMPUL JARINGAN & GRAFIK SINKRONISASI GEOPORTAL (SATU KARTU) ═════ -->
+    <div
+      class="p-5 sm:p-6 rounded-xl border transition-all shadow-2xs space-y-5 bg-white dark:bg-[#0b0f19]"
+      :class="[
+        geoportalStatus?.status === 'online'
+          ? 'border-emerald-500/30 dark:border-emerald-500/20'
+          : geoportalStatus?.status === 'fallback'
+          ? 'border-amber-500/30 dark:border-amber-500/20'
+          : 'border-red-500/30 dark:border-red-500/20'
+      ]"
+    >
+      <!-- Bagian Atas: Informasi Simpul Jaringan Terhubung -->
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-gray-100 dark:border-white/[0.06]">
+        <!-- Kiri: Ikon, Judul, Status & Indikator -->
+        <div class="flex items-start sm:items-center gap-3.5">
+          <div
+            class="size-11 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
+            :class="[
+              geoportalStatus?.status === 'online'
+                ? 'bg-emerald-600 text-white'
+                : geoportalStatus?.status === 'fallback'
+                ? 'bg-amber-500 text-white'
+                : 'bg-red-600 text-white'
+            ]"
+          >
+            <UIcon name="i-lucide-globe-2" class="size-6" />
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h2 class="text-sm sm:text-base font-bold text-gray-900 dark:text-white">
+                Simpul Jaringan Geoportal Bojonegoro (JIGN)
+              </h2>
+
+              <!-- Status Badge & Dot -->
+              <span
+                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                :class="[
+                  geoportalStatus?.status === 'online'
+                    ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
+                    : geoportalStatus?.status === 'fallback'
+                    ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
+                    : 'bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300'
+                ]"
+              >
+                <span class="relative flex size-2">
+                  <span
+                    v-if="geoportalStatus?.status === 'online'"
+                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
+                  />
+                  <span
+                    class="relative inline-flex rounded-full size-2"
+                    :class="[
+                      geoportalStatus?.status === 'online'
+                        ? 'bg-emerald-500'
+                        : geoportalStatus?.status === 'fallback'
+                        ? 'bg-amber-500'
+                        : 'bg-red-500'
+                    ]"
+                  />
+                </span>
+                <span>
+                  {{
+                    checkingGeoportalStatus
+                      ? 'Memeriksa status...'
+                      : geoportalStatus?.status === 'online'
+                      ? 'Terhubung'
+                      : geoportalStatus?.status === 'fallback'
+                      ? 'Menggunakan Data Cadangan'
+                      : 'Koneksi Terputus'
+                  }}
+                </span>
+              </span>
+
+              <!-- Latensi -->
+              <span
+                v-if="geoportalStatus?.response_time_ms && geoportalStatus.status === 'online'"
+                class="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40"
+              >
+                {{ geoportalStatus.response_time_ms }} ms
+              </span>
+
+              <!-- Total Layer Aktif -->
+              <span
+                class="text-[11px] font-semibold text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-200/60 dark:border-blue-900/40"
+              >
+                {{ geoportalStatus?.active_local_layers ?? geoportalStatus?.total_local_layers ?? 0 }} Layer Aktif
+              </span>
+            </div>
+
+            <!-- Metadata Singkat & Waktu Sinkron -->
+            <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+              <span>Waktu Sinkron: <strong class="font-semibold text-gray-700 dark:text-gray-300">{{ formatLastSync(geoportalStatus?.last_synced_at) }}</strong> ({{ timeAgo(geoportalStatus?.last_synced_at) }})</span>
+              <span class="text-gray-300 dark:text-gray-700">•</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pesan Informatif jika Mode Cadangan -->
+      <div
+        v-if="geoportalStatus?.status === 'fallback'"
+        class="p-3 rounded-lg border border-amber-300/80 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5"
+      >
+        <UIcon name="i-lucide-alert-triangle" class="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <div class="min-w-0">
+          <p class="font-bold text-xs">Pemberitahuan Gangguan Layanan Geoportal</p>
+          <p class="text-[11px] text-amber-800/90 dark:text-amber-300/90 mt-0.5 leading-relaxed">
+            Layanan live Geoportal Bojonegoro sedang mengalami kendala. Melarosa otomatis menggunakan data cadangan lokal sehingga katalog dan peta tetap berjalan normal.
+          </p>
+        </div>
+      </div>
+
+      <!-- Bagian Bawah: Grafik Batang Sinkronisasi Tiap Tanggal -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+            Riwayat Sinkronisasi
+          </h3>
+          <NuxtLink
+            to="/admin/layers"
+            class="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+          >
+            <span>Buka Manajemen Layer</span>
+            <UIcon name="i-lucide-arrow-right" class="size-3" />
+          </NuxtLink>
+        </div>
+
+        <!-- Wadah Batang Responsif -->
+        <div class="overflow-x-auto pb-1">
+          <div class="min-w-[500px] sm:min-w-0 grid grid-cols-5 gap-3 sm:gap-4">
+            <div
+              v-for="item in syncTimeline"
+              :key="item.date"
+              class="flex flex-col items-center bg-gray-50/70 dark:bg-white/[0.02] p-3 rounded-xl border border-gray-100 dark:border-white/[0.05] transition-all hover:border-blue-500/30 group"
+            >
+              <!-- Header Kolom: Total Layer & Badge Delta -->
+              <div class="w-full flex items-center justify-between text-[11px] mb-2 font-medium">
+                <span class="font-bold text-gray-900 dark:text-white font-mono">
+                  {{ item.total_layers }} Layer
+                </span>
+
+                <!-- Badge Delta -->
+                <span
+                  v-if="item.added > 0"
+                  class="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                  title="Layer bertambah"
+                >
+                  <UIcon name="i-lucide-plus" class="size-2.5" />
+                  <span>{{ item.added }}</span>
+                </span>
+                <span
+                  v-else-if="item.removed > 0"
+                  class="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/80 px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                  title="Layer berkurang"
+                >
+                  <UIcon name="i-lucide-minus" class="size-2.5" />
+                  <span>{{ item.removed }}</span>
+                </span>
+                <span
+                  v-else
+                  class="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-white/[0.05] px-1.5 py-0.5 rounded"
+                  title="Jumlah layer stabil"
+                >
+                  0
+                </span>
+              </div>
+
+              <!-- Batang Bar (Tinggi 130px) -->
+              <div class="w-full h-32 flex items-end justify-center gap-2 pt-2 pb-1 border-b border-gray-200/60 dark:border-white/[0.08] relative">
+                <!-- Bar 1: Total Layer Tersync (Biru) -->
+                <div class="flex flex-col items-center h-full justify-end w-1/2 relative group/total">
+                  <div
+                    class="w-full rounded-t-md bg-blue-600 dark:bg-blue-500 transition-all duration-300 hover:brightness-110 relative"
+                    :style="{ height: `${Math.max(10, Math.round((item.total_layers / maxTimelineLayers) * 100))}%` }"
+                  >
+                    <!-- Tooltip Angka Total -->
+                    <div class="opacity-0 group-hover/total:opacity-100 transition-opacity absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none bg-gray-900 text-white text-[10px] font-mono py-0.5 px-1.5 rounded shadow-sm whitespace-nowrap z-10">
+                      {{ item.total_layers }} layer
+                    </div>
+                  </div>
+                  <span class="text-[9px] font-mono text-gray-400 mt-1">Total</span>
+                </div>
+
+                <!-- Bar 2: Fluktuasi (Bertambah Hijau / Berkurang Merah) -->
+                <div class="flex flex-col items-center h-full justify-end w-1/2 relative group/delta">
+                  <!-- Bar Bertambah (Emerald) -->
+                  <div
+                    v-if="item.added > 0"
+                    class="w-full rounded-t-md bg-emerald-500 dark:bg-emerald-500 transition-all duration-300 hover:brightness-110 relative"
+                    :style="{ height: `${Math.max(14, Math.round((item.added / maxTimelineChange) * 100))}%` }"
+                  >
+                    <div class="opacity-0 group-hover/delta:opacity-100 transition-opacity absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none bg-emerald-950 text-emerald-200 border border-emerald-800 text-[10px] font-mono py-0.5 px-1.5 rounded shadow-sm whitespace-nowrap z-10">
+                      +{{ item.added }} bertambah
+                    </div>
+                  </div>
+
+                  <!-- Bar Berkurang (Rose) -->
+                  <div
+                    v-else-if="item.removed > 0"
+                    class="w-full rounded-t-md bg-rose-500 dark:bg-rose-500 transition-all duration-300 hover:brightness-110 relative"
+                    :style="{ height: `${Math.max(14, Math.round((item.removed / maxTimelineChange) * 100))}%` }"
+                  >
+                    <div class="opacity-0 group-hover/delta:opacity-100 transition-opacity absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none bg-rose-950 text-rose-200 border border-rose-800 text-[10px] font-mono py-0.5 px-1.5 rounded shadow-sm whitespace-nowrap z-10">
+                      -{{ item.removed }} berkurang
+                    </div>
+                  </div>
+
+                  <!-- Indikator Tetap / Garis Datar -->
+                  <div
+                    v-else
+                    class="w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-full"
+                    title="Tidak ada penambahan atau pengurangan layer"
+                  />
+                  <span class="text-[9px] font-mono text-gray-400 mt-1">Delta</span>
+                </div>
+              </div>
+
+              <!-- Footer Kolom Tanggal: Label Tanggal & Keterangan Dinamis -->
+              <div class="mt-2 text-center space-y-0.5">
+                <div class="text-xs font-semibold text-gray-900 dark:text-white">
+                  {{ formatTimelineDate(item.date) }}
+                </div>
+                <div
+                  class="text-[10px] font-medium"
+                  :class="[
+                    item.added > 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : item.removed > 0
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-gray-400 dark:text-gray-500'
+                  ]"
+                >
+                  {{
+                    item.added > 0
+                      ? `+${item.added} Bertambah`
+                      : item.removed > 0
+                      ? `-${item.removed} Berkurang`
+                      : 'Stabil / Tetap'
+                  }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 3. TIGA PILAR UTAMA (BATAS WILAYAH, JALAN POROS, SEGMEN FISIK) ═══ -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 
       <!-- PILAR 1: BATAS WILAYAH ADMINISTRASI -->

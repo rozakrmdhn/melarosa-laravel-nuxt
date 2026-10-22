@@ -56,6 +56,20 @@ class GeoportalPublicLayerController extends Controller
     }
 
     /**
+     * Get real-time connection status to Geoportal CSW & local cache.
+     */
+    public function status(Request $request): JsonResponse
+    {
+        $refresh = $request->boolean('refresh');
+        $status = $this->cswService->checkConnection($refresh);
+
+        return response()->json([
+            'ok' => true,
+            'data' => $status,
+        ]);
+    }
+
+    /**
      * Get detailed metadata for a geoportal layer, including pyCSW catalog records.
      */
     public function metadata(Layer $layer, Request $request): JsonResponse

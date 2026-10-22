@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import "ol/ol.css";
 import MapControls from "./MapControls.vue";
+import MapScaleCoordinateBar from "./MapScaleCoordinateBar.vue";
 import type { ActiveLayerItem, BasemapKey } from "~/types/map-layers";
 import { $http } from "~/utils/helpers";
 import type { IdentifiedFeature } from "./IdentifyFeatures.vue";
@@ -53,6 +54,14 @@ const emit = defineEmits<{
 const mapContainer = ref<HTMLElement | null>(null);
 const pulseEl = ref<HTMLElement | null>(null);
 const scaleLineTarget = ref<HTMLElement | null>(null);
+let scaleLineControlInstance: any = null;
+
+function handleScaleTargetMounted(el: HTMLElement) {
+  scaleLineTarget.value = el;
+  if (scaleLineControlInstance && typeof scaleLineControlInstance.setTarget === "function") {
+    scaleLineControlInstance.setTarget(el);
+  }
+}
 
 // Bojonegoro coordinates: [longitude, latitude] in EPSG:4326
 const BOJONEGORO_CENTER: [number, number] = [111.88, -7.15];
@@ -66,20 +75,6 @@ const currentMapCenter = ref<{ lng: number; lat: number }>({
 });
 const currentZoomLevel = ref<number>(DEFAULT_ZOOM);
 const isPointerOnCanvas = ref(false);
-const coordDisplayFormat = ref<"dd" | "dms">("dd");
-const isCoordCopied = ref(false);
-let coordCopyTimer: ReturnType<typeof setTimeout> | null = null;
-
-function toDms(dec: number, isLng: boolean): string {
-  const abs = Math.abs(dec);
-  const degrees = Math.floor(abs);
-  const minutesDec = (abs - degrees) * 60;
-  const minutes = Math.floor(minutesDec);
-  const seconds = ((minutesDec - minutes) * 60).toFixed(1);
-  const dir = isLng ? (dec >= 0 ? "E" : "W") : (dec >= 0 ? "N" : "S");
-  return `${degrees}°${minutes.toString().padStart(2, "0")}'${seconds.padStart(4, "0")}" ${dir}`;
-}
-
 const activeDisplayCoords = computed(() => {
   if (isPointerOnCanvas.value && livePointerCoords.value) {
     return {
@@ -93,60 +88,24 @@ const activeDisplayCoords = computed(() => {
   };
 });
 
-const formattedLatDisplay = computed(() => {
-  const lat = activeDisplayCoords.value.coords?.lat;
-  if (lat === undefined || lat === null) return "-";
-  const abs = Math.abs(lat).toFixed(5);
-  const dir = lat >= 0 ? "N" : "S";
-  return `${abs}° ${dir}`;
-});
+const currentScaleRatio = ref<string>("1 : 25.000");
 
-const formattedLngDisplay = computed(() => {
-  const lng = activeDisplayCoords.value.coords?.lng;
-  if (lng === undefined || lng === null) return "-";
-  const abs = Math.abs(lng).toFixed(5);
-  const dir = lng >= 0 ? "E" : "W";
-  return `${abs}° ${dir}`;
-});
-
-const formattedDmsDisplay = computed(() => {
-  const c = activeDisplayCoords.value.coords;
-  if (!c) return "-";
-  return `${toDms(c.lat, false)} ${toDms(c.lng, true)}`;
-});
-
-function fallbackCopy(text: string) {
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.style.position = "fixed";
-  textArea.style.opacity = "0";
-  document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-  try {
-    document.execCommand("copy");
-  } catch (err) {
-    console.error("Gagal menyalin koordinat:", err);
+function formatScaleNumber(denom: number): string {
+  if (denom <= 0) return "1.000";
+  const STANDARD_SCALES = [
+    500, 1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000, 100000, 200000, 250000, 500000, 1000000, 2000000, 5000000
+  ];
+  for (const std of STANDARD_SCALES) {
+    const diff = Math.abs(denom - std) / std;
+    if (diff < 0.22) {
+      return std.toLocaleString("id-ID");
+    }
   }
-  document.body.removeChild(textArea);
-}
-
-function copyCurrentCoordinates() {
-  const c = activeDisplayCoords.value.coords;
-  if (!c) return;
-  const text = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
-
-  if (navigator?.clipboard?.writeText && window.isSecureContext) {
-    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-  } else {
-    fallbackCopy(text);
-  }
-
-  isCoordCopied.value = true;
-  if (coordCopyTimer) clearTimeout(coordCopyTimer);
-  coordCopyTimer = setTimeout(() => {
-    isCoordCopied.value = false;
-  }, 1800);
+  if (denom < 1000) return (Math.round(denom / 50) * 50).toLocaleString("id-ID");
+  if (denom < 10000) return (Math.round(denom / 500) * 500).toLocaleString("id-ID");
+  if (denom < 100000) return (Math.round(denom / 1000) * 1000).toLocaleString("id-ID");
+  if (denom < 500000) return (Math.round(denom / 5000) * 5000).toLocaleString("id-ID");
+  return (Math.round(denom / 10000) * 10000).toLocaleString("id-ID");
 }
 
 function updateMapCenterAndZoom() {
@@ -160,12 +119,38 @@ function updateMapCenterAndZoom() {
   if (center) {
     const lonLat = olModules.toLonLat(center);
     if (lonLat && lonLat.length >= 2) {
+      const lat = Number(lonLat[1]);
+      const lng = Number(lonLat[0]);
       currentMapCenter.value = {
-        lng: Number(lonLat[0].toFixed(5)),
-        lat: Number(lonLat[1].toFixed(5)),
+        lng: Number(lng.toFixed(5)),
+        lat: Number(lat.toFixed(5)),
       };
+      const res = view.getResolution();
+      if (res !== undefined) {
+        const latRad = (lat * Math.PI) / 180;
+        const cosLat = Math.cos(latRad);
+        const scaleDenominator = Math.round(res * cosLat * 3779.527559);
+        currentScaleRatio.value = `1 : ${formatScaleNumber(scaleDenominator)}`;
+      }
     }
   }
+}
+
+function handleSelectScale(targetDenom: number) {
+  if (!mapInstance || !olModules) return;
+  const view = mapInstance.getView();
+  const center = view.getCenter();
+  if (!center) return;
+  const lonLat = olModules.toLonLat(center);
+  const lat = lonLat && lonLat.length >= 2 ? Number(lonLat[1]) : BOJONEGORO_CENTER[1];
+  const latRad = (lat * Math.PI) / 180;
+  const cosLat = Math.cos(latRad);
+  const targetResolution = targetDenom / (cosLat * 3779.527559);
+
+  view.animate({
+    resolution: targetResolution,
+    duration: 350,
+  });
 }
 
 const mapLoaded = ref(false);
@@ -876,6 +861,7 @@ async function initMap() {
       minWidth: 70,
       bar: false,
     });
+    scaleLineControlInstance = scaleLineControl;
 
     // Inisialisasi posisi dan zoom dari props atau default Bojonegoro
     let initialCenter = olModules.fromLonLat(BOJONEGORO_CENTER);
@@ -1039,6 +1025,11 @@ async function initMap() {
       updateMapCenterAndZoom();
     });
 
+    // Sinkronkan skala rasio peta secara langsung saat user melakukan zoom / pinch
+    mapInstance.getView().on("change:resolution", () => {
+      updateMapCenterAndZoom();
+    });
+
     // Pointer move listener for live mouse coordinates & feature hover detection
     mapInstance.on("pointermove", (evt: any) => {
       if (evt.dragging) return;
@@ -1094,7 +1085,16 @@ async function initMap() {
 
     mapLoaded.value = true;
     syncActiveWmsLayers();
-    emit("loaded");
+    if (mapInstance) {
+      mapInstance.once("rendercomplete", () => {
+        emit("loaded");
+      });
+      setTimeout(() => {
+        emit("loaded");
+      }, 750);
+    } else {
+      emit("loaded");
+    }
     emitViewportUpdate();
   } catch (err) {
     console.error("Gagal menginisialisasi peta OpenLayers:", err);
@@ -1944,13 +1944,15 @@ defineExpose({
 
     <!-- Floating Navigation Controls (Bottom Right with Dynamic Mobile Clearance) -->
     <div
-      class="absolute right-3 z-20 flex flex-col items-end gap-1.5 pointer-events-none transition-all duration-300 ease-out"
+      class="absolute right-3 md:right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"
       :class="[
-        mobileDrawerOpen && (mobileSheetSnap === 'peek' || mobileSheetSnap === 'full')
-          ? 'opacity-0 pointer-events-none translate-y-4'
-          : mobileDrawerOpen && mobileSheetSnap === 'min'
-            ? 'bottom-[calc(86px+env(safe-area-inset-bottom,0px))] md:bottom-3 opacity-100'
-            : 'bottom-3 opacity-100'
+        mobileDrawerOpen && mobileSheetSnap === 'full'
+          ? 'opacity-0 pointer-events-none translate-y-4 md:opacity-100 md:pointer-events-auto md:translate-y-0 md:bottom-4'
+          : mobileDrawerOpen && mobileSheetSnap === 'peek'
+            ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4 md:opacity-100'
+            : mobileDrawerOpen && mobileSheetSnap === 'min'
+              ? 'bottom-[calc(200px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
+              : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
       ]"
     >
       <!-- Navigation Controls Component -->
@@ -1970,87 +1972,17 @@ defineExpose({
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <!-- FLOATING SCALE BAR & LIVE CURSOR COORDINATES PANEL (BOTTOM CENTER)      -->
+    <!-- FLOATING SCALE BAR & LIVE CURSOR COORDINATES (STANDALONE COMPONENT)     -->
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <div
-      class="absolute left-1/2 -translate-x-1/2 z-20 pointer-events-auto select-none transition-all duration-300 ease-out"
-      :class="[
-        mobileDrawerOpen && (mobileSheetSnap === 'peek' || mobileSheetSnap === 'full')
-          ? 'opacity-0 pointer-events-none translate-y-4'
-          : mobileDrawerOpen && mobileSheetSnap === 'min'
-            ? 'bottom-[calc(86px+env(safe-area-inset-bottom,0px))] opacity-100'
-            : clickedCoordinate
-              ? 'bottom-3 md:bottom-[160px] opacity-100'
-              : 'bottom-3 sm:bottom-4 opacity-100'
-      ]"
-    >
-      <div
-        class="group flex items-center gap-2 sm:gap-3 px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-full bg-white/90 dark:bg-[#0b1322]/90 backdrop-blur-md border border-slate-200/90 dark:border-white/10 shadow-lg shadow-slate-900/5 dark:shadow-black/40 text-xs transition-colors hover:border-slate-300 dark:hover:border-white/20"
-      >
-        <!-- 1. Scale Bar Section (Left) -->
-        <div class="flex items-center shrink-0" title="Skala Peta">
-          <div
-            ref="scaleLineTarget"
-            class="flex items-center justify-center min-w-[65px] h-4.5 scale-line-container"
-          />
-        </div>
-
-        <!-- Vertical Divider -->
-        <div class="h-3.5 w-px bg-slate-200 dark:bg-white/15 shrink-0" />
-
-        <!-- 2. Cursor / Pointer Coordinates Section (Right) -->
-        <div class="flex items-center gap-1.5 shrink-0">
-          <!-- Coordinate Values (Click to Copy) -->
-          <button
-            type="button"
-            class="group/coord flex items-center gap-1 font-mono text-[11px] text-slate-700 dark:text-slate-200 font-medium hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
-            :title="isCoordCopied ? 'Tersalin ke Clipboard!' : 'Klik untuk menyalin koordinat'"
-            @click="copyCurrentCoordinates"
-          >
-            <span v-if="coordDisplayFormat === 'dd'" class="tabular-nums">
-              <span>{{ formattedLatDisplay }}</span>
-              <span class="mx-1 text-slate-300 dark:text-slate-600">•</span>
-              <span>{{ formattedLngDisplay }}</span>
-            </span>
-
-            <span v-else class="tabular-nums text-[10.5px]">
-              {{ formattedDmsDisplay }}
-            </span>
-
-            <!-- Copy Success Badge / Icon -->
-            <Transition
-              enter-active-class="transition-all duration-150 ease-out"
-              enter-from-class="opacity-0 scale-75"
-              enter-to-class="opacity-100 scale-100"
-              leave-active-class="transition-all duration-150 ease-in"
-              leave-from-class="opacity-100 scale-100"
-              leave-to-class="opacity-0 scale-75"
-            >
-              <span
-                v-if="isCoordCopied"
-                class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-emerald-500 text-white text-[9px] font-sans font-bold shadow-xs ml-1"
-              >
-                <UIcon name="i-lucide-check" class="size-2.5" />
-                <span>Disalin</span>
-              </span>
-            </Transition>
-          </button>
-
-          <!-- Format Toggle Button (DD / DMS) -->
-          <button
-            type="button"
-            class="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold transition-colors cursor-pointer"
-            :class="coordDisplayFormat === 'dd'
-              ? 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/15'
-              : 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300'"
-            :title="`Beralih ke format ${coordDisplayFormat === 'dd' ? 'DMS (Derajat Menit Detik)' : 'DD (Derajat Desimal)'}`"
-            @click="coordDisplayFormat = coordDisplayFormat === 'dd' ? 'dms' : 'dd'"
-          >
-            {{ coordDisplayFormat.toUpperCase() }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <MapScaleCoordinateBar
+      :active-coords="activeDisplayCoords.coords"
+      :scale-ratio="currentScaleRatio"
+      :mobile-drawer-open="mobileDrawerOpen"
+      :mobile-sheet-snap="mobileSheetSnap"
+      :clicked-coordinate="clickedCoordinate"
+      @scale-target-mounted="handleScaleTargetMounted"
+      @select-scale="handleSelectScale"
+    />
   </div>
 </template>
 

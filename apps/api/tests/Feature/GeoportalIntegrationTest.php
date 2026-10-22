@@ -190,4 +190,80 @@ XML;
                 ],
             ]);
     }
+
+    public function test_geoportal_status_returns_online_when_csw_is_reachable(): void
+    {
+        $mockXml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<csw:GetRecordsResponse xmlns:csw="http://www.opengis.net/cat/csw/2.0.2">
+  <csw:SearchResults numberOfRecordsMatched="15" numberOfRecordsReturned="0" nextRecord="1" />
+</csw:GetRecordsResponse>
+XML;
+
+        $mockHandler = new MockHandler([
+            new Response(200, ['Content-Type' => 'application/xml'], $mockXml),
+        ]);
+        $this->app->instance(
+            GeoportalCswClientService::class,
+            new GeoportalCswClientService(new Client(['handler' => HandlerStack::create($mockHandler)]))
+        );
+
+        $response = $this->getJson('/api/v1/layers/geoportal/status?refresh=1');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('data.status', 'online')
+            ->assertJsonPath('data.connected', true)
+            ->assertJsonPath('data.remote_matched', 15);
+    }
+
+    public function test_geoportal_status_returns_fallback_when_csw_fails_but_local_layers_exist(): void
+    {
+        Layer::create([
+            'name' => 'Peta Cadangan Geoportal',
+            'geoportal_id' => 'BACKUP_01',
+            'category' => 'Batas Wilayah',
+            'protocol' => 'WMS',
+            'url' => 'https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms',
+            'layer_name' => 'palapa:BACKUP_01',
+            'source_type' => 'geoportal',
+            'is_active' => true,
+            'order' => 1,
+        ]);
+
+        $mockHandler = new MockHandler([
+            new Response(500, [], 'Internal Server Error'),
+        ]);
+        $this->app->instance(
+            GeoportalCswClientService::class,
+            new GeoportalCswClientService(new Client(['handler' => HandlerStack::create($mockHandler)]))
+        );
+
+        $response = $this->getJson('/api/v1/layers/geoportal/status?refresh=1');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('data.status', 'fallback')
+            ->assertJsonPath('data.connected', false)
+            ->assertJsonPath('data.total_local_layers', 1);
+    }
+
+    public function test_geoportal_status_returns_offline_when_csw_fails_and_no_local_layers(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(502, [], 'Bad Gateway'),
+        ]);
+        $this->app->instance(
+            GeoportalCswClientService::class,
+            new GeoportalCswClientService(new Client(['handler' => HandlerStack::create($mockHandler)]))
+        );
+
+        $response = $this->getJson('/api/v1/layers/geoportal/status?refresh=1');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('data.status', 'offline')
+            ->assertJsonPath('data.connected', false)
+            ->assertJsonPath('data.total_local_layers', 0);
+    }
 }

@@ -279,159 +279,399 @@ async function drawCardToCanvas(): Promise<HTMLCanvasElement> {
 
   const W = target.width;
   const H = target.height;
+  const isStory = target.id === "story";
 
-  // Latar belakang utama
+  // Base canvas background
   ctx.fillStyle = "#070b14";
   ctx.fillRect(0, 0, W, H);
 
-  // Gambar Snapshot Peta atau Fallback
+  // Load logo Bojonegoro
+  let logoImg: HTMLImageElement | null = null;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    await new Promise<void>((resolve) => {
+      img.onload = () => {
+        logoImg = img;
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = "/logo-kabupaten.png";
+    });
+  } catch {
+    logoImg = null;
+  }
+
+  // Load Background Citra Peta Konektivitas Bojonegoro
+  let heroBgImg: HTMLImageElement | null = null;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    await new Promise<void>((resolve) => {
+      img.onload = () => {
+        heroBgImg = img;
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = "/images/hero-bojonegoro-connectivity.jpg";
+    });
+  } catch {
+    heroBgImg = null;
+  }
+
+  // Load snapshot peta
+  let mapImg: HTMLImageElement | null = null;
   if (snapshotDataUrl.value) {
     try {
       const img = new Image();
       img.crossOrigin = "anonymous";
       await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
+        img.onload = () => {
+          mapImg = img;
+          resolve();
+        };
         img.onerror = () => reject();
         img.src = snapshotDataUrl.value!;
       });
+    } catch {
+      mapImg = null;
+    }
+  }
 
-      const imgRatio = img.width / img.height;
-      const targetRatio = W / H;
-      let sWidth = img.width;
-      let sHeight = img.height;
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 1. TATA LETAK SPLIT-LAYOUT (SIDE-BY-SIDE ATAU VERTICAL UNTUK STORY)
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (!isStory) {
+    // ─── SPLIT-LAYOUT HORISONTAL (16:9, 1.91:1, 1:1, 4:5) ───────────────────
+    const panelW = Math.round(W * (W > H ? 0.52 : 0.54));
+    const mapX = panelW;
+    const mapW = W - panelW;
+    const pad = Math.round(panelW * 0.08);
+
+    // [A] SISI KANAN: AREA PETA
+    if (mapImg) {
+      const imgRatio = mapImg.width / mapImg.height;
+      const targetMapRatio = mapW / H;
+      let sWidth = mapImg.width;
+      let sHeight = mapImg.height;
       let sX = 0;
       let sY = 0;
 
-      if (imgRatio > targetRatio) {
-        sWidth = img.height * targetRatio;
-        sX = (img.width - sWidth) / 2;
+      if (imgRatio > targetMapRatio) {
+        sWidth = mapImg.height * targetMapRatio;
+        sX = (mapImg.width - sWidth) / 2;
       } else {
-        sHeight = img.width / targetRatio;
-        sY = (img.height - sHeight) / 2;
+        sHeight = mapImg.width / targetMapRatio;
+        sY = (mapImg.height - sHeight) / 2;
       }
 
-      ctx.drawImage(img, sX, sY, sWidth, sHeight, 0, 0, W, H);
+      ctx.drawImage(mapImg, sX, sY, sWidth, sHeight, mapX, 0, mapW, H);
 
-      // Gradient overlay pelindung keterbacaan teks
-      const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, "rgba(7, 11, 20, 0.85)");
-      grad.addColorStop(0.25, "rgba(7, 11, 20, 0.2)");
-      grad.addColorStop(0.68, "rgba(7, 11, 20, 0.45)");
-      grad.addColorStop(1, "rgba(7, 11, 20, 0.95)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
-    } catch {
-      drawFallbackGrid(ctx, W, H);
+      // Vignette peta halus
+      const mapVignette = ctx.createLinearGradient(mapX, 0, mapX + mapW, 0);
+      mapVignette.addColorStop(0, "rgba(7, 14, 34, 0.45)");
+      mapVignette.addColorStop(0.3, "rgba(7, 14, 34, 0.05)");
+      mapVignette.addColorStop(1, "rgba(7, 14, 34, 0.35)");
+      ctx.fillStyle = mapVignette;
+      ctx.fillRect(mapX, 0, mapW, H);
+    } else {
+      drawFallbackGrid(ctx, mapW, H);
     }
-  } else {
-    drawFallbackGrid(ctx, W, H);
-  }
 
-  // Header Kartu
-  const pad = Math.round(W * 0.05);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `bold ${Math.round(W * 0.026)}px ui-sans-serif, system-ui, sans-serif`;
-  ctx.fillText("KABUPATEN BOJONEGORO", pad, pad + Math.round(W * 0.026));
+    // Retikel Bidik Kartografis di Tengah Peta
+    const mapCx = mapX + mapW / 2;
+    const mapCy = H / 2;
+    ctx.strokeStyle = "rgba(96, 165, 250, 0.6)";
+    ctx.lineWidth = Math.max(1, Math.round(W * 0.0015));
+    ctx.beginPath();
+    ctx.arc(mapCx, mapCy, Math.round(panelW * 0.06), 0, Math.PI * 2);
+    ctx.stroke();
 
-  ctx.fillStyle = "#60a5fa"; // blue-400
-  ctx.font = `600 ${Math.round(W * 0.02)}px ui-sans-serif, system-ui, sans-serif`;
-  ctx.fillText("MELAROSA GIS • SATU DATA SPASIAL", pad, pad + Math.round(W * 0.056));
+    ctx.fillStyle = "#60a5fa";
+    ctx.beginPath();
+    ctx.arc(mapCx, mapCy, Math.round(panelW * 0.012), 0, Math.PI * 2);
+    ctx.fill();
 
-  // Tanggal saat ini
-  const today = new Intl.DateTimeFormat("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(new Date());
+    ctx.beginPath();
+    ctx.moveTo(mapCx - Math.round(panelW * 0.09), mapCy);
+    ctx.lineTo(mapCx + Math.round(panelW * 0.09), mapCy);
+    ctx.moveTo(mapCx, mapCy - Math.round(panelW * 0.09));
+    ctx.lineTo(mapCx, mapCy + Math.round(panelW * 0.09));
+    ctx.stroke();
 
-  ctx.fillStyle = "#94a3b8";
-  ctx.font = `500 ${Math.round(W * 0.018)}px ui-monospace, monospace`;
-  ctx.textAlign = "right";
-  ctx.fillText(today, W - pad, pad + Math.round(W * 0.026));
-  ctx.textAlign = "left";
+    // Tag Rasio di Kanan Atas Peta
+    const ratioTagH = Math.round(panelW * 0.05);
+    const ratioTagPadX = Math.round(panelW * 0.025);
+    ctx.font = `600 ${Math.round(panelW * 0.026)}px ui-monospace, monospace`;
+    const ratioTextW = ctx.measureText(target.label).width;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(W - pad - ratioTextW - ratioTagPadX * 2, pad, ratioTextW + ratioTagPadX * 2, ratioTagH, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(target.label, W - pad - ratioTextW - ratioTagPadX, pad + Math.round(ratioTagH * 0.68));
 
-  // Konten Informasi Bawah (Responsif Unwrap & Multiline)
-  const maxTextWidth = W - (pad * 2);
+    // [B] SISI KIRI: PANEL DARK MODE GLASSMORPHISM DENGAN BACKGROUND HERO CONNECTIVITY
+    if (heroBgImg) {
+      const imgRatio = heroBgImg.width / heroBgImg.height;
+      const panelRatio = panelW / H;
+      let sWidth = heroBgImg.width;
+      let sHeight = heroBgImg.height;
+      let sX = 0;
+      let sY = 0;
+      if (imgRatio > panelRatio) {
+        sWidth = heroBgImg.height * panelRatio;
+        sX = (heroBgImg.width - sWidth) / 2;
+      } else {
+        sHeight = heroBgImg.width / panelRatio;
+        sY = (heroBgImg.height - sHeight) / 2;
+      }
+      ctx.drawImage(heroBgImg, sX, sY, sWidth, sHeight, 0, 0, panelW, H);
+    }
 
-  // Ukur baris judul
-  const title = customTitle.value || (props.locationLabel ? `Wilayah ${props.locationLabel}` : "Peta Spasial Kabupaten Bojonegoro");
-  const titleFontSize = Math.round(W * 0.036);
-  const titleLineHeight = Math.round(titleFontSize * 1.28);
-  ctx.font = `bold ${titleFontSize}px ui-sans-serif, system-ui, sans-serif`;
-  const titleLines = getWrappedLines(ctx, title, maxTextWidth);
+    // Dark glass gradient overlay agar teks berkontras tinggi dan terbaca tajam
+    const panelGrad = ctx.createLinearGradient(0, 0, panelW, H);
+    panelGrad.addColorStop(0, "rgba(6, 12, 29, 0.88)");
+    panelGrad.addColorStop(0.5, "rgba(7, 17, 38, 0.84)");
+    panelGrad.addColorStop(1, "rgba(4, 8, 20, 0.94)");
+    ctx.fillStyle = panelGrad;
+    ctx.fillRect(0, 0, panelW, H);
 
-  // Ukur baris deskripsi
-  const descFontSize = Math.round(W * 0.021);
-  const descLineHeight = Math.round(descFontSize * 1.34);
-  ctx.font = `400 ${descFontSize}px ui-sans-serif, system-ui, sans-serif`;
-  const descLines = customDescription.value
-    ? getWrappedLines(ctx, customDescription.value, maxTextWidth)
-    : [];
+    // Radial glow biru di kiri atas
+    const radialGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, panelW * 0.95);
+    radialGlow.addColorStop(0, "rgba(37, 99, 235, 0.26)");
+    radialGlow.addColorStop(1, "rgba(37, 99, 235, 0)");
+    ctx.fillStyle = radialGlow;
+    ctx.fillRect(0, 0, panelW, H);
 
-  // Ukuran Pill Koordinat & Watermark
-  const pillH = Math.round(W * 0.036);
-  const pillPadX = Math.round(W * 0.02);
-  const pillSpacing = Math.round(W * 0.02);
-  const watermarkSpacing = Math.round(W * 0.045);
+    // Garis batas vertikal pembagi kaca
+    ctx.strokeStyle = "rgba(59, 130, 246, 0.35)";
+    ctx.lineWidth = Math.max(1, Math.round(W * 0.002));
+    ctx.beginPath();
+    ctx.moveTo(panelW, 0);
+    ctx.lineTo(panelW, H);
+    ctx.stroke();
 
-  const totalContentHeight = (titleLines.length * titleLineHeight)
-    + (descLines.length > 0 ? (descLines.length * descLineHeight + Math.round(W * 0.012)) : 0)
-    + pillH
-    + pillSpacing
-    + watermarkSpacing;
+    // 1. Header Kiri Atas: Logo & Instansi (First Capital / Title Case)
+    let headerTextX = pad;
+    const logoH = Math.round(panelW * 0.13);
+    if (logoImg) {
+      const logoW = Math.round(logoH * (logoImg.width / logoImg.height));
+      ctx.drawImage(logoImg, pad, pad, logoW, logoH);
+      headerTextX = pad + logoW + Math.round(panelW * 0.035);
+    }
 
-  let currentY = H - pad - totalContentHeight;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${Math.round(panelW * 0.044)}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText("Pemerintah Kabupaten Bojonegoro", headerTextX, pad + Math.round(logoH * 0.44));
 
-  // Render Judul (Unwrapped Multiline)
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `bold ${titleFontSize}px ui-sans-serif, system-ui, sans-serif`;
-  for (const line of titleLines) {
-    ctx.fillText(line, pad, currentY);
-    currentY += titleLineHeight;
-  }
+    ctx.fillStyle = "#93c5fd";
+    ctx.font = `500 ${Math.round(panelW * 0.031)}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText("Badan Perencanaan Pembangunan Daerah", headerTextX, pad + Math.round(logoH * 0.88));
 
-  // Render Deskripsi (Unwrapped Multiline)
-  if (descLines.length > 0) {
-    currentY += Math.round(W * 0.01);
-    ctx.fillStyle = "#cbd5e1"; // slate-300
-    ctx.font = `400 ${descFontSize}px ui-sans-serif, system-ui, sans-serif`;
+    // 2. Bagian Tengah Kiri: Judul Utama & Deskripsi (Plus Jakarta Sans - Modern & Tidak Kaku)
+    const maxTextW = panelW - pad * 2;
+    const title = customTitle.value || (props.locationLabel ? `Wilayah ${props.locationLabel}` : "Peta Spasial Bojonegoro");
+    const titleFontSize = Math.round(panelW * 0.066);
+    const titleLineHeight = Math.round(titleFontSize * 1.25);
+    ctx.font = `bold ${titleFontSize}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    const titleLines = getWrappedLines(ctx, title, maxTextW);
+
+    const desc = customDescription.value || "Informasi geospasial resmi Kabupaten Bojonegoro";
+    const descFontSize = Math.round(panelW * 0.035);
+    const descLineHeight = Math.round(descFontSize * 1.35);
+    ctx.font = `400 ${descFontSize}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    const descLines = getWrappedLines(ctx, desc, maxTextW);
+
+    const footerH = Math.round(panelW * 0.07);
+
+    // Komputasi Vertikal Tengah
+    const totalMiddleH = (titleLines.length * titleLineHeight)
+      + Math.round(panelW * 0.02)
+      + (descLines.length * descLineHeight);
+
+    let currentY = Math.round(pad + logoH + (H - pad * 2 - logoH - footerH - totalMiddleH) * 0.48);
+
+    // Gambar Judul Utama (Fluid, Modern, High Contrast)
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${titleFontSize}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    for (const line of titleLines) {
+      ctx.fillText(line, pad, currentY);
+      currentY += titleLineHeight;
+    }
+
+    // Gambar Deskripsi
+    currentY += Math.round(panelW * 0.015);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = `400 ${descFontSize}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
     for (const line of descLines) {
       ctx.fillText(line, pad, currentY);
       currentY += descLineHeight;
     }
-  }
 
-  // Render Pill Koordinat
-  currentY += Math.round(W * 0.015);
-  const coordStr = `WGS84: ${formattedCoordinateString.value}`;
-  ctx.font = `600 ${Math.round(W * 0.02)}px ui-monospace, monospace`;
-  const textWidth = ctx.measureText(coordStr).width;
-  ctx.fillStyle = "rgba(30, 58, 138, 0.75)";
-  ctx.strokeStyle = "rgba(96, 165, 250, 0.4)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.roundRect(pad, currentY, textWidth + pillPadX * 2, pillH, 8);
-  ctx.fill();
-  ctx.stroke();
+    // 3. Bagian Bawah: Garis Tipis & Footer (Hanya domain melarosa, teks Bappeda dihilangkan)
+    const footerLineY = H - pad - Math.round(panelW * 0.065);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad, footerLineY);
+    ctx.lineTo(panelW - pad, footerLineY);
+    ctx.stroke();
 
-  ctx.fillStyle = "#93c5fd";
-  ctx.fillText(coordStr, pad + pillPadX, currentY + Math.round(pillH * 0.68));
+    const footerTextY = H - pad;
+    ctx.fillStyle = "#60a5fa";
+    ctx.font = `bold ${Math.round(panelW * 0.032)}px ui-monospace, monospace`;
+    ctx.textAlign = "right";
+    ctx.fillText("melarosa.bojonegorokab.go.id", panelW - pad, footerTextY);
+    ctx.textAlign = "left";
+  } else {
+    // ─── SPLIT-LAYOUT VERTIKAL KHUSUS STORY (9:16) ───────────────────────────
+    const mapH = Math.round(H * 0.48);
+    const panelY = mapH;
+    const panelH = H - mapH;
+    const pad = Math.round(W * 0.08);
 
-  // Jika Image + Link aktif: tambahkan watermark link situs
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(pad, H - pad - Math.round(W * 0.035));
-  ctx.lineTo(W - pad, H - pad - Math.round(W * 0.035));
-  ctx.stroke();
+    // [A] BAGIAN ATAS: AREA PETA
+    if (mapImg) {
+      const imgRatio = mapImg.width / mapImg.height;
+      const targetMapRatio = W / mapH;
+      let sWidth = mapImg.width;
+      let sHeight = mapImg.height;
+      let sX = 0;
+      let sY = 0;
 
-  ctx.fillStyle = "#64748b";
-  ctx.font = `600 ${Math.round(W * 0.018)}px ui-sans-serif, system-ui, sans-serif`;
-  ctx.fillText("PEMERINTAH KABUPATEN BOJONEGORO", pad, H - pad);
+      if (imgRatio > targetMapRatio) {
+        sWidth = mapImg.height * targetMapRatio;
+        sX = (mapImg.width - sWidth) / 2;
+      } else {
+        sHeight = mapImg.width / targetMapRatio;
+        sY = (mapImg.height - sHeight) / 2;
+      }
 
-  if (shareMode.value === "image_link") {
-    ctx.fillStyle = "#3b82f6";
-    ctx.font = `600 ${Math.round(W * 0.018)}px ui-monospace, monospace`;
+      ctx.drawImage(mapImg, sX, sY, sWidth, sHeight, 0, 0, W, mapH);
+
+      // Vignette bawah peta
+      const mapVignette = ctx.createLinearGradient(0, mapH * 0.6, 0, mapH);
+      mapVignette.addColorStop(0, "rgba(7, 14, 34, 0)");
+      mapVignette.addColorStop(1, "rgba(7, 14, 34, 0.8)");
+      ctx.fillStyle = mapVignette;
+      ctx.fillRect(0, 0, W, mapH);
+    } else {
+      drawFallbackGrid(ctx, W, mapH);
+    }
+
+    // Retikel Bidik di Tengah Peta Story
+    const mapCx = W / 2;
+    const mapCy = mapH / 2;
+    ctx.strokeStyle = "rgba(96, 165, 250, 0.6)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(mapCx, mapCy, Math.round(W * 0.07), 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "#60a5fa";
+    ctx.beginPath();
+    ctx.arc(mapCx, mapCy, Math.round(W * 0.015), 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tag Story di Kanan Atas
+    ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(W - pad - 120, pad, 120, 44, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `600 20px ui-monospace, monospace`;
+    ctx.fillText("9:16 Story", W - pad - 105, pad + 28);
+
+    // [B] BAGIAN BAWAH: PANEL DARK MODE GLASSMORPHISM DENGAN BACKGROUND HERO CONNECTIVITY
+    if (heroBgImg) {
+      const imgRatio = heroBgImg.width / heroBgImg.height;
+      const panelRatio = W / panelH;
+      let sWidth = heroBgImg.width;
+      let sHeight = heroBgImg.height;
+      let sX = 0;
+      let sY = 0;
+      if (imgRatio > panelRatio) {
+        sWidth = heroBgImg.height * panelRatio;
+        sX = (heroBgImg.width - sWidth) / 2;
+      } else {
+        sHeight = heroBgImg.width / panelRatio;
+        sY = (heroBgImg.height - sHeight) / 2;
+      }
+      ctx.drawImage(heroBgImg, sX, sY, sWidth, sHeight, 0, panelY, W, panelH);
+    }
+
+    const panelGrad = ctx.createLinearGradient(0, panelY, 0, H);
+    panelGrad.addColorStop(0, "rgba(6, 12, 29, 0.88)");
+    panelGrad.addColorStop(0.5, "rgba(7, 17, 38, 0.84)");
+    panelGrad.addColorStop(1, "rgba(4, 8, 20, 0.94)");
+    ctx.fillStyle = panelGrad;
+    ctx.fillRect(0, panelY, W, panelH);
+
+    // Garis horizontal pembagi
+    ctx.strokeStyle = "rgba(59, 130, 246, 0.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, panelY);
+    ctx.lineTo(W, panelY);
+    ctx.stroke();
+
+    // Header Panel: Logo Bojonegoro & Instansi (First Capital / Title Case)
+    const logoH = Math.round(W * 0.12);
+    let headerTextX = pad;
+    if (logoImg) {
+      const logoW = Math.round(logoH * (logoImg.width / logoImg.height));
+      ctx.drawImage(logoImg, pad, panelY + pad, logoW, logoH);
+      headerTextX = pad + logoW + Math.round(W * 0.035);
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${Math.round(W * 0.04)}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText("Pemerintah Kabupaten Bojonegoro", headerTextX, panelY + pad + Math.round(logoH * 0.44));
+
+    ctx.fillStyle = "#93c5fd";
+    ctx.font = `500 ${Math.round(W * 0.029)}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText("Badan Perencanaan Pembangunan Daerah", headerTextX, panelY + pad + Math.round(logoH * 0.88));
+
+    // Judul & Deskripsi Story (Plus Jakarta Sans)
+    const title = customTitle.value || (props.locationLabel ? `Wilayah ${props.locationLabel}` : "Peta Spasial Bojonegoro");
+    const titleFontSize = Math.round(W * 0.064);
+    ctx.font = `bold ${titleFontSize}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    const titleLines = getWrappedLines(ctx, title, W - pad * 2);
+
+    let currentY = panelY + pad + logoH + Math.round(W * 0.08);
+    ctx.fillStyle = "#ffffff";
+    for (const line of titleLines) {
+      ctx.fillText(line, pad, currentY);
+      currentY += Math.round(titleFontSize * 1.25);
+    }
+
+    const desc = customDescription.value || "Informasi geospasial resmi Kabupaten Bojonegoro";
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = `400 ${Math.round(W * 0.035)}px "Plus Jakarta Sans", "Outfit", ui-sans-serif, system-ui, sans-serif`;
+    const descLines = getWrappedLines(ctx, desc, W - pad * 2);
+    for (const line of descLines) {
+      ctx.fillText(line, pad, currentY);
+      currentY += Math.round(W * 0.05);
+    }
+
+    // Footer Story (Hanya domain melarosa, teks Bappeda dihilangkan)
+    const footerLineY = H - pad - Math.round(W * 0.06);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad, footerLineY);
+    ctx.lineTo(W - pad, footerLineY);
+    ctx.stroke();
+
+    ctx.fillStyle = "#60a5fa";
+    ctx.font = `bold ${Math.round(W * 0.03)}px ui-monospace, monospace`;
     ctx.textAlign = "right";
     ctx.fillText("melarosa.bojonegorokab.go.id", W - pad, H - pad);
     ctx.textAlign = "left";
@@ -630,81 +870,104 @@ async function handleNativeShare() {
             </button>
           </div>
 
-          <!-- Kartu Pratinjau Peta Sesuai Rasio -->
+          <!-- Kartu Pratinjau Peta Sesuai Rasio (Split-Layout Dark Mode Glassmorphism) -->
           <div
-            class="relative rounded-xl overflow-hidden shadow-lg border border-slate-800/80 bg-[#070b14] text-white flex flex-col justify-between transition-all duration-300 mx-auto select-none my-auto"
+            class="relative rounded-2xl overflow-hidden shadow-2xl border border-blue-500/25 bg-[#070b14] text-white flex transition-all duration-300 mx-auto select-none my-auto ring-1 ring-blue-500/30"
+            :class="selectedRatioId === 'story' ? 'flex-col' : 'flex-row'"
             :style="previewCardStyle"
           >
-            <!-- Latar Snapshot / Fallback Peta -->
-            <div class="absolute inset-0 z-0">
+            <!-- ═══ SISI KIRI (ATAU BAWAH PADA STORY): PANEL INFORMASI GLASSMORPHISM ═══ -->
+            <div
+              class="flex flex-col justify-between p-3 sm:p-4 bg-[#060c1d]/80 backdrop-blur-md relative z-10 select-none shadow-[4px_0_15px_rgba(0,0,0,0.5)] overflow-hidden"
+              :class="selectedRatioId === 'story' ? 'w-full h-[52%] border-t border-blue-500/25 order-2' : 'w-[54%] h-full border-r border-blue-500/25 order-1'"
+            >
+              <!-- Background Citra Peta Konektivitas Bojonegoro & Ambient Dark Overlay -->
+              <div class="absolute inset-0 pointer-events-none overflow-hidden -z-10">
+                <img
+                  src="/images/hero-bojonegoro-connectivity.jpg"
+                  alt="Latar Belakang Konektivitas Bojonegoro"
+                  class="w-full h-full object-cover object-center scale-105 filter brightness-[0.55] contrast-[1.12]"
+                />
+                <!-- Gradient dark glass overlay agar teks berkontras tinggi dan terbaca tajam -->
+                <div class="absolute inset-0 bg-gradient-to-br from-[#060c1d]/90 via-[#071126]/85 to-[#040814]/94" />
+                <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.22),transparent_70%)]" />
+              </div>
+
+              <!-- 1. Header Kiri Atas: Logo Kabupaten Bojonegoro & Teks Instansi (First Capital) -->
+              <div class="flex items-center gap-2 shrink-0">
+                <img
+                  src="/logo-kabupaten.png"
+                  alt="Logo Kabupaten Bojonegoro"
+                  class="h-6 sm:h-7 w-auto object-contain shrink-0 drop-shadow-sm"
+                />
+                <div class="min-w-0 flex-1">
+                  <h5 class="font-['Plus_Jakarta_Sans',sans-serif] text-[8.5px] sm:text-[9.5px] font-bold text-white tracking-tight leading-none truncate">
+                    Pemerintah Kabupaten Bojonegoro
+                  </h5>
+                  <p class="font-['Plus_Jakarta_Sans',sans-serif] text-[7px] sm:text-[8px] font-medium text-blue-300 tracking-normal leading-none mt-0.5 truncate">
+                    Badan Perencanaan Pembangunan Daerah
+                  </p>
+                </div>
+              </div>
+
+              <!-- 2. Bagian Tengah Kiri: Judul Utama & Deskripsi (Plus Jakarta Sans - Fluid & Modern) -->
+              <div class="space-y-1.5 my-auto py-2">
+                <h3
+                  class="font-['Plus_Jakarta_Sans',sans-serif] font-bold text-white leading-snug tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.65)] line-clamp-2"
+                  :class="selectedRatioId === 'story' ? 'text-sm' : 'text-xs sm:text-sm'"
+                >
+                  {{ customTitle || (locationLabel ? `Wilayah ${locationLabel}` : 'Peta Spasial Bojonegoro') }}
+                </h3>
+                <p
+                  class="font-['Plus_Jakarta_Sans',sans-serif] text-slate-300 font-normal leading-relaxed line-clamp-2 mt-0.5"
+                  :class="selectedRatioId === 'story' ? 'text-[8.5px]' : 'text-[8px] sm:text-[9px]'"
+                >
+                  {{ customDescription || 'Informasi geospasial resmi Kabupaten Bojonegoro' }}
+                </p>
+              </div>
+
+              <!-- 3. Bagian Bawah: Garis Tipis & Footer Resmi (Teks Bappeda Dihilangkan) -->
+              <div class="pt-1.5 border-t border-white/10 flex items-center justify-end text-[7px] sm:text-[8px] shrink-0">
+                <span class="text-blue-400 font-semibold tracking-tight truncate">
+                  melarosa.bojonegorokab.go.id
+                </span>
+              </div>
+            </div>
+
+            <!-- ═══ SISI KANAN (ATAU ATAS PADA STORY): AREA PETA INTERAKTIF ═══ -->
+            <div
+              class="relative overflow-hidden bg-[#070b14] flex items-center justify-center z-0"
+              :class="selectedRatioId === 'story' ? 'w-full h-[48%] order-1' : 'w-[46%] h-full order-2'"
+            >
+              <!-- Gambar Snapshot Peta / Fallback -->
               <img
                 v-if="snapshotDataUrl"
                 :src="snapshotDataUrl"
                 alt="Cuplikan Peta"
-                class="w-full h-full object-cover"
+                class="w-full h-full object-cover select-none pointer-events-none"
               />
               <div v-else class="w-full h-full bg-[#0b1220] flex items-center justify-center relative overflow-hidden">
-                <div class="absolute inset-0 bg-[radial-gradient(#1e3a8a_1px,transparent_1px)] [background-size:14px_14px] opacity-40" />
-                <div class="size-12 rounded-full border border-blue-500/30 flex items-center justify-center">
-                  <UIcon name="i-lucide-crosshair" class="size-6 text-blue-400/60" />
+                <div class="absolute inset-0 bg-[radial-gradient(#1e3a8a_1.5px,transparent_1.5px)] [background-size:14px_14px] opacity-40" />
+                <div class="size-10 rounded-full border border-blue-500/30 flex items-center justify-center animate-pulse">
+                  <UIcon name="i-lucide-crosshair" class="size-5 text-blue-400/80" />
                 </div>
               </div>
-              <!-- Gradient Overlay Pelindung Teks -->
-              <div class="absolute inset-0 bg-gradient-to-t from-[#070b14] via-[#070b14]/30 to-[#070b14]/80" />
-            </div>
 
-            <!-- Header Mini Kartu -->
-            <div class="relative z-10 p-2.5 flex items-start justify-between">
-              <div class="space-y-0.5">
-                <p class="text-[8px] font-bold text-white tracking-wider uppercase">
-                  KABUPATEN BOJONEGORO
-                </p>
-                <p class="text-[7px] font-semibold text-blue-400">
-                  MELAROSA GIS • SATU DATA SPASIAL
-                </p>
-              </div>
-              <span class="text-[8px] font-mono text-slate-300 bg-black/50 px-1.5 py-0.2 rounded backdrop-blur-xs">
-                {{ selectedRatio.label }}
-              </span>
-            </div>
-
-            <!-- Footer Mini Kartu (Responsif Unwrap & Multiline) -->
-            <div class="relative z-10 p-2.5 space-y-1.5 w-full">
-              <div class="space-y-0.5">
-                <h4
-                  class="font-bold text-white leading-snug whitespace-normal break-words"
-                  :class="selectedRatioId === 'story' ? 'text-[9.5px]' : 'text-xs'"
-                >
-                  {{ customTitle || (locationLabel ? `Wilayah ${locationLabel}` : 'Peta Spasial Bojonegoro') }}
-                </h4>
-                <p
-                  v-if="customDescription"
-                  class="text-slate-300 font-normal leading-normal whitespace-normal break-words"
-                  :class="selectedRatioId === 'story' ? 'text-[7.5px]' : 'text-[8.5px]'"
-                >
-                  {{ customDescription }}
-                </p>
+              <!-- Retikel Bidik Kartografis Menyala di Tengah Peta -->
+              <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div class="size-7 border border-blue-400/60 shadow-[0_0_8px_rgba(59,130,246,0.6)] rounded-full flex items-center justify-center">
+                  <div class="size-2 bg-blue-400 rounded-full animate-ping" />
+                </div>
               </div>
 
-              <!-- Pill Koordinat -->
-              <div class="flex items-center gap-1 flex-wrap">
-                <span
-                  class="inline-flex items-center gap-1 rounded bg-blue-950/80 border border-blue-500/40 font-mono text-blue-200 shrink-0"
-                  :class="selectedRatioId === 'story' ? 'text-[7px] px-1 py-0.2' : 'text-[8px] px-1.5 py-0.2'"
-                >
-                  <UIcon name="i-lucide-map-pin" class="size-2 text-blue-400" />
-                  {{ formattedCoordinateString }}
+              <!-- Vignette Halus Map Viewport -->
+              <div class="absolute inset-0 bg-gradient-to-t from-[#070b14]/60 via-transparent to-[#070b14]/20 pointer-events-none" />
+
+              <!-- Format Ratio Pill di Kanan Atas Peta -->
+              <div class="absolute top-2 right-2 z-10">
+                <span class="text-[7.5px] font-bold text-white bg-black/70 backdrop-blur-xs border border-white/20 px-2 py-0.5 rounded-md shadow-sm">
+                  {{ selectedRatio.label }}
                 </span>
-              </div>
-
-              <!-- Watermark Tautan (Jika Tab Image + Link Aktif) -->
-              <div
-                v-if="shareMode === 'image_link'"
-                class="pt-1 border-t border-white/10 flex items-center justify-between text-slate-400"
-                :class="selectedRatioId === 'story' ? 'text-[6.5px]' : 'text-[7px]'"
-              >
-                <span>Pemkab Bojonegoro</span>
-                <span class="font-mono text-blue-400 truncate ml-1">melarosa.bojonegorokab.go.id</span>
               </div>
             </div>
           </div>

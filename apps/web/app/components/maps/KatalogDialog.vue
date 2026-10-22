@@ -136,7 +136,7 @@ const filteredDatasets = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
   const proto = selectedProtocol.value;
 
-  return allDatasets.value.filter((d) => {
+  return (allDatasets.value || []).filter((d) => {
     const matchProtocol = proto === "Semua" || d.protocol === proto;
     if (!matchProtocol) return false;
 

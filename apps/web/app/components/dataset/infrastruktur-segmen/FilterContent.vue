@@ -7,9 +7,15 @@ interface Props {
   layerTitle?: string;
   tipeList?: InfrastrukturTipe[];
   selectedTipe?: string | null;
+  selectedTahunPembangunan?: number | string | null;
+  selectedTahun?: number | string | null;
   selectedKondisi?: string | null;
   selectedStatusVerifikasi?: string | null;
   selectedPerkerasan?: string | null;
+  selectedStatusJalan?: string | null;
+  selectedStatusKondisi?: string | null;
+  selectedStatusAset?: string | null;
+  selectedSumberDana?: string | null;
   modelKecamatan?: number | null;
   modelDesa?: number | null;
   isMobile?: boolean;
@@ -22,9 +28,15 @@ const props = withDefaults(defineProps<Props>(), {
   layerTitle: 'Segmen Fisik Infrastruktur',
   tipeList: () => [],
   selectedTipe: null,
+  selectedTahunPembangunan: null,
+  selectedTahun: null,
   selectedKondisi: null,
   selectedStatusVerifikasi: null,
   selectedPerkerasan: null,
+  selectedStatusJalan: null,
+  selectedStatusKondisi: null,
+  selectedStatusAset: null,
+  selectedSumberDana: null,
   modelKecamatan: null,
   modelDesa: null,
   isMobile: false,
@@ -35,12 +47,24 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'update:selectedTipe', val: string | null): void;
   (e: 'update:selected-tipe', val: string | null): void;
+  (e: 'update:selectedTahunPembangunan', val: number | string | null): void;
+  (e: 'update:selected-tahun-pembangunan', val: number | string | null): void;
+  (e: 'update:selectedTahun', val: number | string | null): void;
+  (e: 'update:selected-tahun', val: number | string | null): void;
   (e: 'update:selectedKondisi', val: string | null): void;
   (e: 'update:selected-kondisi', val: string | null): void;
   (e: 'update:selectedStatusVerifikasi', val: string | null): void;
   (e: 'update:selected-status-verifikasi', val: string | null): void;
   (e: 'update:selectedPerkerasan', val: string | null): void;
   (e: 'update:selected-perkerasan', val: string | null): void;
+  (e: 'update:selectedStatusJalan', val: string | null): void;
+  (e: 'update:selected-status-jalan', val: string | null): void;
+  (e: 'update:selectedStatusKondisi', val: string | null): void;
+  (e: 'update:selected-status-kondisi', val: string | null): void;
+  (e: 'update:selectedStatusAset', val: string | null): void;
+  (e: 'update:selected-status-aset', val: string | null): void;
+  (e: 'update:selectedSumberDana', val: string | null): void;
+  (e: 'update:selected-sumber-dana', val: string | null): void;
   (e: 'update:modelKecamatan', val: number | null): void;
   (e: 'update:model-kecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
@@ -70,6 +94,15 @@ function handleTipeChange(val: any) {
   emit('update:selected-tipe', v);
 }
 
+function handleTahunPembangunanChange(val: any) {
+  const v = extractValue(val);
+  const resolved = v && v !== 'ALL' ? Number(v) : null;
+  emit('update:selectedTahunPembangunan', resolved);
+  emit('update:selected-tahun-pembangunan', resolved);
+  emit('update:selectedTahun', resolved);
+  emit('update:selected-tahun', resolved);
+}
+
 function handleKondisiChange(val: any) {
   const v = extractValue(val);
   emit('update:selectedKondisi', v);
@@ -86,6 +119,30 @@ function handlePerkerasanChange(val: any) {
   const v = extractValue(val);
   emit('update:selectedPerkerasan', v);
   emit('update:selected-perkerasan', v);
+}
+
+function handleStatusJalanChange(val: any) {
+  const v = extractValue(val);
+  emit('update:selectedStatusJalan', v);
+  emit('update:selected-status-jalan', v);
+}
+
+function handleStatusKondisiChange(val: any) {
+  const v = extractValue(val);
+  emit('update:selectedStatusKondisi', v);
+  emit('update:selected-status-kondisi', v);
+}
+
+function handleStatusAsetChange(val: any) {
+  const v = extractValue(val);
+  emit('update:selectedStatusAset', v);
+  emit('update:selected-status-aset', v);
+}
+
+function handleSumberDanaChange(val: any) {
+  const v = extractValue(val);
+  emit('update:selectedSumberDana', v);
+  emit('update:selected-sumber-dana', v);
 }
 
 function handleKecamatanChange(val: any) {
@@ -108,6 +165,20 @@ const tipeSelectItems = computed(() => [
   })),
 ]);
 
+const tahunPembangunanSelectItems = computed(() => {
+  const currentYear = new Date().getFullYear();
+  const items: { label: string; value: string | number }[] = [
+    { label: 'Semua Tahun Pembangunan', value: 'ALL' },
+  ];
+  for (let y = currentYear + 1; y >= 2015; y--) {
+    items.push({
+      label: `Tahun ${y}`,
+      value: y,
+    });
+  }
+  return items;
+});
+
 const kondisiOptions = [
   { label: 'Semua Kondisi', value: 'ALL' },
   { label: 'Baik', value: 'Baik' },
@@ -123,6 +194,36 @@ const perkerasanOptions = [
   { label: 'Paving', value: 'Paving' },
   { label: 'Kerikil', value: 'Kerikil' },
   { label: 'Tanah', value: 'Tanah' },
+];
+
+const statusJalanOptions = [
+  { label: 'Semua Status Jalan', value: 'ALL' },
+  { label: 'Jalan Desa', value: 'Jalan Desa' },
+  { label: 'Jalan Poros Desa', value: 'Jalan Poros Desa' },
+  { label: 'Jalan Kabupaten', value: 'Jalan Kabupaten' },
+];
+
+const statusKondisiOptions = [
+  { label: 'Semua Status Kondisi', value: 'ALL' },
+  { label: 'Eksisting', value: 'Eksisting' },
+  { label: 'Riwayat', value: 'Riwayat' },
+];
+
+const statusAsetOptions = [
+  { label: 'Semua Status Aset', value: 'ALL' },
+  { label: 'Pemerintah Desa', value: 'Pemerintah Desa' },
+  { label: 'Pemerintah Kabupaten', value: 'Pemerintah Kabupaten' },
+  { label: 'Aset Desa', value: 'Aset Desa' },
+  { label: 'Lainnya', value: 'Lainnya' },
+];
+
+const sumberDanaOptions = [
+  { label: 'Semua Sumber Dana', value: 'ALL' },
+  { label: 'APBD', value: 'APBD' },
+  { label: 'BKK', value: 'BKK' },
+  { label: 'Dana Desa (DD)', value: 'DD' },
+  { label: 'Sektoral', value: 'Sektoral' },
+  { label: 'Lainnya', value: 'Lainnya' },
 ];
 
 const verifikasiOptions = [
@@ -141,10 +242,15 @@ const activeFiltersCount = computed(() => {
     if (props.selectedPerkerasan) count++;
     if (props.selectedKondisi) count++;
   } else {
-    if (props.selectedTipe) count++;
+    if (props.selectedTahunPembangunan || props.selectedTahun) count++;
+    else if (props.selectedTipe) count++;
     if (props.selectedPerkerasan) count++;
     if (props.selectedKondisi) count++;
     if (props.selectedStatusVerifikasi) count++;
+    if (props.selectedStatusJalan) count++;
+    if (props.selectedStatusKondisi) count++;
+    if (props.selectedStatusAset) count++;
+    if (props.selectedSumberDana) count++;
   }
   if (props.modelKecamatan) count++;
   if (props.modelDesa) count++;
@@ -194,43 +300,44 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
 
       <!-- Kriteria Layer 1: Segmen Fisik Infrastruktur -->
       <template v-if="layerId === 'infrastruktur-segmen'">
-        <!-- Tipe Infrastruktur -->
-        <div class="space-y-1.5">
-          <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-            Tipe Infrastruktur
-          </label>
-          <USelectMenu
-            :model-value="selectedTipe || 'ALL'"
-            :items="tipeSelectItems"
-            value-key="value"
-            label-key="label"
-            :size="isMobile ? 'sm' : 'xs'"
-            :ui="{ content: 'z-[100]' }"
-            placeholder="Pilih tipe infrastruktur"
-            class="w-full"
-            @update:model-value="handleTipeChange"
-          />
+        <!-- Baris 1: Tahun Pembangunan & Jenis Perkerasan -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+              Tahun Pembangunan
+            </label>
+            <USelectMenu
+              :model-value="selectedTahunPembangunan ?? selectedTahun ?? 'ALL'"
+              :items="tahunPembangunanSelectItems"
+              value-key="value"
+              label-key="label"
+              :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
+              placeholder="Pilih tahun pembangunan"
+              class="w-full"
+              @update:model-value="handleTahunPembangunanChange"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+              Jenis Perkerasan
+            </label>
+            <USelectMenu
+              :model-value="selectedPerkerasan || 'ALL'"
+              :items="perkerasanOptions"
+              value-key="value"
+              label-key="label"
+              :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
+              placeholder="Pilih perkerasan"
+              class="w-full"
+              @update:model-value="handlePerkerasanChange"
+            />
+          </div>
         </div>
 
-        <!-- Jenis Perkerasan -->
-        <div class="space-y-1.5">
-          <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-            Jenis Perkerasan
-          </label>
-          <USelectMenu
-            :model-value="selectedPerkerasan || 'ALL'"
-            :items="perkerasanOptions"
-            value-key="value"
-            label-key="label"
-            :size="isMobile ? 'sm' : 'xs'"
-            :ui="{ content: 'z-[100]' }"
-            placeholder="Pilih perkerasan"
-            class="w-full"
-            @update:model-value="handlePerkerasanChange"
-          />
-        </div>
-
-        <!-- 2 Kolom: Kondisi Fisik & Status Verifikasi -->
+        <!-- Baris 2: Kondisi Fisik & Status Kondisi -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="space-y-1.5">
             <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
@@ -251,6 +358,80 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
 
           <div class="space-y-1.5">
             <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+              Status Kondisi
+            </label>
+            <USelectMenu
+              :model-value="selectedStatusKondisi || 'ALL'"
+              :items="statusKondisiOptions"
+              value-key="value"
+              label-key="label"
+              :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
+              placeholder="Pilih status kondisi"
+              class="w-full"
+              @update:model-value="handleStatusKondisiChange"
+            />
+          </div>
+        </div>
+
+        <!-- Baris 3: Status Jalan & Status Aset -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+              Status Jalan
+            </label>
+            <USelectMenu
+              :model-value="selectedStatusJalan || 'ALL'"
+              :items="statusJalanOptions"
+              value-key="value"
+              label-key="label"
+              :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
+              placeholder="Pilih status jalan"
+              class="w-full"
+              @update:model-value="handleStatusJalanChange"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+              Status Aset
+            </label>
+            <USelectMenu
+              :model-value="selectedStatusAset || 'ALL'"
+              :items="statusAsetOptions"
+              value-key="value"
+              label-key="label"
+              :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
+              placeholder="Pilih status aset"
+              class="w-full"
+              @update:model-value="handleStatusAsetChange"
+            />
+          </div>
+        </div>
+
+        <!-- Baris 4: Sumber Dana & Status Verifikasi -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+              Sumber Dana
+            </label>
+            <USelectMenu
+              :model-value="selectedSumberDana || 'ALL'"
+              :items="sumberDanaOptions"
+              value-key="value"
+              label-key="label"
+              :size="isMobile ? 'sm' : 'xs'"
+              :ui="{ content: 'z-[100]' }"
+              placeholder="Pilih sumber dana"
+              class="w-full"
+              @update:model-value="handleSumberDanaChange"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
               Status Verifikasi
             </label>
             <USelectMenu
@@ -260,7 +441,7 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
               label-key="label"
               :size="isMobile ? 'sm' : 'xs'"
               :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih status"
+              placeholder="Pilih status verifikasi"
               class="w-full"
               @update:model-value="handleStatusVerifikasiChange"
             />

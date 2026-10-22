@@ -25,8 +25,13 @@ interface Props {
   // Active filters for chips
   tipeList?: InfrastrukturTipe[];
   selectedTipe?: string | null;
+  selectedTahunPembangunan?: number | string | null;
   selectedKondisi?: string | null;
   selectedStatusVerifikasi?: string | null;
+  selectedStatusJalan?: string | null;
+  selectedStatusKondisi?: string | null;
+  selectedStatusAset?: string | null;
+  selectedSumberDana?: string | null;
   modelKecamatan?: number | null;
   modelDesa?: number | null;
   kecamatanName?: string | null;
@@ -55,8 +60,13 @@ const props = withDefaults(defineProps<Props>(), {
   canSubmit: true,
   tipeList: () => [],
   selectedTipe: null,
+  selectedTahunPembangunan: null,
   selectedKondisi: null,
   selectedStatusVerifikasi: null,
+  selectedStatusJalan: null,
+  selectedStatusKondisi: null,
+  selectedStatusAset: null,
+  selectedSumberDana: null,
   modelKecamatan: null,
   modelDesa: null,
   kecamatanName: null,
@@ -72,8 +82,18 @@ const emit = defineEmits<{
   (e: 'update:tablePage', page: number): void;
   (e: 'update:tablePerPage', perPage: number): void;
   (e: 'update:selectedTipe', val: string | null): void;
+  (e: 'update:selectedTahunPembangunan', val: number | string | null): void;
+  (e: 'update:selected-tahun-pembangunan', val: number | string | null): void;
   (e: 'update:selectedKondisi', val: string | null): void;
   (e: 'update:selectedStatusVerifikasi', val: string | null): void;
+  (e: 'update:selectedStatusJalan', val: string | null): void;
+  (e: 'update:selected-status-jalan', val: string | null): void;
+  (e: 'update:selectedStatusKondisi', val: string | null): void;
+  (e: 'update:selected-status-kondisi', val: string | null): void;
+  (e: 'update:selectedStatusAset', val: string | null): void;
+  (e: 'update:selected-status-aset', val: string | null): void;
+  (e: 'update:selectedSumberDana', val: string | null): void;
+  (e: 'update:selected-sumber-dana', val: string | null): void;
   (e: 'update:modelKecamatan', val: number | null): void;
   (e: 'update:modelDesa', val: number | null): void;
   (e: 'resetFilters'): void;
@@ -86,9 +106,14 @@ const emit = defineEmits<{
 
 const hasActiveFilters = computed(() => {
   return Boolean(
+    props.selectedTahunPembangunan ||
     props.selectedTipe ||
     props.selectedKondisi ||
     props.selectedStatusVerifikasi ||
+    props.selectedStatusJalan ||
+    props.selectedStatusKondisi ||
+    props.selectedStatusAset ||
+    props.selectedSumberDana ||
     props.modelKecamatan ||
     props.modelDesa
   );
@@ -96,9 +121,14 @@ const hasActiveFilters = computed(() => {
 
 const activeFilterCount = computed(() => {
   let count = 0;
-  if (props.selectedTipe) count++;
+  if (props.selectedTahunPembangunan) count++;
+  else if (props.selectedTipe) count++;
   if (props.selectedKondisi) count++;
   if (props.selectedStatusVerifikasi) count++;
+  if (props.selectedStatusJalan) count++;
+  if (props.selectedStatusKondisi) count++;
+  if (props.selectedStatusAset) count++;
+  if (props.selectedSumberDana) count++;
   if (props.modelKecamatan) count++;
   if (props.modelDesa) count++;
   return count;
@@ -506,6 +536,23 @@ function handleTabClick(tab: 'table' | 'console') {
               </button>
             </span>
 
+            <!-- Chip Tahun Pembangunan -->
+            <span
+              v-if="selectedTahunPembangunan"
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800/80 shrink-0 text-[11px] shadow-2xs"
+            >
+              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Tahun:</span>
+              <span class="font-semibold tracking-tight font-mono">{{ selectedTahunPembangunan }}</span>
+              <button
+                type="button"
+                class="p-0.5 rounded-full hover:bg-emerald-200/60 dark:hover:bg-emerald-800/60 transition-colors cursor-pointer flex items-center justify-center text-emerald-700 dark:text-emerald-300 hover:text-emerald-950 dark:hover:text-white"
+                title="Hapus filter tahun pembangunan"
+                @click="emit('update:selectedTahunPembangunan', null); emit('update:selected-tahun-pembangunan', null)"
+              >
+                <UIcon name="i-lucide-x" class="size-3" />
+              </button>
+            </span>
+
             <!-- Chip Tipe -->
             <span
               v-if="selectedTipe"
@@ -563,6 +610,74 @@ function handleTabClick(tab: 'table' | 'console') {
               </button>
             </span>
 
+            <!-- Chip Status Jalan -->
+            <span
+              v-if="selectedStatusJalan"
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-50 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-200 border border-cyan-200 dark:border-cyan-800/80 shrink-0 text-[11px] shadow-2xs"
+            >
+              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Jalan:</span>
+              <span class="font-semibold tracking-tight">{{ selectedStatusJalan }}</span>
+              <button
+                type="button"
+                class="p-0.5 rounded-full hover:bg-cyan-200/60 dark:hover:bg-cyan-800/60 transition-colors cursor-pointer flex items-center justify-center text-cyan-700 dark:text-cyan-300 hover:text-cyan-950 dark:hover:text-white"
+                title="Hapus filter status jalan"
+                @click="emit('update:selectedStatusJalan', null); emit('update:selected-status-jalan', null)"
+              >
+                <UIcon name="i-lucide-x" class="size-3" />
+              </button>
+            </span>
+
+            <!-- Chip Status Kondisi -->
+            <span
+              v-if="selectedStatusKondisi"
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/40 text-teal-900 dark:text-teal-200 border border-teal-200 dark:border-teal-800/80 shrink-0 text-[11px] shadow-2xs"
+            >
+              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Status:</span>
+              <span class="font-semibold tracking-tight">{{ selectedStatusKondisi }}</span>
+              <button
+                type="button"
+                class="p-0.5 rounded-full hover:bg-teal-200/60 dark:hover:bg-teal-800/60 transition-colors cursor-pointer flex items-center justify-center text-teal-700 dark:text-teal-300 hover:text-teal-950 dark:hover:text-white"
+                title="Hapus filter status kondisi"
+                @click="emit('update:selectedStatusKondisi', null); emit('update:selected-status-kondisi', null)"
+              >
+                <UIcon name="i-lucide-x" class="size-3" />
+              </button>
+            </span>
+
+            <!-- Chip Status Aset -->
+            <span
+              v-if="selectedStatusAset"
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 border border-purple-200 dark:border-purple-800/80 shrink-0 text-[11px] shadow-2xs"
+            >
+              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Aset:</span>
+              <span class="font-semibold tracking-tight">{{ selectedStatusAset }}</span>
+              <button
+                type="button"
+                class="p-0.5 rounded-full hover:bg-purple-200/60 dark:hover:bg-purple-800/60 transition-colors cursor-pointer flex items-center justify-center text-purple-700 dark:text-purple-300 hover:text-purple-950 dark:hover:text-white"
+                title="Hapus filter status aset"
+                @click="emit('update:selectedStatusAset', null); emit('update:selected-status-aset', null)"
+              >
+                <UIcon name="i-lucide-x" class="size-3" />
+              </button>
+            </span>
+
+            <!-- Chip Sumber Dana -->
+            <span
+              v-if="selectedSumberDana"
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/80 shrink-0 text-[11px] shadow-2xs"
+            >
+              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Dana:</span>
+              <span class="font-semibold tracking-tight">{{ selectedSumberDana }}</span>
+              <button
+                type="button"
+                class="p-0.5 rounded-full hover:bg-amber-200/60 dark:hover:bg-amber-800/60 transition-colors cursor-pointer flex items-center justify-center text-amber-700 dark:text-amber-300 hover:text-amber-950 dark:hover:text-white"
+                title="Hapus filter sumber dana"
+                @click="emit('update:selectedSumberDana', null); emit('update:selected-sumber-dana', null)"
+              >
+                <UIcon name="i-lucide-x" class="size-3" />
+              </button>
+            </span>
+
             <!-- Tombol Reset Semua -->
             <button
               type="button"
@@ -594,7 +709,7 @@ function handleTabClick(tab: 'table' | 'console') {
             <table class="w-full text-left text-xs border-collapse">
               <thead class="sticky top-0 z-10 bg-gray-50 dark:bg-[#0b0f19] border-b border-gray-200 dark:border-gray-800 text-[11px] font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">
                 <tr>
-                  <th class="py-2 px-3">Tipe</th>
+                  <th class="py-2 px-3">Tahun Pembangunan</th>
                   <th class="py-2 px-3 min-w-[200px]">Nama Objek / Ruas</th>
                   <th class="py-2 px-3">Desa</th>
                   <th class="py-2 px-3">Kecamatan</th>
@@ -621,11 +736,14 @@ function handleTabClick(tab: 'table' | 'console') {
                 >
                   <td class="py-2 px-3 whitespace-nowrap">
                     <UBadge
-                      :label="row.tipe?.nama || row.tipe_kode"
+                      v-if="row.tahun_pembangunan"
+                      :label="`Tahun ${row.tahun_pembangunan}`"
                       color="neutral"
                       variant="subtle"
                       size="xs"
+                      class="font-mono text-[11px]"
                     />
+                    <span v-else class="text-gray-400 dark:text-gray-500 font-mono text-xs">-</span>
                   </td>
                   <td class="py-2 px-3 font-semibold text-gray-900 dark:text-white truncate max-w-[220px]">
                     <div class="flex items-center gap-1.5 truncate">

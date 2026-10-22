@@ -4,6 +4,9 @@ const isAdmin = computed(() => route.path.startsWith("/admin"));
 const isAuth = computed(() => route.path.startsWith("/auth"));
 const isMaps = computed(() => route.path.startsWith("/maps"));
 const isHomepage = computed(() => route.path === '/');
+
+// Shared state: diisi oleh pages/maps/index.vue saat sidebar terbuka/tertutup di desktop
+const mapsSidebarWidth = useState<number>("maps_sidebar_width", () => 0);
 </script>
 
 <template>
@@ -22,10 +25,10 @@ const isHomepage = computed(() => route.path === '/');
       </div>
     </template>
 
-    <!-- Dedicated Maps Layout (Full Map Canvas, Full Height Full Width with Public Navbar) -->
+    <!-- Dedicated Maps Layout (Wrapper Maps Split Layout with Public Navbar) -->
     <template v-else-if="isMaps">
       <div class="fixed inset-0 overflow-hidden flex flex-col bg-white dark:bg-[#070b14]">
-        <AppPublicNavbar class="shrink-0 z-40" />
+        <AppPublicNavbar class="shrink-0 z-[60]" />
         <main class="flex-1 w-full h-full relative overflow-hidden">
           <NuxtPage />
         </main>

@@ -13,9 +13,14 @@ interface Props {
   loading?: boolean;
   basemap?: BasemapType;
   tipeFilter?: string | null;
+  tahunPembangunanFilter?: number | string | null;
   perkerasanFilter?: string | null;
   kondisiFilter?: string | null;
   statusVerifikasiFilter?: string | null;
+  statusJalanFilter?: string | null;
+  statusKondisiFilter?: string | null;
+  statusAsetFilter?: string | null;
+  sumberDanaFilter?: string | null;
   kecamatanFilter?: number | null;
   desaFilter?: number | null;
   layerVisible?: boolean;
@@ -44,9 +49,14 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   basemap: 'osm',
   tipeFilter: null,
+  tahunPembangunanFilter: null,
   perkerasanFilter: null,
   kondisiFilter: null,
   statusVerifikasiFilter: null,
+  statusJalanFilter: null,
+  statusKondisiFilter: null,
+  statusAsetFilter: null,
+  sumberDanaFilter: null,
   kecamatanFilter: null,
   desaFilter: null,
   layerVisible: true,
@@ -606,9 +616,33 @@ function getFeatureStyle(feature: any) {
 
   // Client-side filtering
   if (props.tipeFilter && String(propsObj.tipe_kode || '').trim().toLowerCase() !== props.tipeFilter.trim().toLowerCase()) return null;
+  if (props.tahunPembangunanFilter) {
+    const fTahun = String(propsObj.tahun_pembangunan || propsObj.tahun || '').trim();
+    if (fTahun !== String(props.tahunPembangunanFilter).trim()) return null;
+  }
   if (props.perkerasanFilter && !String(propsObj.jenis_perkerasan || propsObj.perkerasan || '').toLowerCase().includes(props.perkerasanFilter.toLowerCase().trim())) return null;
   if (props.kondisiFilter && !String(propsObj.kondisi || '').toLowerCase().includes(props.kondisiFilter.toLowerCase().trim())) return null;
   if (props.statusVerifikasiFilter && String(propsObj.status_verifikasi || '').trim().toLowerCase() !== props.statusVerifikasiFilter.trim().toLowerCase()) return null;
+  if (props.statusJalanFilter) {
+    const fStatusJalan = String(propsObj.status_jalan || '').trim().toLowerCase();
+    const filterVal = String(props.statusJalanFilter).trim().toLowerCase();
+    if (fStatusJalan !== filterVal && !fStatusJalan.includes(filterVal)) return null;
+  }
+  if (props.statusKondisiFilter) {
+    const fStatusKondisi = String(propsObj.status_kondisi || '').trim().toLowerCase();
+    const filterVal = String(props.statusKondisiFilter).trim().toLowerCase();
+    if (fStatusKondisi !== filterVal && !fStatusKondisi.includes(filterVal)) return null;
+  }
+  if (props.statusAsetFilter) {
+    const fStatusAset = String(propsObj.status_aset || '').trim().toLowerCase();
+    const filterVal = String(props.statusAsetFilter).trim().toLowerCase();
+    if (fStatusAset !== filterVal && !fStatusAset.includes(filterVal)) return null;
+  }
+  if (props.sumberDanaFilter) {
+    const fSumberDana = String(propsObj.sumber_dana || '').trim().toLowerCase();
+    const filterVal = String(props.sumberDanaFilter).trim().toLowerCase();
+    if (fSumberDana !== filterVal && !fSumberDana.includes(filterVal)) return null;
+  }
   if (props.kecamatanFilter) {
     const fKecId = String(propsObj.id_kecamatan || '').trim();
     const fKec = String(propsObj.kecamatan || '').toLowerCase().trim();
@@ -1960,9 +1994,14 @@ let filterDebounceTimer: any = null;
 watch(
   [
     () => props.tipeFilter,
+    () => props.tahunPembangunanFilter,
     () => props.perkerasanFilter,
     () => props.kondisiFilter,
     () => props.statusVerifikasiFilter,
+    () => props.statusJalanFilter,
+    () => props.statusKondisiFilter,
+    () => props.statusAsetFilter,
+    () => props.sumberDanaFilter,
     () => props.kecamatanFilter,
     () => props.desaFilter,
   ],

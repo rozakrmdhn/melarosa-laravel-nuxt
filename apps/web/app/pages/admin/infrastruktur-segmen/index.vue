@@ -259,9 +259,20 @@ function toggleAllPanels() {
 
 // ─── Filter State & Query Sync ────────────────────────────────────────────────
 const filterTipe = ref<string | null>((route.query.tipe as string) || null);
+const filterTahunPembangunan = ref<number | null>(
+  route.query.tahun_pembangunan
+    ? Number(route.query.tahun_pembangunan)
+    : route.query.tahun
+      ? Number(route.query.tahun)
+      : null
+);
 const filterPerkerasan = ref<string | null>((route.query.perkerasan as string) || null);
 const filterKondisi = ref<string | null>((route.query.kondisi as string) || null);
 const filterStatusVerifikasi = ref<string | null>((route.query.status as string) || null);
+const filterStatusJalan = ref<string | null>((route.query.status_jalan as string) || null);
+const filterStatusKondisi = ref<string | null>((route.query.status_kondisi as string) || null);
+const filterStatusAset = ref<string | null>((route.query.status_aset as string) || null);
+const filterSumberDana = ref<string | null>((route.query.sumber_dana as string) || null);
 
 // Territory Authority Sanitizer: Mencegah manipulasi query parameter oleh user
 function getAuthorizedKecamatan(requested: any): number | null {
@@ -310,10 +321,15 @@ watch(
 
 const activeFilterCount = computed(() => {
   let count = 0;
-  if (filterTipe.value) count++;
+  if (filterTahunPembangunan.value) count++;
+  else if (filterTipe.value) count++;
   if (filterPerkerasan.value) count++;
   if (filterKondisi.value) count++;
   if (filterStatusVerifikasi.value) count++;
+  if (filterStatusJalan.value) count++;
+  if (filterStatusKondisi.value) count++;
+  if (filterStatusAset.value) count++;
+  if (filterSumberDana.value) count++;
   if (filterKecamatan.value) count++;
   if (filterDesa.value) count++;
   return count;
@@ -322,9 +338,14 @@ const activeFilterCount = computed(() => {
 function syncQueryToUrl() {
   const query: Record<string, string> = {};
   if (filterTipe.value) query.tipe = filterTipe.value;
+  if (filterTahunPembangunan.value) query.tahun_pembangunan = String(filterTahunPembangunan.value);
   if (filterPerkerasan.value) query.perkerasan = filterPerkerasan.value;
   if (filterKondisi.value) query.kondisi = filterKondisi.value;
   if (filterStatusVerifikasi.value) query.status = filterStatusVerifikasi.value;
+  if (filterStatusJalan.value) query.status_jalan = filterStatusJalan.value;
+  if (filterStatusKondisi.value) query.status_kondisi = filterStatusKondisi.value;
+  if (filterStatusAset.value) query.status_aset = filterStatusAset.value;
+  if (filterSumberDana.value) query.sumber_dana = filterSumberDana.value;
 
   // Pastikan URL hanya memuat wilayah yang sah bagi user
   const authorizedKec = getAuthorizedKecamatan(filterKecamatan.value);
@@ -405,10 +426,15 @@ const filterJalanPerkerasan = ref<string | null>(null);
 
 const activeSegmenFilterCount = computed(() => {
   let count = 0;
-  if (filterTipe.value) count++;
+  if (filterTahunPembangunan.value) count++;
+  else if (filterTipe.value) count++;
   if (filterPerkerasan.value) count++;
   if (filterKondisi.value) count++;
   if (filterStatusVerifikasi.value) count++;
+  if (filterStatusJalan.value) count++;
+  if (filterStatusKondisi.value) count++;
+  if (filterStatusAset.value) count++;
+  if (filterSumberDana.value) count++;
   if (filterKecamatan.value) count++;
   if (filterDesa.value) count++;
   return count;
@@ -695,9 +721,14 @@ async function loadSummary(shouldFitBounds = false) {
   try {
     const params: Record<string, any> = {};
     if (filterTipe.value) params.tipe_kode = filterTipe.value;
+    if (filterTahunPembangunan.value) params.tahun_pembangunan = filterTahunPembangunan.value;
     if (filterPerkerasan.value) params.jenis_perkerasan = filterPerkerasan.value;
     if (filterKondisi.value) params.kondisi = filterKondisi.value;
     if (filterStatusVerifikasi.value) params.status_verifikasi = filterStatusVerifikasi.value;
+    if (filterStatusJalan.value) params.status_jalan = filterStatusJalan.value;
+    if (filterStatusKondisi.value) params.status_kondisi = filterStatusKondisi.value;
+    if (filterStatusAset.value) params.status_aset = filterStatusAset.value;
+    if (filterSumberDana.value) params.sumber_dana = filterSumberDana.value;
     if (filterKecamatan.value) params.id_kecamatan = filterKecamatan.value;
     if (filterDesa.value) params.id_desa = filterDesa.value;
 
@@ -727,9 +758,14 @@ async function loadTable() {
       per_page: tablePerPage.value,
     };
     if (filterTipe.value) params.tipe_kode = filterTipe.value;
+    if (filterTahunPembangunan.value) params.tahun_pembangunan = filterTahunPembangunan.value;
     if (filterPerkerasan.value) params.jenis_perkerasan = filterPerkerasan.value;
     if (filterKondisi.value) params.kondisi = filterKondisi.value;
     if (filterStatusVerifikasi.value) params.status_verifikasi = filterStatusVerifikasi.value;
+    if (filterStatusJalan.value) params.status_jalan = filterStatusJalan.value;
+    if (filterStatusKondisi.value) params.status_kondisi = filterStatusKondisi.value;
+    if (filterStatusAset.value) params.status_aset = filterStatusAset.value;
+    if (filterSumberDana.value) params.sumber_dana = filterSumberDana.value;
     if (filterKecamatan.value) params.id_kecamatan = filterKecamatan.value;
     if (filterDesa.value) params.id_desa = filterDesa.value;
     if (tableSearch.value) params.search = tableSearch.value;
@@ -792,9 +828,14 @@ function resetFilters() {
   }
 
   filterTipe.value = null;
+  filterTahunPembangunan.value = null;
   filterPerkerasan.value = null;
   filterKondisi.value = null;
   filterStatusVerifikasi.value = null;
+  filterStatusJalan.value = null;
+  filterStatusKondisi.value = null;
+  filterStatusAset.value = null;
+  filterSumberDana.value = null;
   tableSearch.value = '';
   tablePage.value = 1;
   syncQueryToUrl();
@@ -806,7 +847,19 @@ function resetFilters() {
 let programmaticPageReset = false;
 
 // Watch filters: reset page, sync URL, refresh once and fitbounds to filtered dataset
-watch([filterTipe, filterPerkerasan, filterKondisi, filterStatusVerifikasi, filterKecamatan, filterDesa], () => {
+watch([
+  filterTipe,
+  filterTahunPembangunan,
+  filterPerkerasan,
+  filterKondisi,
+  filterStatusVerifikasi,
+  filterStatusJalan,
+  filterStatusKondisi,
+  filterStatusAset,
+  filterSumberDana,
+  filterKecamatan,
+  filterDesa,
+], () => {
   programmaticPageReset = true;
   tablePage.value = 1;
   programmaticPageReset = false;
@@ -852,9 +905,18 @@ watch(
   () => route.query,
   (newQ) => {
     filterTipe.value = (newQ.tipe as string) || null;
+    filterTahunPembangunan.value = newQ.tahun_pembangunan
+      ? Number(newQ.tahun_pembangunan)
+      : newQ.tahun
+        ? Number(newQ.tahun)
+        : null;
     filterPerkerasan.value = (newQ.perkerasan as string) || null;
     filterKondisi.value = (newQ.kondisi as string) || null;
     filterStatusVerifikasi.value = (newQ.status as string) || null;
+    filterStatusJalan.value = (newQ.status_jalan as string) || null;
+    filterStatusKondisi.value = (newQ.status_kondisi as string) || null;
+    filterStatusAset.value = (newQ.status_aset as string) || null;
+    filterSumberDana.value = (newQ.sumber_dana as string) || null;
 
     const authorizedKec = getAuthorizedKecamatan(newQ.id_kecamatan);
     const authorizedDesa = getAuthorizedDesa(newQ.id_desa);
@@ -1646,8 +1708,13 @@ onMounted(async () => {
                   v-model:symbology="layerSymbology"
                   :tipe-list="tipeList"
                   v-model:selected-tipe="filterTipe"
+                  v-model:selected-tahun-pembangunan="filterTahunPembangunan"
                   v-model:selected-kondisi="filterKondisi"
                   v-model:selected-status-verifikasi="filterStatusVerifikasi"
+                  v-model:selected-status-jalan="filterStatusJalan"
+                  v-model:selected-status-kondisi="filterStatusKondisi"
+                  v-model:selected-status-aset="filterStatusAset"
+                  v-model:selected-sumber-dana="filterSumberDana"
                   v-model:model-kecamatan="filterKecamatan"
                   v-model:model-desa="filterDesa"
                   :kecamatan-name="currentKecamatanName"
@@ -1692,9 +1759,14 @@ onMounted(async () => {
                     :selected-segmen-id="selectedSegmenId"
                     :selected-segmen="selectedSegmen"
                     :tipe-filter="filterTipe"
+                    :tahun-pembangunan-filter="filterTahunPembangunan"
                     :perkerasan-filter="filterPerkerasan"
                     :kondisi-filter="filterKondisi"
                     :status-verifikasi-filter="filterStatusVerifikasi"
+                    :status-jalan-filter="filterStatusJalan"
+                    :status-kondisi-filter="filterStatusKondisi"
+                    :status-aset-filter="filterStatusAset"
+                    :sumber-dana-filter="filterSumberDana"
                     :kecamatan-filter="filterKecamatan"
                     :desa-filter="filterDesa"
                     :layer-visible="layerVisible"
@@ -1770,8 +1842,13 @@ onMounted(async () => {
               :can-submit="canSubmit"
               :tipe-list="tipeList"
               :selected-tipe="filterTipe"
+              :selected-tahun-pembangunan="filterTahunPembangunan"
               :selected-kondisi="filterKondisi"
               :selected-status-verifikasi="filterStatusVerifikasi"
+              :selected-status-jalan="filterStatusJalan"
+              :selected-status-kondisi="filterStatusKondisi"
+              :selected-status-aset="filterStatusAset"
+              :selected-sumber-dana="filterSumberDana"
               :model-kecamatan="filterKecamatan"
               :model-desa="filterDesa"
               :kecamatan-name="currentKecamatanName"
@@ -1782,8 +1859,13 @@ onMounted(async () => {
               @update:table-page="(p) => tablePage = p"
               @update:table-per-page="(pp) => tablePerPage = pp"
               @update:selected-tipe="(val) => filterTipe = val"
+              @update:selected-tahun-pembangunan="(val) => filterTahunPembangunan = val"
               @update:selected-kondisi="(val) => filterKondisi = val"
               @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
+              @update:selected-status-jalan="(val) => filterStatusJalan = val"
+              @update:selected-status-kondisi="(val) => filterStatusKondisi = val"
+              @update:selected-status-aset="(val) => filterStatusAset = val"
+              @update:selected-sumber-dana="(val) => filterSumberDana = val"
               @update:model-kecamatan="(val) => filterKecamatan = val"
               @update:model-desa="(val) => filterDesa = val"
               @reset-filters="resetFilters"
@@ -1806,9 +1888,14 @@ onMounted(async () => {
           :selected-segmen-id="selectedSegmenId"
           :selected-segmen="selectedSegmen"
           :tipe-filter="filterTipe"
+          :tahun-pembangunan-filter="filterTahunPembangunan"
           :perkerasan-filter="filterPerkerasan"
           :kondisi-filter="filterKondisi"
           :status-verifikasi-filter="filterStatusVerifikasi"
+          :status-jalan-filter="filterStatusJalan"
+          :status-kondisi-filter="filterStatusKondisi"
+          :status-aset-filter="filterStatusAset"
+          :sumber-dana-filter="filterSumberDana"
           :kecamatan-filter="filterKecamatan"
           :desa-filter="filterDesa"
           :layer-visible="layerVisible"
@@ -2131,8 +2218,13 @@ onMounted(async () => {
           v-model:symbology="layerSymbology"
           :tipe-list="tipeList"
           :selected-tipe="filterTipe"
+          :selected-tahun-pembangunan="filterTahunPembangunan"
           :selected-kondisi="filterKondisi"
           :selected-status-verifikasi="filterStatusVerifikasi"
+          :selected-status-jalan="filterStatusJalan"
+          :selected-status-kondisi="filterStatusKondisi"
+          :selected-status-aset="filterStatusAset"
+          :selected-sumber-dana="filterSumberDana"
           v-model:model-kecamatan="filterKecamatan"
           v-model:model-desa="filterDesa"
           :kecamatan-name="currentKecamatanName"
@@ -2282,15 +2374,25 @@ onMounted(async () => {
             layer-title="Segmen Fisik Infrastruktur"
             :tipe-list="tipeList"
             :selected-tipe="filterTipe"
+            :selected-tahun-pembangunan="filterTahunPembangunan"
             :selected-perkerasan="filterPerkerasan"
             :selected-kondisi="filterKondisi"
             :selected-status-verifikasi="filterStatusVerifikasi"
+            :selected-status-jalan="filterStatusJalan"
+            :selected-status-kondisi="filterStatusKondisi"
+            :selected-status-aset="filterStatusAset"
+            :selected-sumber-dana="filterSumberDana"
             :model-kecamatan="filterKecamatan"
             :model-desa="filterDesa"
             @update:selected-tipe="(val) => filterTipe = val"
+            @update:selected-tahun-pembangunan="(val) => filterTahunPembangunan = val"
             @update:selected-perkerasan="(val) => filterPerkerasan = val"
             @update:selected-kondisi="(val) => filterKondisi = val"
             @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
+            @update:selected-status-jalan="(val) => filterStatusJalan = val"
+            @update:selected-status-kondisi="(val) => filterStatusKondisi = val"
+            @update:selected-status-aset="(val) => filterStatusAset = val"
+            @update:selected-sumber-dana="(val) => filterSumberDana = val"
             @update:model-kecamatan="(val) => filterKecamatan = val"
             @update:model-desa="(val) => filterDesa = val"
             @apply="() => { mobileDrawerOpen = false; handleApplySegmenFilter(); }"
@@ -2335,8 +2437,13 @@ onMounted(async () => {
           :can-submit="canSubmit"
           :tipe-list="tipeList"
           :selected-tipe="filterTipe"
+          :selected-tahun-pembangunan="filterTahunPembangunan"
           :selected-kondisi="filterKondisi"
           :selected-status-verifikasi="filterStatusVerifikasi"
+          :selected-status-jalan="filterStatusJalan"
+          :selected-status-kondisi="filterStatusKondisi"
+          :selected-status-aset="filterStatusAset"
+          :selected-sumber-dana="filterSumberDana"
           :model-kecamatan="filterKecamatan"
           :model-desa="filterDesa"
           :kecamatan-name="currentKecamatanName"
@@ -2346,8 +2453,13 @@ onMounted(async () => {
           @update:table-page="(p) => tablePage = p"
           @update:table-per-page="(pp) => tablePerPage = pp"
           @update:selected-tipe="(val) => filterTipe = val"
+          @update:selected-tahun-pembangunan="(val) => filterTahunPembangunan = val"
           @update:selected-kondisi="(val) => filterKondisi = val"
           @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
+          @update:selected-status-jalan="(val) => filterStatusJalan = val"
+          @update:selected-status-kondisi="(val) => filterStatusKondisi = val"
+          @update:selected-status-aset="(val) => filterStatusAset = val"
+          @update:selected-sumber-dana="(val) => filterSumberDana = val"
           @update:model-kecamatan="(val) => filterKecamatan = val"
           @update:model-desa="(val) => filterDesa = val"
           @reset-filters="resetFilters"
@@ -2385,9 +2497,14 @@ onMounted(async () => {
       v-model:active-layer-id="activeLayerId"
       :tipe-list="tipeList"
       v-model:selected-tipe="filterTipe"
+      v-model:selected-tahun-pembangunan="filterTahunPembangunan"
       v-model:selected-perkerasan="filterPerkerasan"
       v-model:selected-kondisi="filterKondisi"
       v-model:selected-status-verifikasi="filterStatusVerifikasi"
+      v-model:selected-status-jalan="filterStatusJalan"
+      v-model:selected-status-kondisi="filterStatusKondisi"
+      v-model:selected-status-aset="filterStatusAset"
+      v-model:selected-sumber-dana="filterSumberDana"
       v-model:model-kecamatan="filterKecamatan"
       v-model:model-desa="filterDesa"
       :segmen-filter-count="activeSegmenFilterCount"

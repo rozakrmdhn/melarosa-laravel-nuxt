@@ -28,7 +28,7 @@ import type {
   LayerId,
   LayerSymbology,
 } from '~/types/dataset-editor';
-import { DEFAULT_SYMBOLOGY } from '~/types/dataset-editor';
+import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from '~/types/dataset-editor';
 import { formatWilayah } from '~/utils/helpers';
 
 definePageMeta({
@@ -391,9 +391,7 @@ const STORAGE_KEY_SYMBOLOGY_JALAN = 'gis_symbology_jalan_poros_desa';
 const jalanPorosDesaVisible = ref(true);
 const jalanPorosDesaOpacity = ref(0.85);
 const jalanPorosDesaSymbology = ref<LayerSymbology>({
-  ...DEFAULT_SYMBOLOGY,
-  lineColor: '#2563eb', // Royal Blue
-  lineWidth: 2,
+  ...DEFAULT_JALAN_POROS_SYMBOLOGY,
 });
 
 const filterJalanKecamatan = ref<number | null>(
@@ -429,6 +427,18 @@ const activeLayerTitle = computed(() => {
   return activeLayerId.value === 'jalan-poros-desa' ? 'Jalan Poros Desa' : 'Segmen Fisik Infrastruktur';
 });
 
+watch(activeLayerId, (newId, oldId) => {
+  if (newId !== oldId) {
+    mapCanvasRef.value?.closePopup();
+    mobileMapCanvasRef.value?.closePopup();
+    if (newId === 'jalan-poros-desa' && selectedSegmenId.value) {
+      selectedSegmenId.value = null;
+      selectedSegmen.value = null;
+      collapseRightPanel();
+    }
+  }
+});
+
 function handleApplySegmenFilter() {
   isFilterDialogOpen.value = false;
   mobileDrawerOpen.value = false;
@@ -461,7 +471,12 @@ onMounted(() => {
   try {
     const savedJalan = localStorage.getItem(STORAGE_KEY_SYMBOLOGY_JALAN);
     if (savedJalan) {
-      jalanPorosDesaSymbology.value = { ...DEFAULT_SYMBOLOGY, lineColor: '#2563eb', ...JSON.parse(savedJalan) };
+      const parsed = JSON.parse(savedJalan);
+      jalanPorosDesaSymbology.value = {
+        ...DEFAULT_JALAN_POROS_SYMBOLOGY,
+        ...parsed,
+        colorMode: parsed.colorMode && parsed.colorMode !== 'single' ? parsed.colorMode : 'kondisi',
+      };
     }
   } catch (err) {
     console.error('Gagal memuat preferensi simbologi jalan poros desa:', err);
@@ -657,8 +672,12 @@ const currentDesaName = computed(() => {
 async function loadMasterData() {
   try {
     const promises: Promise<any>[] = [
-      api.fetchTipeList({ active_only: true }),
-      api.fetchPlottingList({ per_page: 100 }),
+      can('infrastruktur-tipe-view') || can('infrastruktur-tipe-manage')
+        ? api.fetchTipeList({ active_only: true })
+        : Promise.resolve(null),
+      can('plotting-anggaran-view') || can('plotting-anggaran-manage')
+        ? api.fetchPlottingList({ per_page: 100 })
+        : Promise.resolve(null),
       wilayahStore.getKecamatanList(),
     ];
     if (filterKecamatan.value) {
@@ -1669,6 +1688,7 @@ onMounted(async () => {
                   <MapCanvas
                     ref="mapCanvasRef"
                     :api-base="apiBase"
+                    :active-layer-id="activeLayerId"
                     :selected-segmen-id="selectedSegmenId"
                     :selected-segmen="selectedSegmen"
                     :tipe-filter="filterTipe"
@@ -1782,6 +1802,7 @@ onMounted(async () => {
         <MapCanvas
           ref="mobileMapCanvasRef"
           :api-base="apiBase"
+          :active-layer-id="activeLayerId"
           :selected-segmen-id="selectedSegmenId"
           :selected-segmen="selectedSegmen"
           :tipe-filter="filterTipe"
@@ -2196,7 +2217,7 @@ onMounted(async () => {
             layer-id="jalan-poros-desa"
             layer-title="Jalan Poros Desa"
             v-model:symbology="jalanPorosDesaSymbology"
-            @reset="jalanPorosDesaSymbology = { ...DEFAULT_SYMBOLOGY, lineColor: '#2563eb', lineWidth: 2 }"
+            @reset="jalanPorosDesaSymbology = { ...DEFAULT_JALAN_POROS_SYMBOLOGY }"
             @close="mobileDrawerOpen = false"
           />
         </div>
@@ -2388,7 +2409,7 @@ onMounted(async () => {
       v-model:segmen-symbology="layerSymbology"
       v-model:jalan-symbology="jalanPorosDesaSymbology"
       @reset-segmen="layerSymbology = { ...DEFAULT_SYMBOLOGY }"
-      @reset-jalan="jalanPorosDesaSymbology = { ...DEFAULT_SYMBOLOGY, lineColor: '#2563eb', lineWidth: 2 }"
+      @reset-jalan="jalanPorosDesaSymbology = { ...DEFAULT_JALAN_POROS_SYMBOLOGY }"
     />
 
     <!-- ═══ MODAL: Simpan Segmen Baru dari Digitasi ═══════════════════════════ -->

@@ -2,6 +2,7 @@
 import type { SplitterItem } from "@nuxt/ui";
 import {
   DEFAULT_SYMBOLOGY,
+  DEFAULT_JALAN_POROS_SYMBOLOGY,
   type BasemapType,
   type ConsoleLog,
   type DatasetFilterOptions,
@@ -161,7 +162,7 @@ const clickedCoordinate = ref<[number, number] | null>(null);
 
 const STORAGE_KEY_SYMBOLOGY = "gis_symbology_jalan_poros";
 
-const layerSymbology = ref<LayerSymbology>({ ...DEFAULT_SYMBOLOGY });
+const layerSymbology = ref<LayerSymbology>({ ...DEFAULT_JALAN_POROS_SYMBOLOGY });
 
 // Load from localStorage on client mount
 onMounted(() => {
@@ -169,7 +170,11 @@ onMounted(() => {
     const saved = localStorage.getItem(STORAGE_KEY_SYMBOLOGY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      layerSymbology.value = { ...DEFAULT_SYMBOLOGY, ...parsed };
+      layerSymbology.value = {
+        ...DEFAULT_JALAN_POROS_SYMBOLOGY,
+        ...parsed,
+        colorMode: parsed.colorMode && parsed.colorMode !== "single" ? parsed.colorMode : "kondisi",
+      };
     }
   } catch (err) {
     console.error("Gagal memuat preferensi simbologi:", err);
@@ -209,6 +214,12 @@ function addLog(level: "INFO" | "WARN" | "ERROR", message: string) {
 
 const route = useRoute();
 const router = useRouter();
+
+// ─── View Mode (Mode Peta vs Mode Tabular) ────────────────────────────────────
+
+const viewMode = ref<"map" | "table">(
+  (route.query.mode as "map" | "table") === "table" ? "table" : "map"
+);
 
 // ─── Filter States (Initialized from URL query params) ──────────────────────
 
@@ -252,6 +263,7 @@ const activeFilterCount = computed(() => {
 
 function syncQueryToUrl() {
   const query: Record<string, string> = {};
+  if (viewMode.value === "table") query.mode = "table";
   if (tableKecamatan.value) query.kecamatan = tableKecamatan.value;
   if (tableDesa.value) query.desa = tableDesa.value;
   if (tableKondisi.value) query.kondisi = tableKondisi.value;
@@ -271,6 +283,17 @@ function syncQueryToUrl() {
     router.replace({ query });
   }
 }
+
+watch(viewMode, (newMode) => {
+  syncQueryToUrl();
+  if (newMode === "table") {
+    refreshTable();
+  } else if (newMode === "map") {
+    nextTick(() => {
+      mapCanvasRef.value?.fitBounds();
+    });
+  }
+});
 
 // Guard: suppress page-watcher's refreshTable() when page is reset programmatically
 let programmaticPageReset = false;
@@ -306,6 +329,9 @@ watch(tableSearch, () => {
 watch(
   () => route.query,
   (newQ) => {
+    if (newQ.mode === "table" || newQ.mode === "map") {
+      viewMode.value = newQ.mode;
+    }
     tableKecamatan.value = (newQ.kecamatan as string) || null;
     tableDesa.value = (newQ.desa as string) || null;
     tableKondisi.value = (newQ.kondisi as string) || null;
@@ -330,7 +356,7 @@ watch(tablePerPage, () => {
 // Fetch Master Options (Kecamatan & Desa)
 const { data: filterOptionsResponse } = useHttp<DatasetFilterOptions>(
   "admin/jalan-poros-desa",
-  { query: { format: "options" }, lazy: true }
+  { key: "jalan-poros-options", query: { format: "options" }, lazy: true }
 );
 
 const kecamatanOptions = computed<KecamatanOption[]>(
@@ -476,6 +502,7 @@ watch(
 const { data: summaryData, status: summaryStatus, refresh: refreshSummary } = useHttp<SpatialSummary>(
   "admin/jalan-poros-desa",
   {
+    key: "jalan-poros-summary",
     query: computed(() => ({
       format: "summary",
       kecamatan: tableKecamatan.value || undefined,
@@ -495,6 +522,7 @@ const { data: tableResponse, status: tableStatus, refresh: refreshTable } = useH
   current_page: number;
   last_page: number;
 }>("admin/jalan-poros-desa", {
+  key: "jalan-poros-table",
   query: computed(() => ({
     format: "table",
     per_page: tablePerPage.value,
@@ -528,6 +556,9 @@ const isTableActive = computed(() => {
 // Triggered when bottom panel is toggled open in desktop
 function handleBottomPanelExpandChange(isCollapsed: boolean) {
   bottomPanelOpen.value = !isCollapsed;
+  if (bottomPanelOpen.value && tableRows.value.length === 0) {
+    refreshTable();
+  }
 }
 
 // (Broad watch removed — each trigger now calls refreshTable() exactly once via individual watchers)
@@ -846,7 +877,7 @@ function resetFilters() {
 
 async function handleRefreshAll() {
   const tasks: Promise<any>[] = [refreshSummary()];
-  if (bottomPanelOpen.value) tasks.push(refreshTable());
+  if (bottomPanelOpen.value || viewMode.value === "table") tasks.push(refreshTable());
   await Promise.all(tasks);
   refreshAllVectorTiles();
   addLog("INFO", "Data spasial telah disinkronkan.");
@@ -981,6 +1012,86 @@ function handleFormDesaChange(val: any) {
   }
 }
 
+// ─── Mode Tabular Helpers ─────────────────────────────────────────────────────
+
+const tabularDesaOptions = computed(() => {
+  if (!tableKecamatan.value) return desaOptions.value;
+  const matchKec = kecamatanOptions.value.find(
+    (k) => k.nama.toLowerCase() === tableKecamatan.value?.toLowerCase()
+  );
+  if (!matchKec) return desaOptions.value;
+  return desaOptions.value.filter((d) => d.id_kecamatan === matchKec.id);
+});
+
+function handleTabularKecamatanChange(val: string | null) {
+  if (isKecamatanRestricted.value) return;
+  const selected = val && val !== "null" && val !== "" ? val : null;
+  tableKecamatan.value = selected;
+
+  if (tableDesa.value && selected) {
+    const matchKec = kecamatanOptions.value.find(
+      (k) => k.nama.toLowerCase() === selected.toLowerCase()
+    );
+    if (matchKec) {
+      const stillValid = desaOptions.value.some(
+        (d) => d.id_kecamatan === matchKec.id && d.nama.toLowerCase() === tableDesa.value?.toLowerCase()
+      );
+      if (!stillValid) {
+        tableDesa.value = null;
+      }
+    }
+  }
+}
+
+function handleTabularDesaChange(val: string | null) {
+  if (isDesaRestricted.value) return;
+  const selected = val && val !== "null" && val !== "" ? val : null;
+  tableDesa.value = selected;
+
+  if (selected && !tableKecamatan.value) {
+    const matchDesa = desaOptions.value.find(
+      (d) => d.nama.toLowerCase() === selected.toLowerCase()
+    );
+    if (matchDesa) {
+      const parentKec = kecamatanOptions.value.find((k) => k.id === matchDesa.id_kecamatan);
+      if (parentKec) {
+        tableKecamatan.value = parentKec.nama;
+      }
+    }
+  }
+}
+
+function getKondisiBadge(kondisi?: string | null) {
+  if (!kondisi) return { label: "-", color: "neutral" as const };
+  const k = kondisi.toLowerCase();
+  if (k.includes("baik")) return { label: kondisi, color: "success" as const };
+  if (k.includes("sedang")) return { label: kondisi, color: "warning" as const };
+  if (k.includes("rusak berat")) return { label: kondisi, color: "error" as const };
+  if (k.includes("rusak")) return { label: kondisi, color: "warning" as const };
+  return { label: kondisi, color: "neutral" as const };
+}
+
+const tabularPageRangeText = computed(() => {
+  if (!tableTotal.value) return "Tidak ada data";
+  const start = (tablePage.value - 1) * tablePerPage.value + 1;
+  const end = Math.min(tablePage.value * tablePerPage.value, tableTotal.value);
+  return `${start.toLocaleString("id-ID")} - ${end.toLocaleString("id-ID")} dari ${tableTotal.value.toLocaleString("id-ID")} data`;
+});
+
+function handleViewRowOnMap(row: any) {
+  viewMode.value = "map";
+  nextTick(() => {
+    handleZoomToFeature(row);
+  });
+}
+
+function handleSplitFromTable(row: any) {
+  viewMode.value = "map";
+  nextTick(() => {
+    handleStartSplit(row);
+  });
+}
+
 function openCreate() {
   if (!canCreate.value) {
     toast.add({
@@ -992,6 +1103,9 @@ function openCreate() {
   }
 
   isEditing.value = false;
+  if (viewMode.value === "table") {
+    viewMode.value = "map";
+  }
   if (mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
   }
@@ -1490,21 +1604,45 @@ async function handleConfirmSplit() {
         </div>
       </div>
 
-      <!-- Right: Action Buttons -->
-      <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+      <!-- Right: Action Buttons & Mode Switcher -->
+      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <!-- 2-Pilihan Mode: Peta vs Tabular -->
+        <div class="flex items-center p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06] border border-gray-200/60 dark:border-white/[0.08]">
+          <UButton
+            icon="i-lucide-map"
+            label="Peta"
+            size="xs"
+            :color="viewMode === 'map' ? 'primary' : 'neutral'"
+            :variant="viewMode === 'map' ? 'solid' : 'ghost'"
+            class="text-xs font-medium cursor-pointer"
+            @click="viewMode = 'map'"
+          />
+          <UButton
+            icon="i-lucide-table"
+            label="Tabular"
+            size="xs"
+            :color="viewMode === 'table' ? 'primary' : 'neutral'"
+            :variant="viewMode === 'table' ? 'solid' : 'ghost'"
+            class="text-xs font-medium cursor-pointer"
+            @click="viewMode = 'table'"
+          />
+        </div>
+
+        <USeparator orientation="vertical" class="h-4" />
+
         <UTooltip text="Sinkronkan Data & Peta">
           <UButton
             icon="i-lucide-refresh-cw"
             size="xs"
             color="neutral"
             variant="ghost"
-            :loading="loading"
+            :loading="loading || (viewMode === 'table' && tableStatus === 'pending')"
             class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
             @click="handleRefreshAll"
           />
         </UTooltip>
 
-        <UTooltip :text="allPanelsHidden ? 'Tampilkan semua panel' : 'Mode peta penuh'">
+        <UTooltip v-if="viewMode === 'map'" :text="allPanelsHidden ? 'Tampilkan semua panel' : 'Mode peta penuh'">
           <UButton
             icon="i-lucide-layout-dashboard"
             size="xs"
@@ -1539,8 +1677,11 @@ async function handleConfirmSplit() {
       </div>
     </header>
 
-    <!-- ═══ MAIN WORKSPACE (USplitter with SplitterItem from @nuxt/ui) ═══════ -->
-    <div class="flex flex-1 overflow-hidden relative w-full h-full">
+    <!-- ═══ MAIN WORKSPACE (MODE PETA: USplitter with SplitterItem from @nuxt/ui) ═══════ -->
+    <div
+      v-show="viewMode === 'map'"
+      class="flex flex-1 overflow-hidden relative w-full h-full"
+    >
 
       <!-- Desktop View: Nested Two-Tier USplitter (Vertical + Horizontal) -->
       <div class="hidden lg:flex flex-1 w-full h-full overflow-hidden">
@@ -1712,9 +1853,397 @@ async function handleConfirmSplit() {
 
     </div>
 
+    <!-- ═══ VIEW MODE 2: TABULAR DATA MODE ═══════════════════════════════════ -->
+    <div
+      v-show="viewMode === 'table'"
+      class="flex flex-col flex-1 w-full h-full overflow-hidden bg-gray-50/70 dark:bg-[#070b14]"
+    >
+      <!-- Tabular Header & Filter Toolbar -->
+      <div class="p-3 sm:p-4 border-b border-gray-200/80 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] shrink-0 space-y-3 shadow-2xs">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <!-- Left: Title & Context info -->
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <UButton
+              icon="i-lucide-arrow-left"
+              size="xs"
+              color="neutral"
+              variant="subtle"
+              label="Kembali ke Peta"
+              class="cursor-pointer"
+              @click="viewMode = 'map'"
+            />
+            <div class="h-4 w-px bg-gray-200 dark:bg-white/[0.1] hidden sm:block" />
+            <h2 class="text-xs font-semibold text-gray-900 dark:text-white">
+              Data Tabular Jalan Poros Desa
+            </h2>
+            <UBadge
+              :label="`${tableTotal.toLocaleString('id-ID')} Total Ruas`"
+              color="neutral"
+              variant="subtle"
+              size="xs"
+              class="font-mono text-[11px]"
+            />
+            <UBadge
+              v-if="isKecamatanRestricted && userKecamatanName"
+              :label="`Kecamatan: ${userKecamatanName}`"
+              color="info"
+              variant="subtle"
+              size="xs"
+              class="text-[10px]"
+            />
+            <UBadge
+              v-if="isDesaRestricted && userDesaName"
+              :label="`Desa: ${userDesaName}`"
+              color="warning"
+              variant="subtle"
+              size="xs"
+              class="text-[10px]"
+            />
+          </div>
+
+          <!-- Right: Action shortcuts -->
+          <div class="flex items-center gap-2">
+            <UButton
+              v-if="canCreate"
+              icon="i-lucide-plus"
+              label="Tambah Ruas Baru"
+              size="xs"
+              color="primary"
+              variant="solid"
+              class="cursor-pointer"
+              @click="openCreate"
+            />
+          </div>
+        </div>
+
+        <!-- Filter Controls Row -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 items-center">
+          <!-- 1. Text Search Input -->
+          <UInput
+            v-model="tableSearch"
+            icon="i-lucide-search"
+            placeholder="Cari kode, nama ruas, desa..."
+            size="xs"
+            class="w-full"
+          />
+
+          <!-- 2. Filter Kecamatan -->
+          <select
+            :value="tableKecamatan"
+            :disabled="isKecamatanRestricted || isDesaRestricted"
+            class="text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden disabled:opacity-75 disabled:cursor-not-allowed"
+            @change="handleTabularKecamatanChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option :value="null">Semua Kecamatan</option>
+            <option
+              v-for="kec in kecamatanOptions"
+              :key="kec.id"
+              :value="kec.nama"
+            >
+              {{ kec.nama }}
+            </option>
+          </select>
+
+          <!-- 3. Filter Desa -->
+          <select
+            :value="tableDesa"
+            :disabled="isDesaRestricted"
+            class="text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden disabled:opacity-75 disabled:cursor-not-allowed"
+            @change="handleTabularDesaChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option :value="null">Semua Desa</option>
+            <option
+              v-for="desa in tabularDesaOptions"
+              :key="desa.id"
+              :value="desa.nama"
+            >
+              {{ desa.nama }}
+            </option>
+          </select>
+
+          <!-- 4. Filter Kondisi -->
+          <select
+            v-model="tableKondisi"
+            class="text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden"
+          >
+            <option :value="null">Semua Kondisi</option>
+            <option v-for="kond in kondisiOptions" :key="kond" :value="kond">
+              {{ kond }}
+            </option>
+          </select>
+
+          <!-- 5. Filter Perkerasan & Reset -->
+          <div class="flex items-center gap-1.5">
+            <select
+              v-model="tablePerkerasan"
+              class="flex-1 text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2.5 py-1.5 focus:outline-hidden"
+            >
+              <option :value="null">Semua Perkerasan</option>
+              <option v-for="perk in perkerasanOptions" :key="perk" :value="perk">
+                {{ perk }}
+              </option>
+            </select>
+
+            <UButton
+              v-if="activeFilterCount > 0 || tableSearch"
+              icon="i-lucide-filter-x"
+              size="xs"
+              color="neutral"
+              variant="subtle"
+              title="Reset Semua Filter"
+              class="cursor-pointer shrink-0"
+              @click="resetFilters"
+            />
+            <UButton
+              icon="i-lucide-refresh-cw"
+              size="xs"
+              color="neutral"
+              variant="outline"
+              :loading="tableStatus === 'pending'"
+              title="Muat Ulang Tabel"
+              class="cursor-pointer shrink-0"
+              @click="() => refreshTable()"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabular Main Body: Card & Scrollable Table -->
+      <div class="flex-1 p-3 sm:p-4 overflow-hidden flex flex-col">
+        <div class="flex flex-col flex-1 w-full h-full rounded-xl border border-gray-200/80 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden shadow-2xs">
+          <!-- Scrollable Table -->
+          <div class="flex-1 overflow-auto">
+            <table class="w-full text-left text-xs border-collapse">
+              <thead class="sticky top-0 z-10 bg-gray-50 dark:bg-[#0f1422] border-b border-gray-200 dark:border-white/[0.08] text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400 tracking-wider whitespace-nowrap">
+                <tr>
+                  <th class="py-2.5 px-3">Kode</th>
+                  <th class="py-2.5 px-3 min-w-[220px]">Nama Ruas</th>
+                  <th class="py-2.5 px-3">Desa</th>
+                  <th class="py-2.5 px-3">Kecamatan</th>
+                  <th class="py-2.5 px-3 text-right">Panjang (m)</th>
+                  <th class="py-2.5 px-3 text-right">Lebar (m)</th>
+                  <th class="py-2.5 px-3">Perkerasan</th>
+                  <th class="py-2.5 px-3">Kondisi</th>
+                  <th class="py-2.5 px-3">Status</th>
+                  <th class="py-2.5 px-3">Sumber Data</th>
+                  <th class="py-2.5 px-3 text-center min-w-[140px]">Aksi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-white/[0.05] font-sans">
+                <!-- Skeleton rows when loading -->
+                <tr v-if="tableStatus === 'pending' && tableRows.length === 0" v-for="i in 8" :key="i">
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-12 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-40 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-20 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-24 rounded" /></td>
+                  <td class="py-3 px-3 text-right"><USkeleton class="h-4 w-16 ml-auto rounded" /></td>
+                  <td class="py-3 px-3 text-right"><USkeleton class="h-4 w-12 ml-auto rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-16 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-16 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-16 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-20 rounded" /></td>
+                  <td class="py-3 px-3"><USkeleton class="h-4 w-24 mx-auto rounded" /></td>
+                </tr>
+
+                <!-- Empty state -->
+                <tr v-else-if="tableRows.length === 0">
+                  <td colspan="11" class="py-12 px-4 text-center">
+                    <div class="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                      <UIcon name="i-lucide-inbox" class="size-8 text-gray-400 dark:text-gray-500" />
+                      <p class="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        Tidak ada data jalan poros desa yang cocok
+                      </p>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Coba sesuaikan kata kunci pencarian atau reset filter wilayah dan kondisi.
+                      </p>
+                      <UButton
+                        v-if="activeFilterCount > 0 || tableSearch"
+                        label="Reset Filter"
+                        size="xs"
+                        color="neutral"
+                        variant="subtle"
+                        class="mt-1 cursor-pointer"
+                        @click="resetFilters"
+                      />
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Table Rows -->
+                <tr
+                  v-else
+                  v-for="row in tableRows"
+                  :key="row.id"
+                  class="transition-colors hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
+                  :class="[
+                    String(row.id) === String(selectedFeature?.id)
+                      ? 'bg-blue-50/70 dark:bg-blue-950/40'
+                      : ''
+                  ]"
+                >
+                  <!-- Kode -->
+                  <td class="py-2.5 px-3 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono text-[11px]">
+                    {{ row.kode_ruas ?? '-' }}
+                  </td>
+
+                  <!-- Nama Ruas -->
+                  <td class="py-2.5 px-3 font-medium text-gray-900 dark:text-white">
+                    <div class="flex items-center gap-1.5">
+                      <span class="truncate">{{ row.nama_ruas || 'Tanpa Nama' }}</span>
+                    </div>
+                  </td>
+
+                  <!-- Desa -->
+                  <td class="py-2.5 px-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                    {{ row.desa || '-' }}
+                  </td>
+
+                  <!-- Kecamatan -->
+                  <td class="py-2.5 px-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                    {{ row.kecamatan || '-' }}
+                  </td>
+
+                  <!-- Panjang -->
+                  <td class="py-2.5 px-3 text-right font-mono font-medium whitespace-nowrap text-gray-800 dark:text-gray-200">
+                    {{ (row.panjang_meter != null && row.panjang_meter !== '') ? Number(row.panjang_meter).toLocaleString('id-ID', { maximumFractionDigits: 1 }) : (row.panjang != null && row.panjang !== '' ? Number(row.panjang).toLocaleString('id-ID', { maximumFractionDigits: 1 }) : '-') }}
+                  </td>
+
+                  <!-- Lebar -->
+                  <td class="py-2.5 px-3 text-right font-mono whitespace-nowrap text-gray-600 dark:text-gray-400">
+                    {{ row.lebar != null && row.lebar !== '' ? `${Number(row.lebar).toLocaleString('id-ID', { maximumFractionDigits: 1 })}` : '-' }}
+                  </td>
+
+                  <!-- Perkerasan -->
+                  <td class="py-2.5 px-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                    <UBadge
+                      v-if="row.perkerasan"
+                      :label="row.perkerasan"
+                      color="neutral"
+                      variant="subtle"
+                      size="xs"
+                      class="text-[10px]"
+                    />
+                    <span v-else class="text-gray-400">-</span>
+                  </td>
+
+                  <!-- Kondisi -->
+                  <td class="py-2.5 px-3 whitespace-nowrap">
+                    <UBadge
+                      :label="getKondisiBadge(row.kondisi).label"
+                      :color="getKondisiBadge(row.kondisi).color"
+                      variant="subtle"
+                      size="xs"
+                      class="text-[10px]"
+                    />
+                  </td>
+
+                  <!-- Status Eksisting -->
+                  <td class="py-2.5 px-3 whitespace-nowrap text-gray-600 dark:text-gray-400 text-[11px]">
+                    {{ row.status_eksisting || '-' }}
+                  </td>
+
+                  <!-- Sumber Data -->
+                  <td class="py-2.5 px-3 whitespace-nowrap text-gray-500 dark:text-gray-400 text-[11px]">
+                    {{ row.sumber_data || '-' }}
+                  </td>
+
+                  <!-- Aksi -->
+                  <td class="py-2.5 px-3 text-center whitespace-nowrap">
+                    <div class="flex items-center justify-center gap-1">
+                      <UButton
+                        icon="i-lucide-map-pin"
+                        size="xs"
+                        color="primary"
+                        variant="subtle"
+                        label="Peta"
+                        title="Tampilkan ruas ini di peta"
+                        class="cursor-pointer text-xs"
+                        @click="handleViewRowOnMap(row)"
+                      />
+                      <UButton
+                        v-if="canEditFeature(row)"
+                        icon="i-lucide-pencil"
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        title="Edit Data Ruas"
+                        class="cursor-pointer"
+                        @click="openEdit(row)"
+                      />
+                      <UButton
+                        v-if="canSplitFeature(row)"
+                        icon="i-lucide-scissors"
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        title="Split / Pecah Ruas"
+                        class="cursor-pointer text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                        @click="handleSplitFromTable(row)"
+                      />
+                      <UButton
+                        v-if="canDeleteFeature(row)"
+                        icon="i-lucide-trash-2"
+                        size="xs"
+                        color="error"
+                        variant="ghost"
+                        title="Hapus Ruas"
+                        class="cursor-pointer"
+                        @click="confirmDelete(row)"
+                      />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tabular Pagination Footer -->
+          <div
+            v-if="tableTotal > 0"
+            class="flex flex-col sm:flex-row items-center justify-between px-4 py-2 border-t border-gray-200 dark:border-white/[0.08] bg-gray-50/50 dark:bg-[#070b14] text-xs gap-3 shrink-0"
+          >
+            <!-- Page info -->
+            <span class="text-gray-600 dark:text-gray-400 font-mono text-xs tabular-nums">
+              {{ tabularPageRangeText }}
+            </span>
+
+            <div class="flex items-center gap-3">
+              <!-- Per Page Selector -->
+              <div class="flex items-center gap-1.5 text-xs text-gray-500">
+                <span class="hidden sm:inline">Tampilkan:</span>
+                <select
+                  v-model.number="tablePerPage"
+                  class="text-xs rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-[#131926] text-gray-900 dark:text-white px-2 py-1 focus:outline-hidden"
+                >
+                  <option :value="10">10</option>
+                  <option :value="15">15</option>
+                  <option :value="25">25</option>
+                  <option :value="50">50</option>
+                  <option :value="100">100</option>
+                </select>
+                <span class="hidden sm:inline">per halaman</span>
+              </div>
+
+              <!-- UPagination -->
+              <UPagination
+                v-if="tableLastPage > 1"
+                :page="tablePage"
+                :total="tableTotal"
+                :items-per-page="tablePerPage"
+                size="xs"
+                color="neutral"
+                active-color="primary"
+                @update:page="(p) => tablePage = p"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ MOBILE FEATURE PEEK CARD (When a road is selected on mobile) ═════ -->
     <div
-      v-if="selectedFeature"
+      v-if="selectedFeature && viewMode === 'map'"
       class="lg:hidden fixed bottom-16 left-3 right-3 z-30 pointer-events-auto transition-transform duration-200"
     >
       <div class="p-3 rounded-xl bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-xl space-y-2">
@@ -1784,6 +2313,7 @@ async function handleConfirmSplit() {
 
     <!-- ═══ MOBILE FLOATING BOTTOM DOCK (Touch-Friendly 44px min target) ══════ -->
     <nav
+      v-if="viewMode === 'map'"
       class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 px-1 py-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid items-center select-none"
       :class="canCreate ? 'grid-cols-5' : 'grid-cols-4'"
       aria-label="Navigasi Editor Mobile"

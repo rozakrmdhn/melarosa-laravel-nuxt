@@ -85,6 +85,9 @@ const userItems = computed<DropdownMenuItem[][]>(() => [
       label: "Public Site",
       icon: "i-lucide-external-link",
       to: "/",
+      target: "_blank",
+      exact: true,
+      active: false,
     },
     {
       label: "Log out",
@@ -128,9 +131,14 @@ const userItems = computed<DropdownMenuItem[][]>(() => [
           <span class="truncate font-semibold text-sm text-gray-900 dark:text-gray-100 leading-tight">
             {{ user.name }}
           </span>
-          <span class="truncate text-xs text-gray-500 dark:text-gray-400 leading-tight mt-0.5">
-            {{ auth.user.email }}
-          </span>
+          <ClientOnly>
+            <span class="truncate text-xs text-gray-500 dark:text-gray-400 leading-tight mt-0.5">
+              {{ auth.user.email }}
+            </span>
+            <template #fallback>
+              <span class="truncate text-xs text-transparent select-none leading-tight mt-0.5">&nbsp;</span>
+            </template>
+          </ClientOnly>
         </div>
       </div>
       <UIcon

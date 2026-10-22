@@ -10,6 +10,10 @@ export default defineNuxtPlugin(async (nuxtApp) => {
   }
 
   if (auth.logged && !auth.user?.uuid) {
-    await auth.fetchUser();
+    try {
+      await auth.fetchUser();
+    } catch (error) {
+      console.warn('Gagal memuat profil pengguna:', error);
+    }
   }
 })

@@ -71,6 +71,8 @@ export default defineNuxtConfig({
     '/admin/dataset/**': { ssr: false },
     '/admin/infrastruktur-segmen': { ssr: false },
     '/admin/infrastruktur-segmen/**': { ssr: false },
+    '/admin/rekap-jalan': { ssr: false },
+    '/admin/rekap-jalan/**': { ssr: false },
     '/maps': { ssr: false },
     '/maps/**': { ssr: false },
     // Dynamic proxy request API dan Storage ke backend Laravel
@@ -79,6 +81,8 @@ export default defineNuxtConfig({
     '/storage/**': { proxy: `${process.env.API_LOCAL_URL || process.env.APP_URL || 'http://127.0.0.1:9000'}/storage/**` },
     // Dynamic proxy Martin Tile Server
     '/martin/**': { proxy: `${process.env.MARTIN_URL || 'http://127.0.0.1:9090'}/**` },
+    // Dynamic proxy Basemap Rupabumi Indonesia (BIG)
+    '/rbi-tiles/**': { proxy: 'https://geoservices.big.go.id/rbi/rest/services/BASEMAP/Rupabumi_Indonesia/MapServer/tile/**' },
   },
 
   css: ['~/assets/css/main.css'],
@@ -179,6 +183,7 @@ export default defineNuxtConfig({
       apiPrefix: '/api/v1',
       storageBase: (process.env.APP_URL || 'http://localhost:9000') + '/storage/',
       martinUrl: process.env.NUXT_PUBLIC_MARTIN_URL || '/martin',
+      rekapApiUrl: process.env.NUXT_PUBLIC_REKAP_API_URL || 'https://api-melarosa.saggaserv.my.id/api/v1',
       providers: {
         google: {
           name: "Google",

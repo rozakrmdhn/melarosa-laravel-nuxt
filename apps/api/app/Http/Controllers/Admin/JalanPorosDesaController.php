@@ -77,6 +77,12 @@ class JalanPorosDesaController extends Controller
             $query->where('jalan_porosdesa.id_desa', $targetDesaId);
         } elseif ($targetKecId) {
             $query->where('jalan_porosdesa.id_kecamatan', $targetKecId);
+        } else {
+            if ($request->filled('desa')) {
+                $query->where('jalan_porosdesa.desa', $likeOp, $request->query('desa'));
+            } elseif ($request->filled('kecamatan')) {
+                $query->where('jalan_porosdesa.kecamatan', $likeOp, $request->query('kecamatan'));
+            }
         }
 
         // Viewport bounding box filter

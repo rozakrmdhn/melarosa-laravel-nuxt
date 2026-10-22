@@ -10,9 +10,26 @@ export function useHttp<T>(
 
   const rawKey = options?.key;
   const key = computed(() => {
-    const base = typeof rawKey === 'function'
-      ? rawKey()
-      : (rawKey || (typeof url === 'function' ? url() : url));
+    let base = typeof rawKey === 'function' ? rawKey() : rawKey;
+    if (!base) {
+      const urlStr = typeof url === 'function' ? url() : url;
+      let queryStr = '';
+      if (options?.query) {
+        const q = unref(options.query);
+        if (q && typeof q === 'object') {
+          try {
+            queryStr = ':' + Object.entries(q)
+              .filter(([_, v]) => v !== undefined && v !== null && v !== '')
+              .map(([k, v]) => `${k}=${unref(v)}`)
+              .sort()
+              .join('&');
+          } catch {
+            queryStr = '';
+          }
+        }
+      }
+      base = `${urlStr}${queryStr}`;
+    }
     return `${base}:${userScope.value}`;
   });
 

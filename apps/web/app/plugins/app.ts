@@ -103,10 +103,12 @@ export default defineNuxtPlugin((nuxtApp) => {
 
       if (import.meta.server || context.error.name === 'AbortError') return;
 
+      const message = context.error?.message?.trim() || 'Gagal menghubungkan ke server. Periksa koneksi internet Anda.';
+
       toast.add({
         icon: 'i-heroicons-exclamation-circle-solid',
         color: "error",
-        title: context.error.message ?? 'Something went wrong'
+        title: message
       });
     },
     async onResponse(context: HttpFetchContext) {
@@ -119,10 +121,42 @@ export default defineNuxtPlugin((nuxtApp) => {
         const auth = useAuthStore();
         auth.reset();
       } else if (context.response.status !== 422 && import.meta.client) {
+        const data = context.response._data;
+        let message = '';
+
+        if (typeof data === 'string' && data.trim()) {
+          try {
+            const parsed = JSON.parse(data);
+            message = parsed.message || parsed.error || parsed.statusMessage || '';
+          } catch {
+            if (!data.trim().startsWith('<')) {
+              message = data.trim();
+            }
+          }
+        } else if (data && typeof data === 'object') {
+          message = data.message || data.error || data.statusMessage || '';
+        }
+
+        if (!message && context.response.statusText?.trim()) {
+          message = context.response.statusText.trim();
+        }
+
+        if (!message) {
+          if (context.response.status === 403) {
+            message = 'Akses ditolak: Anda tidak memiliki izin untuk tindakan ini (403).';
+          } else if (context.response.status === 404) {
+            message = 'Data atau endpoint tidak ditemukan (404).';
+          } else if (context.response.status >= 500) {
+            message = `Terjadi kesalahan pada server (Kode: ${context.response.status}).`;
+          } else {
+            message = `Terjadi kesalahan (Kode: ${context.response.status}).`;
+          }
+        }
+
         toast.add({
           icon: 'i-heroicons-exclamation-circle-solid',
           color: "error",
-          title: context.response._data?.message ?? context.response.statusText ?? 'Something went wrong'
+          title: message
         });
       }
     },

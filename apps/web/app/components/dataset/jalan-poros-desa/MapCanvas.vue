@@ -8,7 +8,7 @@ import type {
   RuasProperties,
   SelectedFeature,
 } from "~/types/dataset-editor";
-import { DEFAULT_SYMBOLOGY } from "~/types/dataset-editor";
+import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from "~/types/dataset-editor";
 import { $http } from "~/utils/helpers";
 
 const props = withDefaults(
@@ -40,7 +40,7 @@ const props = withDefaults(
     perkerasanFilter: null,
     kecamatanOptions: () => [],
     desaOptions: () => [],
-    symbology: () => ({ ...DEFAULT_SYMBOLOGY }),
+    symbology: () => ({ ...DEFAULT_JALAN_POROS_SYMBOLOGY }),
     clickedCoordinate: null,
   }
 );
@@ -213,20 +213,21 @@ const PERKERASAN_COLORS: Record<string, string> = {
 };
 
 function getStrokeColor(feature: any): string {
-  const sym = props.symbology || DEFAULT_SYMBOLOGY;
+  const sym = props.symbology || DEFAULT_JALAN_POROS_SYMBOLOGY;
   if (sym.colorMode === "kondisi") {
-    const k = String(feature.get("kondisi") || "").toUpperCase().trim();
-    if (k.includes("RUSAK BERAT")) return KONDISI_COLORS["RUSAK BERAT"];
-    if (k.includes("RUSAK")) return KONDISI_COLORS["RUSAK"];
-    if (k.includes("SEDANG")) return KONDISI_COLORS["SEDANG"];
-    if (k.includes("BAIK")) return KONDISI_COLORS["BAIK"];
-    return sym.lineColor || "#10b981";
+    const k = String(feature.get("kondisi") || "").toLowerCase().trim();
+    if (k.includes("rusak berat")) return KONDISI_COLORS["RUSAK BERAT"];
+    if (k.includes("rusak ringan")) return "#f97316";
+    if (k.includes("rusak")) return KONDISI_COLORS["RUSAK"];
+    if (k.includes("sedang")) return KONDISI_COLORS["SEDANG"];
+    if (k.includes("baik")) return KONDISI_COLORS["BAIK"];
+    return sym.lineColor || "#2563eb";
   }
   if (sym.colorMode === "perkerasan") {
     const p = String(feature.get("perkerasan") || "").trim();
     return PERKERASAN_COLORS[p] || PERKERASAN_COLORS["Lainnya"] || "#64748b";
   }
-  return sym.lineColor || "#059669";
+  return sym.lineColor || "#2563eb";
 }
 
 function getLineDash(): number[] | undefined {

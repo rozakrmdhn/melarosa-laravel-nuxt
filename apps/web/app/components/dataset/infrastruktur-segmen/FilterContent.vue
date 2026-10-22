@@ -120,6 +120,7 @@ const perkerasanOptions = [
   { label: 'Semua Perkerasan', value: 'ALL' },
   { label: 'Aspal', value: 'Aspal' },
   { label: 'Beton', value: 'Beton' },
+  { label: 'Paving', value: 'Paving' },
   { label: 'Kerikil', value: 'Kerikil' },
   { label: 'Tanah', value: 'Tanah' },
 ];

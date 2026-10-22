@@ -18,6 +18,12 @@ export function useAdminNavigation() {
   const route = useRoute();
   const auth = useAuthStore();
 
+  function normalizePath(p?: string): string {
+    if (!p) return "";
+    const clean = p.split("?")[0];
+    return clean === "/" ? "/" : clean.replace(/\/$/, "");
+  }
+
   // Dynamic navigation tree sourced directly from the authenticated user
   const navTree = computed<AdminNavItemDef[]>(() => auth.user?.navigation ?? []);
 
@@ -28,10 +34,13 @@ export function useAdminNavigation() {
     function walk(items: AdminNavItemDef[]) {
       for (const item of items) {
         if (item.to) {
-          map[item.to.replace(/\/$/, "")] = {
-            title: item.label,
-            icon: item.icon,
-          };
+          const key = normalizePath(item.to);
+          if (key) {
+            map[key] = {
+              title: item.label,
+              icon: item.icon,
+            };
+          }
         }
         if (item.children) {
           walk(item.children);
@@ -44,13 +53,13 @@ export function useAdminNavigation() {
   });
 
   const currentHeader = computed<RouteHeaderMeta>(() => {
-    const path = route.path.replace(/\/$/, "");
+    const path = normalizePath(route.path);
     const headers = flatHeaderMap.value;
 
     if (headers[path]) return headers[path];
 
     for (const [key, val] of Object.entries(headers)) {
-      if (key !== "/admin" && key !== "/" && path.startsWith(key)) {
+      if (key !== "/admin" && key !== "/" && (path === key || path.startsWith(`${key}/`))) {
         return val;
       }
     }
@@ -68,15 +77,20 @@ export function useAdminNavigation() {
   });
 
   const breadcrumbs = computed<AdminBreadcrumbItem[]>(() => {
-    const path = route.path.replace(/\/$/, "") || "/admin";
+    const path = normalizePath(route.path) || "/admin";
     const tree = navTree.value;
 
     // 1. Check nested children in navigation tree
     for (const group of tree) {
       if (group.children && group.children.length > 0) {
-        const matchedChild = group.children.find(
-          (c) => c.to === path || (c.to && c.to !== "/admin" && c.to !== "/" && path.startsWith(c.to))
-        );
+        const matchedChild = group.children.find((c) => {
+          if (!c.to) return false;
+          const target = normalizePath(c.to);
+          if (c.exact || target === "/admin" || target === "/") {
+            return path === target;
+          }
+          return path === target || path.startsWith(`${target}/`);
+        });
 
         if (matchedChild) {
           const items: AdminBreadcrumbItem[] = [
@@ -88,13 +102,20 @@ export function useAdminNavigation() {
             {
               label: matchedChild.label,
               icon: matchedChild.icon,
-              to: matchedChild.to === path ? undefined : matchedChild.to,
+              to: normalizePath(matchedChild.to) === path ? undefined : matchedChild.to,
             },
           ];
 
           // Additional sub-path segment (e.g. /admin/dataset/jalan-poros-desa/create)
-          if (matchedChild.to && path.length > matchedChild.to.length) {
-            const sub = path.slice(matchedChild.to.length).replace(/^\//, "");
+          const childTarget = normalizePath(matchedChild.to);
+          if (
+            childTarget &&
+            childTarget !== "/" &&
+            childTarget !== "/admin" &&
+            path.length > childTarget.length &&
+            path.startsWith(`${childTarget}/`)
+          ) {
+            const sub = path.slice(childTarget.length).replace(/^\//, "");
             if (sub) {
               const subLabel = sub
                 .split("/")
@@ -119,20 +140,29 @@ export function useAdminNavigation() {
     // 2. Check top-level items without children
     for (const item of tree) {
       if (!item.children || item.children.length === 0) {
-        if (
-          item.to === path ||
-          (!item.exact && item.to && item.to !== "/admin" && item.to !== "/" && path.startsWith(item.to))
-        ) {
+        const itemTarget = normalizePath(item.to);
+        const isMatched =
+          item.exact || itemTarget === "/admin" || itemTarget === "/"
+            ? path === itemTarget
+            : path === itemTarget || (itemTarget ? path.startsWith(`${itemTarget}/`) : false);
+
+        if (isMatched) {
           const items: AdminBreadcrumbItem[] = [
             {
               label: item.label,
               icon: item.icon,
-              to: item.to === path ? undefined : item.to,
+              to: itemTarget === path ? undefined : item.to,
             },
           ];
 
-          if (item.to && path.length > item.to.length) {
-            const sub = path.slice(item.to.length).replace(/^\//, "");
+          if (
+            itemTarget &&
+            itemTarget !== "/" &&
+            itemTarget !== "/admin" &&
+            path.length > itemTarget.length &&
+            path.startsWith(`${itemTarget}/`)
+          ) {
+            const sub = path.slice(itemTarget.length).replace(/^\//, "");
             if (sub) {
               const subLabel = sub
                 .split("/")
@@ -165,8 +195,8 @@ export function useAdminNavigation() {
 
   function isPathActive(targetPath?: string, exact?: boolean): boolean {
     if (!targetPath) return false;
-    const current = route.path.split("?")[0].replace(/\/$/, "");
-    const target = targetPath.split("?")[0].replace(/\/$/, "");
+    const current = normalizePath(route.path);
+    const target = normalizePath(targetPath);
 
     if (exact || target === "/admin" || target === "/") {
       return current === target;
@@ -180,7 +210,7 @@ export function useAdminNavigation() {
 
     return navTree.value.map((item) => {
       const visibleChildren = item.children ?? [];
-      const hasActiveChild = visibleChildren.some((child) => isPathActive(child.to));
+      const hasActiveChild = visibleChildren.some((child) => isPathActive(child.to, child.exact));
       const isSelfActive = isPathActive(item.to, item.exact);
       const isItemActive = isCollapsed
         ? (hasActiveChild || isSelfActive)
@@ -201,7 +231,9 @@ export function useAdminNavigation() {
               label: child.label,
               icon: child.icon,
               to: child.to,
-              active: isPathActive(child.to),
+              target: child.target,
+              exact: child.exact ?? (child.to === "/" || child.to === "/admin"),
+              active: isPathActive(child.to, child.exact),
             }))
           : [],
       };

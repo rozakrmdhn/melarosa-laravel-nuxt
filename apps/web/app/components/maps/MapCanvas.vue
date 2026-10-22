@@ -54,6 +54,120 @@ const mapContainer = ref<HTMLElement | null>(null);
 const pulseEl = ref<HTMLElement | null>(null);
 const scaleLineTarget = ref<HTMLElement | null>(null);
 
+// Bojonegoro coordinates: [longitude, latitude] in EPSG:4326
+const BOJONEGORO_CENTER: [number, number] = [111.88, -7.15];
+const DEFAULT_ZOOM = 11;
+
+// ─── Live Cursor Coordinates & Map Scale Status Bar ──────────────────────────
+const livePointerCoords = ref<{ lng: number; lat: number } | null>(null);
+const currentMapCenter = ref<{ lng: number; lat: number }>({
+  lng: BOJONEGORO_CENTER[0],
+  lat: BOJONEGORO_CENTER[1],
+});
+const currentZoomLevel = ref<number>(DEFAULT_ZOOM);
+const isPointerOnCanvas = ref(false);
+const coordDisplayFormat = ref<"dd" | "dms">("dd");
+const isCoordCopied = ref(false);
+let coordCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function toDms(dec: number, isLng: boolean): string {
+  const abs = Math.abs(dec);
+  const degrees = Math.floor(abs);
+  const minutesDec = (abs - degrees) * 60;
+  const minutes = Math.floor(minutesDec);
+  const seconds = ((minutesDec - minutes) * 60).toFixed(1);
+  const dir = isLng ? (dec >= 0 ? "E" : "W") : (dec >= 0 ? "N" : "S");
+  return `${degrees}°${minutes.toString().padStart(2, "0")}'${seconds.padStart(4, "0")}" ${dir}`;
+}
+
+const activeDisplayCoords = computed(() => {
+  if (isPointerOnCanvas.value && livePointerCoords.value) {
+    return {
+      coords: livePointerCoords.value,
+      isLiveCursor: true,
+    };
+  }
+  return {
+    coords: livePointerCoords.value || currentMapCenter.value,
+    isLiveCursor: false,
+  };
+});
+
+const formattedLatDisplay = computed(() => {
+  const lat = activeDisplayCoords.value.coords?.lat;
+  if (lat === undefined || lat === null) return "-";
+  const abs = Math.abs(lat).toFixed(5);
+  const dir = lat >= 0 ? "N" : "S";
+  return `${abs}° ${dir}`;
+});
+
+const formattedLngDisplay = computed(() => {
+  const lng = activeDisplayCoords.value.coords?.lng;
+  if (lng === undefined || lng === null) return "-";
+  const abs = Math.abs(lng).toFixed(5);
+  const dir = lng >= 0 ? "E" : "W";
+  return `${abs}° ${dir}`;
+});
+
+const formattedDmsDisplay = computed(() => {
+  const c = activeDisplayCoords.value.coords;
+  if (!c) return "-";
+  return `${toDms(c.lat, false)} ${toDms(c.lng, true)}`;
+});
+
+function fallbackCopy(text: string) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    document.execCommand("copy");
+  } catch (err) {
+    console.error("Gagal menyalin koordinat:", err);
+  }
+  document.body.removeChild(textArea);
+}
+
+function copyCurrentCoordinates() {
+  const c = activeDisplayCoords.value.coords;
+  if (!c) return;
+  const text = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
+
+  if (navigator?.clipboard?.writeText && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+
+  isCoordCopied.value = true;
+  if (coordCopyTimer) clearTimeout(coordCopyTimer);
+  coordCopyTimer = setTimeout(() => {
+    isCoordCopied.value = false;
+  }, 1800);
+}
+
+function updateMapCenterAndZoom() {
+  if (!mapInstance || !olModules) return;
+  const view = mapInstance.getView();
+  const z = view.getZoom();
+  if (z !== undefined) {
+    currentZoomLevel.value = Math.round(z);
+  }
+  const center = view.getCenter();
+  if (center) {
+    const lonLat = olModules.toLonLat(center);
+    if (lonLat && lonLat.length >= 2) {
+      currentMapCenter.value = {
+        lng: Number(lonLat[0].toFixed(5)),
+        lat: Number(lonLat[1].toFixed(5)),
+      };
+    }
+  }
+}
+
 const mapLoaded = ref(false);
 const isPulseVisible = ref(false);
 const isBadgeVisible = ref(Boolean(props.clickedCoordinate));
@@ -158,6 +272,11 @@ const mvtLayersMap = new Map<string, any>();
 let isDismissing = false;
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Cartographic Graticule (Grid Kartografi & Koordinat Tepi Peta)
+const showCartoGrid = ref(false);
+let graticuleLayer: any = null;
+let themeMutationObserver: MutationObserver | null = null;
+
 // Geolocation: OL VectorLayer for accuracy circle + dot (scales with zoom)
 let geoVectorSource: any = null;
 let geoVectorLayer: any = null;
@@ -172,9 +291,6 @@ let geoAnimTo: [number, number] | null = null;
 let geoAnimStartTime: number | null = null;
 const GEO_ANIM_DURATION = 1200; // ms
 
-// Bojonegoro coordinates: [longitude, latitude] in EPSG:4326
-const BOJONEGORO_CENTER: [number, number] = [111.88, -7.15];
-const DEFAULT_ZOOM = 11;
 
 function getBasemapSource(key: BasemapKey) {
   if (!olModules) return null;
@@ -186,21 +302,36 @@ function getBasemapSource(key: BasemapKey) {
         url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attributions: "&copy; Esri, Maxar, Earthstar Geographics",
         maxZoom: 19,
+        crossOrigin: "anonymous",
       });
     case "aerial":
       return new XYZ({
         url: "https://petadasar.meritech.cloud/tile/{z}/{x}/{y}.jpg",
         attributions: "&copy; Peta Dasar ATR/BPN Aerial Orthophoto",
         maxZoom: 21,
+        crossOrigin: "anonymous",
       });
     case "topo":
     case "osm":
       return new OSM();
     case "rbi":
       return new XYZ({
-        url: "https://geoservices.big.go.id/rbi/rest/services/BASEMAP/Rupabumi_Indonesia/MapServer/tile/{z}/{y}/{x}",
+        url: "/rbi-tiles/{z}/{y}/{x}",
         attributions: "&copy; Badan Informasi Geospasial (BIG)",
         maxZoom: 18,
+        crossOrigin: "anonymous",
+        tileLoadFunction: (imageTile: any, src: string) => {
+          const img = imageTile.getImage();
+          img.crossOrigin = "anonymous";
+          let hasRetried = false;
+          img.onerror = () => {
+            if (!hasRetried && src.includes("/rbi-tiles/")) {
+              hasRetried = true;
+              img.src = src.replace(/^.*?\/rbi-tiles\//, "https://geoservices.big.go.id/rbi/rest/services/BASEMAP/Rupabumi_Indonesia/MapServer/tile/");
+            }
+          };
+          img.src = src;
+        },
       });
     case "none":
       return null;
@@ -212,6 +343,7 @@ function getBasemapSource(key: BasemapKey) {
         url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
         attributions: "&copy; Esri, HERE, Garmin, FAO, NOAA, USGS, EPA, NPS, NRCan",
         maxZoom: 19,
+        crossOrigin: "anonymous",
       });
   }
 }
@@ -596,6 +728,7 @@ async function initMap() {
       { default: OlText },
       { default: RegularShape },
       { default: OlIcon },
+      { default: Graticule },
     ] = await Promise.all([
       import("ol/Map.js"),
       import("ol/View.js"),
@@ -623,6 +756,7 @@ async function initMap() {
       import("ol/style/Text.js"),
       import("ol/style/RegularShape.js"),
       import("ol/style/Icon.js"),
+      import("ol/layer/Graticule.js"),
     ]);
 
     olModules = {
@@ -637,6 +771,7 @@ async function initMap() {
       OlStyle,
       Fill,
       Stroke,
+      Graticule,
       OSM,
       XYZ,
       fromLonLat: projPkg.fromLonLat,
@@ -770,9 +905,110 @@ async function initMap() {
       timeout: 80,
     });
 
+    // Formatters untuk koordinat pada tepi grid kartografi (Notasi ringkas E dan S)
+    function formatLonGrid(lon: number): string {
+      const norm = ((((lon + 180) % 360) + 360) % 360) - 180;
+      const abs = Math.abs(norm);
+      const deg = Math.floor(abs);
+      const min = Math.floor((abs - deg) * 60);
+      const sec = Math.round(((abs - deg) * 60 - min) * 60);
+      const hemi = norm >= 0 ? "E" : "W";
+      if (sec !== 0) {
+        return `${deg}°${String(min).padStart(2, "0")}'${String(sec).padStart(2, "0")}" ${hemi}`;
+      }
+      if (min !== 0) {
+        return `${deg}°${String(min).padStart(2, "0")}' ${hemi}`;
+      }
+      return `${deg}° ${hemi}`;
+    }
+
+    function formatLatGrid(lat: number): string {
+      const norm = Math.max(-90, Math.min(90, lat));
+      const abs = Math.abs(norm);
+      const deg = Math.floor(abs);
+      const min = Math.floor((abs - deg) * 60);
+      const sec = Math.round(((abs - deg) * 60 - min) * 60);
+      const hemi = norm >= 0 ? "N" : "S";
+      if (sec !== 0) {
+        return `${deg}°${String(min).padStart(2, "0")}'${String(sec).padStart(2, "0")}" ${hemi}`;
+      }
+      if (min !== 0) {
+        return `${deg}°${String(min).padStart(2, "0")}' ${hemi}`;
+      }
+      return `${deg}° ${hemi}`;
+    }
+
+    const isCurrentDark = document.documentElement.classList.contains("dark");
+    graticuleLayer = new Graticule({
+      strokeStyle: new Stroke({
+        color: isCurrentDark ? "rgba(148, 163, 184, 0.45)" : "rgba(71, 85, 105, 0.4)",
+        width: 1,
+        lineDash: [4, 4],
+      }),
+      showLabels: true,
+      wrapX: false,
+      zIndex: 40,
+      lonLabelPosition: 0,
+      latLabelPosition: 1,
+      lonLabelFormatter: formatLonGrid,
+      latLabelFormatter: formatLatGrid,
+      lonLabelStyle: new OlText({
+        font: "600 10.5px Inter, -apple-system, sans-serif",
+        textBaseline: "bottom",
+        textAlign: "center",
+        fill: new Fill({ color: isCurrentDark ? "#f1f5f9" : "#1e293b" }),
+        stroke: new Stroke({ color: isCurrentDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.95)", width: 3 }),
+        offsetY: -8,
+      }),
+      latLabelStyle: new OlText({
+        font: "600 10.5px Inter, -apple-system, sans-serif",
+        textAlign: "end",
+        textBaseline: "middle",
+        fill: new Fill({ color: isCurrentDark ? "#f1f5f9" : "#1e293b" }),
+        stroke: new Stroke({ color: isCurrentDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.95)", width: 3 }),
+        offsetX: -8,
+      }),
+      visible: showCartoGrid.value,
+    });
+
+    function updateGraticuleTheme() {
+      if (!graticuleLayer) return;
+      const isDark = document.documentElement.classList.contains("dark");
+      graticuleLayer.strokeStyle_ = new Stroke({
+        color: isDark ? "rgba(148, 163, 184, 0.45)" : "rgba(71, 85, 105, 0.4)",
+        width: 1,
+        lineDash: [4, 4],
+      });
+      graticuleLayer.lonLabelStyle_ = new OlText({
+        font: "600 10.5px Inter, -apple-system, sans-serif",
+        textBaseline: "bottom",
+        textAlign: "center",
+        fill: new Fill({ color: isDark ? "#f1f5f9" : "#1e293b" }),
+        stroke: new Stroke({ color: isDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.95)", width: 3 }),
+        offsetY: -8,
+      });
+      graticuleLayer.latLabelStyle_ = new OlText({
+        font: "600 10.5px Inter, -apple-system, sans-serif",
+        textAlign: "end",
+        textBaseline: "middle",
+        fill: new Fill({ color: isDark ? "#f1f5f9" : "#1e293b" }),
+        stroke: new Stroke({ color: isDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.95)", width: 3 }),
+        offsetX: -8,
+      });
+      graticuleLayer.changed();
+    }
+
+    themeMutationObserver = new MutationObserver(() => {
+      updateGraticuleTheme();
+    });
+    themeMutationObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
     mapInstance = new Map({
       target: mapContainer.value,
-      layers: [tileLayer, geoVectorLayer],
+      layers: [tileLayer, geoVectorLayer, graticuleLayer],
       view: new View({
         center: initialCenter,
         zoom: initialZoomLevel,
@@ -794,9 +1030,13 @@ async function initMap() {
       });
     }
 
+    // Inisialisasi posisi center dan zoom status bar awal
+    updateMapCenterAndZoom();
+
     // Listener pergerakan dan zoom peta untuk sinkronisasi URL parameter
     mapInstance.on("moveend", () => {
       emitViewportUpdate();
+      updateMapCenterAndZoom();
     });
 
     // Pointer move listener for live mouse coordinates & feature hover detection
@@ -804,8 +1044,13 @@ async function initMap() {
       if (evt.dragging) return;
       const coords = olModules.toLonLat(evt.coordinate);
       if (coords && coords.length >= 2) {
-        const lng = coords[0].toFixed(5);
-        const lat = coords[1].toFixed(5);
+        const numLng = Number(coords[0]);
+        const numLat = Number(coords[1]);
+        livePointerCoords.value = { lng: numLng, lat: numLat };
+        isPointerOnCanvas.value = true;
+
+        const lng = numLng.toFixed(5);
+        const lat = numLat.toFixed(5);
         emit("update:mouse-coords", `${lat}, ${lng}`);
       }
 
@@ -885,81 +1130,179 @@ function syncActiveWmsLayers() {
       layer.source_type === "martin" ||
       Boolean(layer.mvtUrl) ||
       Boolean(layer.martinSource) ||
-      (layer.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(layer.layer_name));
+      (layer.layer_name && ["infrastruktur_segmen", "jalan_porosdesa", "bataswilayah_kabupaten"].includes(layer.layer_name)) ||
+      (layer.url && layer.url.includes("/martin/"));
 
     // A. Handle Martin MVT Layer
     if (isMvt) {
-      const sourceName = layer.martinSource || layer.layer_name || (layer.id.includes("segmen") ? "infrastruktur_segmen" : "jalan_porosdesa");
-      const tileUrl = layer.mvtUrl || `${martinBase}/${sourceName}/{z}/{x}/{y}`;
-      const isSegmen = sourceName === "infrastruktur_segmen" || layer.id.includes("segmen");
+      const sourceName =
+        layer.martinSource ||
+        layer.layer_name ||
+        (layer.url ? layer.url.match(/\/martin\/([^\/]+)/)?.[1] : undefined) ||
+        (layer.id.includes("segmen") ? "infrastruktur_segmen" : "jalan_porosdesa");
 
-      // Infrastruktur Segmen dipastikan selalu layer paling atas (z-index tertinggi 40)
-      const mvtZIndex = isSegmen ? 40 : 20 + (currentLayers.length - index);
-      const effectiveOpacity = isSegmen ? (typeof layer.opacity === "number" ? layer.opacity : 1) : (layer.opacity ?? 1);
+      const tileUrl = layer.mvtUrl || `${martinBase}/${sourceName}/{z}/{x}/{y}`;
+      const isKabupaten =
+        sourceName === "bataswilayah_kabupaten" ||
+        layer.layer_name === "bataswilayah_kabupaten" ||
+        layer.id === "01a15e28-a042-71a0-b111-ed7d9256e5bf" ||
+        Boolean(layer.url && layer.url.includes("bataswilayah_kabupaten")) ||
+        Boolean(layer.mvtUrl && layer.mvtUrl.includes("bataswilayah_kabupaten"));
+
+      const isSegmen = !isKabupaten && (sourceName === "infrastruktur_segmen" || layer.id.includes("segmen"));
+
+      // Urutan z-index dinamis: Batas wilayah kabupaten selalu di lapisan dasar (z-index 4), jalan di atasnya (z-index 10+)
+      const layerZIndex = isKabupaten ? 4 : 10 + (currentLayers.length - index) * 2;
+      const effectiveOpacity = typeof layer.opacity === "number" ? layer.opacity : 1;
+
+      // ─── 1. Standar Kartografi Batas Administrasi Kabupaten (BIG / Peta RBI Dati II) ───
+      const createKabupatenStyleFn = (_targetOlLayer: any) => {
+        return (_feature?: any) => {
+          const currentZoom = mapInstance?.getView()?.getZoom() || 0;
+          const isDark = document.documentElement.classList.contains("dark");
+
+          return [
+            // Casing / underlay halo batas kabupaten (efek kartografi batas wilayah teritorial)
+            new OlStyle({
+              stroke: new Stroke({
+                color: isDark ? "rgba(148, 163, 184, 0.25)" : "rgba(71, 85, 105, 0.22)",
+                width: currentZoom >= 13 ? 7.5 : currentZoom >= 11 ? 5.5 : 4,
+                lineCap: "round",
+                lineJoin: "round",
+              }),
+              fill: new Fill({
+                color: isDark ? "rgba(148, 163, 184, 0.03)" : "rgba(71, 85, 105, 0.015)",
+              }),
+            }),
+            // Garis utama batas kartografi kabupaten (Standar BIG: Dash-Dot-Dot-Dash warna abu-abu gelap)
+            new OlStyle({
+              stroke: new Stroke({
+                color: isDark ? "#94a3b8" : "#475569",
+                width: currentZoom >= 13 ? 2.5 : currentZoom >= 11 ? 2 : 1.75,
+                lineDash: [12, 4, 2, 4, 2, 4],
+                lineCap: "round",
+                lineJoin: "round",
+              }),
+              zIndex: 4,
+            }),
+          ];
+        };
+      };
+
+      // ─── 2. Generator Gaya MVT Ruas & Segmen Jalan Berdasarkan Kondisi ───
+      const createMvtStyleFn = (targetOlLayer: any, isLayerSegmen: boolean) => {
+        return (feature: any) => {
+          // 1. Filter Wilayah (Kecamatan)
+          const targetKec = (targetOlLayer.get("filterKecamatan") || "").trim().toLowerCase();
+          if (targetKec && targetKec !== "all") {
+            const rawFeatKec = String(
+              feature.get("kecamatan") ||
+              feature.get("WADMKC") ||
+              feature.get("wadmkc") ||
+              feature.get("nama_kecamatan") ||
+              ""
+            ).trim().toLowerCase();
+
+            const cleanTarget = targetKec.replace(/^(kecamatan|kec\.)\s+/i, "").trim();
+            const cleanFeat = rawFeatKec.replace(/^(kecamatan|kec\.)\s+/i, "").trim();
+
+            if (!cleanFeat || (cleanFeat !== cleanTarget && !cleanFeat.includes(cleanTarget) && !cleanTarget.includes(cleanFeat))) {
+              return null;
+            }
+          }
+
+          // 2. Filter Status Kondisi
+          const targetStatus = (targetOlLayer.get("filterStatus") || "").trim().toLowerCase();
+          if (targetStatus && targetStatus !== "all") {
+            const featKondisi = String(feature.get("kondisi") || feature.get("status") || "").trim().toLowerCase();
+            if (!featKondisi.includes(targetStatus)) {
+              return null;
+            }
+          }
+
+          const kondisi = String(feature.get("kondisi") || "").toLowerCase();
+          let strokeColor = isLayerSegmen ? "#10b981" : "#2563eb";
+
+          if (kondisi.includes("rusak berat")) strokeColor = "#ef4444";
+          else if (kondisi.includes("rusak ringan")) strokeColor = "#f97316";
+          else if (kondisi.includes("sedang")) strokeColor = "#f59e0b";
+          else if (kondisi.includes("rusak")) strokeColor = "#f97316";
+          else if (kondisi.includes("baik")) strokeColor = "#10b981";
+
+          let textStyle: any = undefined;
+          const currentZoom = mapInstance?.getView()?.getZoom() || 0;
+          if (currentZoom >= 13.5) {
+            const labelText = String(feature.get(isLayerSegmen ? "namobj" : "nama_ruas") || feature.get("nama_ruas") || feature.get("namobj") || "");
+            if (labelText && labelText !== "-") {
+              textStyle = new OlText({
+                text: labelText,
+                font: "600 11px Inter, sans-serif",
+                fill: new Fill({ color: isLayerSegmen ? "#064e3b" : "#1e3a8a" }),
+                stroke: new Stroke({ color: "#ffffff", width: 3 }),
+                placement: "line",
+                overflow: false,
+              });
+            }
+          }
+
+          return new OlStyle({
+            stroke: new Stroke({
+              color: strokeColor,
+              width: currentZoom >= 14 ? (isLayerSegmen ? 4 : 2.5) : (isLayerSegmen ? 3 : 1.75),
+              lineCap: "round",
+              lineJoin: "round",
+            }),
+            text: textStyle,
+            zIndex: isLayerSegmen ? 100 : 10,
+          });
+        };
+      };
 
       if (mvtLayersMap.has(layer.id)) {
         const olLayer = mvtLayersMap.get(layer.id);
         olLayer.setVisible(layer.visible ?? true);
         olLayer.setOpacity(effectiveOpacity);
-        olLayer.setZIndex(mvtZIndex);
+        olLayer.setZIndex(layerZIndex);
+
+        if (isKabupaten) {
+          olLayer.setStyle(createKabupatenStyleFn(olLayer));
+        } else {
+          // Pantau jika filterKecamatan atau filterStatus berubah agar render ulang style
+          const prevKec = olLayer.get("filterKecamatan");
+          const prevStatus = olLayer.get("filterStatus");
+          if (prevKec !== layer.filterKecamatan || prevStatus !== layer.filterStatus) {
+            olLayer.set("filterKecamatan", layer.filterKecamatan);
+            olLayer.set("filterStatus", layer.filterStatus);
+            olLayer.setStyle(createMvtStyleFn(olLayer, isSegmen));
+            olLayer.changed();
+          }
+        }
       } else {
         try {
           const source = new VectorTileSource({
             format: new MVT({ idProperty: "id" }),
             url: tileUrl,
             maxZoom: 20,
-            minZoom: 7,
+            minZoom: isKabupaten ? 5 : 7,
             cacheSize: 512,
           });
 
-          // Style function disesuaikan untuk infrastruktur_segmen vs jalan_porosdesa
-          const styleFn = (feature: any) => {
-            const kondisi = String(feature.get("kondisi") || "").toLowerCase();
-            let strokeColor = isSegmen ? "#10b981" : "#2563eb";
-
-            if (kondisi.includes("rusak berat")) strokeColor = "#ef4444";
-            else if (kondisi.includes("rusak ringan")) strokeColor = "#f97316";
-            else if (kondisi.includes("sedang")) strokeColor = "#f59e0b";
-            else if (kondisi.includes("rusak")) strokeColor = "#f97316";
-            else if (kondisi.includes("baik")) strokeColor = "#10b981";
-
-            let textStyle: any = undefined;
-            const currentZoom = mapInstance?.getView()?.getZoom() || 0;
-            if (currentZoom >= 13.5) {
-              const labelText = String(feature.get(isSegmen ? "namobj" : "nama_ruas") || feature.get("nama_ruas") || feature.get("namobj") || "");
-              if (labelText && labelText !== "-") {
-                textStyle = new OlText({
-                  text: labelText,
-                  font: "600 11px Inter, sans-serif",
-                  fill: new Fill({ color: isSegmen ? "#064e3b" : "#1e3a8a" }),
-                  stroke: new Stroke({ color: "#ffffff", width: 3 }),
-                  placement: "line",
-                  overflow: false,
-                });
-              }
-            }
-
-            return new OlStyle({
-              stroke: new Stroke({
-                color: strokeColor,
-                width: currentZoom >= 14 ? (isSegmen ? 4 : 2.5) : (isSegmen ? 3 : 1.75),
-                lineCap: "round",
-                lineJoin: "round",
-              }),
-              text: textStyle,
-              zIndex: isSegmen ? 100 : 10,
-            });
-          };
-
           const olLayer = new VectorTileLayer({
             source,
-            style: styleFn,
             renderMode: "hybrid",
             declutter: true,
             opacity: effectiveOpacity,
             visible: layer.visible ?? true,
-            zIndex: mvtZIndex,
+            zIndex: layerZIndex,
           });
+
+          if (isKabupaten) {
+            olLayer.setStyle(createKabupatenStyleFn(olLayer));
+          } else {
+            olLayer.set("filterKecamatan", layer.filterKecamatan);
+            olLayer.set("filterStatus", layer.filterStatus);
+            olLayer.setStyle(createMvtStyleFn(olLayer, isSegmen));
+          }
 
           mapInstance.addLayer(olLayer);
           mvtLayersMap.set(layer.id, olLayer);
@@ -971,20 +1314,23 @@ function syncActiveWmsLayers() {
     }
 
     // B. Handle WMS Layer
-    if (layer.wmsUrl && layer.wmsLayerName) {
-      const wmsZIndex = 5 + (currentLayers.length - index);
+    const effectiveWmsUrl = layer.wmsUrl || layer.url;
+    const effectiveWmsLayerName = layer.wmsLayerName || layer.layer_name;
+
+    if (effectiveWmsUrl && effectiveWmsLayerName) {
+      const layerZIndex = 10 + (currentLayers.length - index) * 2;
       if (wmsLayersMap.has(layer.id)) {
         const olLayer = wmsLayersMap.get(layer.id);
         olLayer.setVisible(layer.visible);
         olLayer.setOpacity(layer.opacity ?? 1);
-        olLayer.setZIndex(wmsZIndex);
+        olLayer.setZIndex(layerZIndex);
       } else {
         try {
           const source = new TileWMS({
-            url: layer.wmsUrl,
+            url: effectiveWmsUrl,
             crossOrigin: "anonymous",
             params: {
-              LAYERS: layer.wmsLayerName,
+              LAYERS: effectiveWmsLayerName,
               TILED: true,
               VERSION: "1.1.1",
               FORMAT: "image/png",
@@ -998,13 +1344,13 @@ function syncActiveWmsLayers() {
             source,
             opacity: layer.opacity ?? 1,
             visible: layer.visible ?? true,
-            zIndex: wmsZIndex,
+            zIndex: layerZIndex,
           });
 
           mapInstance.addLayer(olLayer);
           wmsLayersMap.set(layer.id, olLayer);
         } catch (err) {
-          console.error(`Gagal memuat layer WMS [${layer.title}]:`, err);
+          console.error(`Gagal memuat layer WMS [${layer.title || layer.name}]:`, err);
         }
       }
     }
@@ -1015,7 +1361,7 @@ async function performWmsIdentify(olCoord: any) {
   if (!mapInstance || !olModules) return;
   const currentLayers = props.activeLayers || [];
   const visibleWmsLayers = currentLayers.filter(
-    (l) => l.wmsUrl && l.wmsLayerName && l.visible !== false
+    (l) => (l.wmsUrl || l.url) && (l.wmsLayerName || l.layer_name) && l.visible !== false
   );
 
   activeNamobj.value = null;
@@ -1032,6 +1378,11 @@ async function performWmsIdentify(olCoord: any) {
         (feature: any, layer: any) => {
           for (const [id, olLayer] of mvtLayersMap.entries()) {
             if (olLayer === layer) {
+              const styleFn = olLayer.getStyleFunction();
+              if (styleFn) {
+                const computedStyle = styleFn(feature, mapInstance.getView().getResolution());
+                if (!computedStyle) return;
+              }
               const match = currentLayers.find((l) => l.id === id);
               if (match && match.visible !== false) {
                 const rawProps = feature.getProperties() || {};
@@ -1066,6 +1417,15 @@ async function performWmsIdentify(olCoord: any) {
     console.warn("Gagal membaca fitur MVT at pixel:", err);
   }
 
+  // Prioritaskan fitur garis ruas/segmen atau titik di atas poligon wilayah agar jalan teridentifikasi lebih dahulu
+  vectorIdentified.sort((a, b) => {
+    const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
+    const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
+    if (isPolyA && !isPolyB) return 1;
+    if (!isPolyA && isPolyB) return -1;
+    return 0;
+  });
+
   // Jika tidak ada layer WMS yang aktif dan fitur vektor sudah ditemukan atau kosong
   if (visibleWmsLayers.length === 0) {
     if (vectorIdentified.length > 0) {
@@ -1089,9 +1449,10 @@ async function performWmsIdentify(olCoord: any) {
     const source = olLayer.getSource();
     if (!source || typeof source.getFeatureInfoUrl !== "function") return [];
 
+    const queryLayerName = layer.wmsLayerName || layer.layer_name;
     const url = source.getFeatureInfoUrl(olCoord, resolution, projection, {
       INFO_FORMAT: "application/json",
-      QUERY_LAYERS: layer.wmsLayerName,
+      QUERY_LAYERS: queryLayerName,
       FEATURE_COUNT: 5,
       BUFFER: 10,
     });
@@ -1251,12 +1612,23 @@ onMounted(() => {
   onUnmounted(() => {
     stopLiveTracking();
     resizeObserver.disconnect();
+    if (themeMutationObserver) {
+      themeMutationObserver.disconnect();
+      themeMutationObserver = null;
+    }
     if (mapInstance) {
       mapInstance.setTarget(undefined);
       mapInstance = null;
     }
   });
 });
+
+function toggleCartoGrid() {
+  showCartoGrid.value = !showCartoGrid.value;
+  if (graticuleLayer) {
+    graticuleLayer.setVisible(showCartoGrid.value);
+  }
+}
 
 function setCenterAndZoom(center: [number, number], zoom?: number, animate = false) {
   if (!mapInstance || !olModules) return;
@@ -1339,12 +1711,14 @@ function updateCursorOnHover(pixel: [number, number]) {
 }
 
 function handleMapMouseEnter() {
+  isPointerOnCanvas.value = true;
   if (mapContainer.value && document.activeElement !== mapContainer.value) {
     mapContainer.value.focus({ preventScroll: true });
   }
 }
 
 function handleMapMouseLeave() {
+  isPointerOnCanvas.value = false;
   if (mapInstance) {
     const viewport = mapInstance.getViewport();
     if (viewport) {
@@ -1568,7 +1942,7 @@ defineExpose({
       </div>
     </div>
 
-    <!-- Floating Navigation Controls & ScaleLine (Bottom Right with Dynamic Mobile Clearance) -->
+    <!-- Floating Navigation Controls (Bottom Right with Dynamic Mobile Clearance) -->
     <div
       class="absolute right-3 z-20 flex flex-col items-end gap-1.5 pointer-events-none transition-all duration-300 ease-out"
       :class="[
@@ -1586,17 +1960,96 @@ defineExpose({
         :speed="userSpeed"
         :heading="userHeading"
         :accuracy="userAccuracy"
+        :show-grid="showCartoGrid"
         @locate="locateUser"
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
         @share="emit('share')"
+        @toggle-grid="toggleCartoGrid"
       />
+    </div>
 
-      <!-- ScaleLine Mount Anchor (Underneath Map Controls in Bottom Right) -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- FLOATING SCALE BAR & LIVE CURSOR COORDINATES PANEL (BOTTOM CENTER)      -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div
+      class="absolute left-1/2 -translate-x-1/2 z-20 pointer-events-auto select-none transition-all duration-300 ease-out"
+      :class="[
+        mobileDrawerOpen && (mobileSheetSnap === 'peek' || mobileSheetSnap === 'full')
+          ? 'opacity-0 pointer-events-none translate-y-4'
+          : mobileDrawerOpen && mobileSheetSnap === 'min'
+            ? 'bottom-[calc(86px+env(safe-area-inset-bottom,0px))] opacity-100'
+            : clickedCoordinate
+              ? 'bottom-3 md:bottom-[160px] opacity-100'
+              : 'bottom-3 sm:bottom-4 opacity-100'
+      ]"
+    >
       <div
-        ref="scaleLineTarget"
-        class="pointer-events-auto select-none"
-      />
+        class="group flex items-center gap-2 sm:gap-3 px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-full bg-white/90 dark:bg-[#0b1322]/90 backdrop-blur-md border border-slate-200/90 dark:border-white/10 shadow-lg shadow-slate-900/5 dark:shadow-black/40 text-xs transition-colors hover:border-slate-300 dark:hover:border-white/20"
+      >
+        <!-- 1. Scale Bar Section (Left) -->
+        <div class="flex items-center shrink-0" title="Skala Peta">
+          <div
+            ref="scaleLineTarget"
+            class="flex items-center justify-center min-w-[65px] h-4.5 scale-line-container"
+          />
+        </div>
+
+        <!-- Vertical Divider -->
+        <div class="h-3.5 w-px bg-slate-200 dark:bg-white/15 shrink-0" />
+
+        <!-- 2. Cursor / Pointer Coordinates Section (Right) -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <!-- Coordinate Values (Click to Copy) -->
+          <button
+            type="button"
+            class="group/coord flex items-center gap-1 font-mono text-[11px] text-slate-700 dark:text-slate-200 font-medium hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+            :title="isCoordCopied ? 'Tersalin ke Clipboard!' : 'Klik untuk menyalin koordinat'"
+            @click="copyCurrentCoordinates"
+          >
+            <span v-if="coordDisplayFormat === 'dd'" class="tabular-nums">
+              <span>{{ formattedLatDisplay }}</span>
+              <span class="mx-1 text-slate-300 dark:text-slate-600">•</span>
+              <span>{{ formattedLngDisplay }}</span>
+            </span>
+
+            <span v-else class="tabular-nums text-[10.5px]">
+              {{ formattedDmsDisplay }}
+            </span>
+
+            <!-- Copy Success Badge / Icon -->
+            <Transition
+              enter-active-class="transition-all duration-150 ease-out"
+              enter-from-class="opacity-0 scale-75"
+              enter-to-class="opacity-100 scale-100"
+              leave-active-class="transition-all duration-150 ease-in"
+              leave-from-class="opacity-100 scale-100"
+              leave-to-class="opacity-0 scale-75"
+            >
+              <span
+                v-if="isCoordCopied"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-emerald-500 text-white text-[9px] font-sans font-bold shadow-xs ml-1"
+              >
+                <UIcon name="i-lucide-check" class="size-2.5" />
+                <span>Disalin</span>
+              </span>
+            </Transition>
+          </button>
+
+          <!-- Format Toggle Button (DD / DMS) -->
+          <button
+            type="button"
+            class="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold transition-colors cursor-pointer"
+            :class="coordDisplayFormat === 'dd'
+              ? 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/15'
+              : 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300'"
+            :title="`Beralih ke format ${coordDisplayFormat === 'dd' ? 'DMS (Derajat Menit Detik)' : 'DD (Derajat Desimal)'}`"
+            @click="coordDisplayFormat = coordDisplayFormat === 'dd' ? 'dms' : 'dd'"
+          >
+            {{ coordDisplayFormat.toUpperCase() }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -1613,34 +2066,35 @@ defineExpose({
   cursor: pointer !important;
 }
 
-/* ─── Transparent ScaleLine (Google Maps Style) ─────────────────────────────── */
+/* ─── ScaleLine Control in Bottom-Center Status Pill ────────────────────────── */
 :deep(.ol-scale-line) {
-  position: relative;
-  bottom: auto;
-  left: auto;
-  right: auto;
+  position: relative !important;
+  bottom: auto !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border: none !important;
   border-radius: 0 !important;
   padding: 0 !important;
+  margin: 0 !important;
   box-shadow: none !important;
 }
 
 :deep(.ol-scale-line-inner) {
-  color: #1e293b;
-  border: 1.5px solid #1e293b;
+  color: #334155;
+  border: 1.5px solid #475569;
   border-top: none;
   font-size: 10px;
-  font-weight: 600;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   text-align: center;
   margin: 0 auto;
-  padding: 1px 2px;
+  padding: 0 4px 1px;
   background: transparent !important;
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.95), 0 0 2px rgba(255, 255, 255, 0.95);
-  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.9));
+  line-height: 1.2;
   transition: color 0.2s ease, border-color 0.2s ease;
 }
 
@@ -1654,11 +2108,9 @@ defineExpose({
 
 :global(.dark) :deep(.ol-scale-line-inner),
 .dark :deep(.ol-scale-line-inner) {
-  color: #f1f5f9;
-  border: 1.5px solid #f1f5f9;
+  color: #e2e8f0;
+  border: 1.5px solid #94a3b8;
   border-top: none;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.9);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9));
 }
 
 /* ─── Click Shockwave Ring & Pin Pop Animation ───────────────────────────── */

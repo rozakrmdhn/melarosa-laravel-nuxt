@@ -2,7 +2,6 @@
 import MapCanvas, { type BasemapKey } from "~/components/maps/MapCanvas.vue";
 import LeftPanel from "~/components/maps/LeftPanel.vue";
 import BottomLocationBar from "~/components/maps/BottomLocationBar.vue";
-import KatalogDialog from "~/components/maps/KatalogDialog.vue";
 import MapMobileBottomSheet, { type SnapLevel } from "~/components/maps/MapMobileBottomSheet.vue";
 import MapShareModal from "~/components/maps/MapShareModal.vue";
 import type { ActiveLayerItem } from "~/types/map-layers";
@@ -13,7 +12,7 @@ definePageMeta({
 });
 
 useSeoMeta({
-  title: "Peta Interaktif | Melarosa GIS",
+  title: "Peta Interaktif",
   description: "Peta spasial interaktif Kabupaten Bojonegoro dengan pencarian lokasi, eksplorasi basemap, dan katalog layer tematik.",
 });
 
@@ -162,7 +161,7 @@ const clickedCoordinate = ref<[number, number] | null>(
 // Floating panels toggles
 const leftPanelOpen = ref(false);
 const locationBarOpen = ref(hasExplicitSearchOrPin);
-const isKatalogDialogOpen = ref(false);
+const selectedKecamatanFilter = ref<string | null>(null);
 const isShareModalOpen = ref(false);
 
 async function getMapSnapshot(): Promise<string | null> {
@@ -181,31 +180,43 @@ function mapLayerItemToActive(item: any): ActiveLayerItem {
     (item.protocol || "").toUpperCase() === "MVT" ||
     item.source_type === "martin" ||
     (item.url && item.url.includes("/martin/")) ||
-    (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(item.layer_name));
+    (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa", "bataswilayah_kabupaten"].includes(item.layer_name));
 
   const isSegmen = item.layer_name === "infrastruktur_segmen" || item.id === "01a1589c-8c15-70b6-a4fe-35517f888b36";
+  const isKabupaten =
+    item.layer_name === "bataswilayah_kabupaten" ||
+    item.id === "01a15e28-a042-71a0-b111-ed7d9256e5bf" ||
+    (item.url && item.url.includes("bataswilayah_kabupaten"));
+
+  const detectedMartinSource = item.martinSource || item.layer_name || (item.url ? item.url.match(/\/martin\/([^\/]+)/)?.[1] : undefined);
 
   return {
     id: String(item.id),
     title: item.name || item.title || item.layer_name,
     name: item.name || item.title || item.layer_name,
-    layer_name: item.layer_name || item.wmsLayerName || null,
+    layer_name: item.layer_name || item.wmsLayerName || (isKabupaten ? "bataswilayah_kabupaten" : null),
     protocol: isMvt ? "MVT" : (item.protocol || "WMS").toUpperCase().replace("OGC:", ""),
     url: item.url || item.wmsUrl || "",
-    instansi: item.instansi || item.attribution || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
-    attribution: item.attribution || item.instansi || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
-    agency: item.agency || item.instansi || item.attribution || (isSegmen || item.layer_name === "jalan_porosdesa" ? "Bappeda" : "BIG"),
-    description: item.description || null,
+    instansi: item.instansi || item.attribution || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" || isKabupaten ? "Bappeda" : "BIG"),
+    attribution: item.attribution || item.instansi || item.agency || (isSegmen || item.layer_name === "jalan_porosdesa" || isKabupaten ? "Bappeda" : "BIG"),
+    agency: item.agency || item.instansi || item.attribution || (isSegmen || item.layer_name === "jalan_porosdesa" || isKabupaten ? "Bappeda" : "BIG"),
+    description: item.description || (isKabupaten ? "Batas administrasi resmi wilayah Kabupaten Bojonegoro sesuai standar pemetaan RBI/BIG." : null),
     source_type: isMvt ? "martin" : (item.source_type || "external"),
     visible: true,
-    opacity: typeof item.opacity === "number" ? item.opacity : (isSegmen ? 1 : 0.9),
-    order: typeof item.order === "number" ? item.order : (isSegmen ? 0 : 1),
+    opacity: typeof item.opacity === "number" ? item.opacity : 1,
+    order: typeof item.order === "number" ? item.order : (isSegmen ? 0 : isKabupaten ? 13 : 1),
     wmsUrl: isMvt ? undefined : (item.wmsUrl || item.url),
     wmsLayerName: isMvt ? undefined : (item.wmsLayerName || item.layer_name),
     mvtUrl: isMvt ? (item.mvtUrl || item.url) : undefined,
-    martinSource: isMvt ? (item.martinSource || item.layer_name) : undefined,
-    expanded: isSegmen,
+    martinSource: isMvt ? (detectedMartinSource || (isKabupaten ? "bataswilayah_kabupaten" : isSegmen ? "infrastruktur_segmen" : "jalan_porosdesa")) : undefined,
+    expanded: false,
     activeTool: "none",
+    geoportal_id: item.geoportal_id,
+    category: item.category,
+    opd_name: item.opd_name,
+    legend_url: item.legend_url,
+    csw_metadata: item.csw_metadata,
+    last_synced_at: item.last_synced_at,
   };
 }
 
@@ -227,7 +238,7 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
     description: "Data spasial vektor MVT segmen jalan dan jembatan infrastruktur Kabupaten Bojonegoro.",
     visible: true,
     opacity: 1,
-    expanded: true,
+    expanded: false,
     activeTool: "none",
   },
   {
@@ -245,28 +256,29 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
     agency: "Bappeda",
     description: "Data spasial vektor MVT trase ruas jalan poros penghubung antar-desa Kabupaten Bojonegoro.",
     visible: true,
-    opacity: 0.9,
+    opacity: 1,
     expanded: false,
     activeTool: "none",
   },
   {
-    id: "868571d7-f20d-4028-ae23-680752603204",
-    title: "Administrasi Desa (Garis) Tahun 2019 Skala 1:10.000",
-    name: "Administrasi Desa (Garis) Tahun 2019 Skala 1:10.000",
-    layer_name: "palapa:ADMINISTRASIDESA_LN_10K_2019_BOJONEGORO",
-    protocol: "WMS",
-    url: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
-    instansi: "BIG",
-    attribution: "BIG",
-    agency: "BIG",
-    description: "Batas administrasi resmi desa dan kelurahan Kabupaten Bojonegoro.",
-    source_type: "geoserver",
-    wmsUrl: "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
-    wmsLayerName: "palapa:ADMINISTRASIDESA_LN_10K_2019_BOJONEGORO",
+    id: "01a15e28-a042-71a0-b111-ed7d9256e5bf",
+    title: "Batas Wilayah Kabupaten",
+    name: "Batas Wilayah Kabupaten",
+    layer_name: "bataswilayah_kabupaten",
+    protocol: "MVT",
+    url: "/martin/bataswilayah_kabupaten/{z}/{x}/{y}",
+    mvtUrl: "/martin/bataswilayah_kabupaten/{z}/{x}/{y}",
+    martinSource: "bataswilayah_kabupaten",
+    source_type: "martin",
+    instansi: "Bappeda",
+    attribution: "Bappeda",
+    agency: "Bappeda",
+    description: "Batas administrasi resmi wilayah Kabupaten Bojonegoro sesuai standar pemetaan RBI/BIG.",
     visible: true,
-    opacity: 0.7,
+    opacity: 1,
     expanded: false,
     activeTool: "none",
+    order: 13,
   },
 ];
 
@@ -327,7 +339,7 @@ const BASEMAP_OPTIONS: BasemapOption[] = [
 ];
 
 // Mobile drawers
-type MobileDrawerTab = "layer" | "kecamatan" | "inspector";
+type MobileDrawerTab = "layer" | "geoportal" | "kecamatan" | "inspector";
 const mobileDrawerOpen = ref(false);
 const mobileDrawerTab = ref<MobileDrawerTab>("layer");
 const mobileSheetSnap = ref<SnapLevel>("min");
@@ -538,6 +550,16 @@ function handleSelectLocation(payload: { name: string; coordinate: [number, numb
   }
 }
 
+function handleSelectKecamatan(payload: { name: string; coordinate: [number, number]; zoom?: number }) {
+  mapCanvasRef.value?.flyTo(payload.coordinate, payload.zoom ?? 13.5);
+  // Di mobile drawer, jangan paksa pindah tab inspector agar pengguna tetap berada di Tab Wilayah
+  if (!mobileDrawerOpen.value) {
+    clickedCoordinate.value = payload.coordinate;
+    searchedLocationLabel.value = payload.name;
+    locationBarOpen.value = true;
+  }
+}
+
 function extractNamobj(props: Record<string, any> | undefined): string | null {
   if (!props) return null;
   // 1. Cek langsung kunci NAMOBJ (case-insensitive)
@@ -645,7 +667,7 @@ function openMobileTab(tab: MobileDrawerTab) {
 
 function toggleLeftPanel() {
   if (typeof window !== "undefined" && window.innerWidth < 768) {
-    if (mobileDrawerOpen.value && (mobileDrawerTab.value === "layer" || mobileDrawerTab.value === "kecamatan")) {
+    if (mobileDrawerOpen.value && (mobileDrawerTab.value === "layer" || mobileDrawerTab.value === "geoportal" || mobileDrawerTab.value === "kecamatan")) {
       mobileDrawerOpen.value = false;
     } else {
       openMobileTab("layer");
@@ -679,11 +701,37 @@ function handleUpdateLayerOpacity(payload: { layerId: string; opacity: number })
 }
 
 function handleUpdateLayerFilter(payload: { layerId: string; kecamatan: string | null; status: string | null }) {
-  const target = activeLayers.value.find((l) => l.id === payload.layerId);
-  if (target) {
-    target.filterKecamatan = payload.kecamatan;
-    target.filterStatus = payload.status;
-  }
+  activeLayers.value = activeLayers.value.map((layer) => {
+    if (layer.id === payload.layerId) {
+      return {
+        ...layer,
+        filterKecamatan: payload.kecamatan,
+        filterStatus: payload.status,
+      };
+    }
+    return layer;
+  });
+}
+
+function handleFilterWilayah(kecamatanName: string | null) {
+  selectedKecamatanFilter.value = kecamatanName;
+  activeLayers.value = activeLayers.value.map((layer) => {
+    const isMvt =
+      (layer.protocol || "").toUpperCase() === "MVT" ||
+      layer.source_type === "martin" ||
+      (layer.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(layer.layer_name));
+    if (isMvt) {
+      return {
+        ...layer,
+        filterKecamatan: kecamatanName,
+      };
+    }
+    return layer;
+  });
+}
+
+function handleReorderLayers(newLayers: ActiveLayerItem[]) {
+  activeLayers.value = [...newLayers];
 }
 
 function handleRemoveLayer(layerId: string) {
@@ -698,20 +746,11 @@ function handleSelectDataset(dataset: any) {
     existing.visible = true;
     existing.expanded = true;
   } else {
-    activeLayers.value.push(mapLayerItemToActive(dataset));
-
-    // Pastikan infrastruktur-segmen selalu berada di posisi paling atas (index 0)
-    activeLayers.value.sort((a, b) => {
-      const isSegmenA = a.layer_name === "infrastruktur_segmen" || a.id.includes("segmen");
-      const isSegmenB = b.layer_name === "infrastruktur_segmen" || b.id.includes("segmen");
-      if (isSegmenA) return -1;
-      if (isSegmenB) return 1;
-      return (a.order ?? 0) - (b.order ?? 0);
-    });
+    // Sisipkan layer baru di posisi teratas tumpukan
+    activeLayers.value.unshift(mapLayerItemToActive(dataset));
   }
 
   leftPanelOpen.value = true;
-  isKatalogDialogOpen.value = false;
 }
 </script>
 
@@ -755,15 +794,18 @@ function handleSelectDataset(dataset: any) {
         <LeftPanel
           v-model:current-basemap="currentBasemap"
           :active-layers="activeLayers"
+          :selected-kecamatan-filter="selectedKecamatanFilter"
           @close="leftPanelOpen = false"
-          @zoom-to-home="mapCanvasRef?.resetView()"
-          @select-kecamatan="handleSelectLocation"
-          @open-katalog-dialog="isKatalogDialogOpen = true"
+          @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView()"
+          @select-kecamatan="handleSelectKecamatan"
+          @filter-wilayah="handleFilterWilayah"
+          @reorder-layers="handleReorderLayers"
           @zoom-to-layer="handleZoomToLayer"
           @toggle-layer-visibility="handleToggleLayerVisibility"
           @update-layer-opacity="handleUpdateLayerOpacity"
           @update-layer-filter="handleUpdateLayerFilter"
           @remove-layer="handleRemoveLayer"
+          @add-layer="handleSelectDataset"
         />
       </div>
     </Transition>
@@ -857,27 +899,33 @@ function handleSelectDataset(dataset: any) {
       :title="
         mobileDrawerTab === 'layer'
           ? 'Panel Lapisan Peta'
-          : mobileDrawerTab === 'kecamatan'
-            ? 'Wilayah Bojonegoro'
-            : (searchedLocationLabel || 'Informasi Lokasi & Titik')
+          : mobileDrawerTab === 'geoportal'
+            ? 'Katalog Geoportal'
+            : mobileDrawerTab === 'kecamatan'
+              ? 'Wilayah Bojonegoro'
+              : (searchedLocationLabel || 'Informasi Lokasi & Titik')
       "
       :subtitle="
         mobileDrawerTab === 'layer'
           ? `${activeLayers.length} Layer Aktif · Bojonegoro`
-          : mobileDrawerTab === 'kecamatan'
-            ? '28 Wilayah Kecamatan Terdata'
-            : (searchedLocationLabel && clickedCoordinate
-                ? `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`
-                : (clickedCoordinate
-                    ? `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`
-                    : 'Ketuk area peta untuk info detail'))
+          : mobileDrawerTab === 'geoportal'
+            ? 'Katalog Layer Resmi JIGN Bojonegoro'
+            : mobileDrawerTab === 'kecamatan'
+              ? (selectedKecamatanFilter ? `Filter Aktif: Kec. ${selectedKecamatanFilter}` : '28 Wilayah Kecamatan Terdata')
+              : (searchedLocationLabel && clickedCoordinate
+                  ? `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`
+                  : (clickedCoordinate
+                      ? `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`
+                      : 'Ketuk area peta untuk info detail'))
       "
       :icon="
         mobileDrawerTab === 'layer'
           ? 'i-lucide-layers'
-          : mobileDrawerTab === 'kecamatan'
-            ? 'i-lucide-compass'
-            : 'i-lucide-map-pin'
+          : mobileDrawerTab === 'geoportal'
+            ? 'i-lucide-globe-2'
+            : mobileDrawerTab === 'kecamatan'
+              ? 'i-lucide-compass'
+              : 'i-lucide-map-pin'
       "
     >
       <!-- Action Header Button: Bagikan Peta -->
@@ -893,24 +941,24 @@ function handleSelectDataset(dataset: any) {
         </button>
       </template>
 
-      <!-- Quick Tab Switcher inside Sheet (3 tabs: Lapisan Peta, Wilayah, Lokasi) -->
+      <!-- Quick Tab Switcher inside Sheet (4 tabs: Layer, Geoportal, Wilayah, Lokasi) -->
       <template #tabs>
-        <div class="px-3 pt-1 pb-2 border-b border-gray-100 dark:border-gray-800/80 bg-gray-50/50 dark:bg-gray-900/30">
-          <div class="grid grid-cols-3 gap-1.5 p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl">
+        <div class="px-2 sm:px-3 pt-1 pb-2 border-b border-gray-100 dark:border-gray-800/80 bg-gray-50/50 dark:bg-gray-900/30">
+          <div class="grid grid-cols-4 gap-1 p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl">
             <!-- Tab 1: Layer -->
             <button
               type="button"
-              class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[38px]"
+              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[40px] select-none"
               :class="mobileDrawerTab === 'layer'
                 ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'layer'"
+              @click="mobileDrawerTab = 'layer'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
             >
               <UIcon name="i-lucide-layers" class="size-3.5 shrink-0" />
-              <span>Layer</span>
+              <span class="truncate text-[11px] sm:text-xs">Layer</span>
               <span
                 v-if="activeLayers.length > 0"
-                class="px-1.5 py-0.2 rounded-full text-[9px] font-mono leading-tight"
+                class="hidden sm:inline-block px-1.5 py-0.2 rounded-full text-[9px] font-mono leading-tight shrink-0"
                 :class="mobileDrawerTab === 'layer'
                   ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300'
                   : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
@@ -919,38 +967,48 @@ function handleSelectDataset(dataset: any) {
               </span>
             </button>
 
-            <!-- Tab 2: Wilayah -->
+            <!-- Tab 2: Geoportal -->
             <button
               type="button"
-              class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[38px]"
+              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[40px] select-none"
+              :class="mobileDrawerTab === 'geoportal'
+                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
+              @click="mobileDrawerTab = 'geoportal'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+            >
+              <UIcon name="i-lucide-globe-2" class="size-3.5 shrink-0" />
+              <span class="truncate text-[11px] sm:text-xs">Geoportal</span>
+            </button>
+
+            <!-- Tab 3: Wilayah -->
+            <button
+              type="button"
+              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[40px] select-none"
               :class="mobileDrawerTab === 'kecamatan'
                 ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'kecamatan'"
+              @click="mobileDrawerTab = 'kecamatan'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
             >
               <UIcon name="i-lucide-compass" class="size-3.5 shrink-0" />
-              <span>Wilayah</span>
+              <span class="truncate text-[11px] sm:text-xs">Wilayah</span>
               <span
-                class="px-1.5 py-0.2 rounded-full text-[9px] font-mono leading-tight"
-                :class="mobileDrawerTab === 'kecamatan'
-                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
-              >
-                28
-              </span>
+                v-if="selectedKecamatanFilter"
+                class="size-1.5 rounded-full bg-blue-500 shrink-0"
+                title="Filter Aktif"
+              />
             </button>
 
-            <!-- Tab 3: Detail / Lokasi -->
+            <!-- Tab 4: Detail / Lokasi -->
             <button
               type="button"
-              class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all relative cursor-pointer min-h-[38px]"
+              class="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 py-1.5 px-1 rounded-lg text-xs font-medium transition-all relative cursor-pointer min-h-[40px] select-none"
               :class="mobileDrawerTab === 'inspector'
                 ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'inspector'"
+              @click="mobileDrawerTab = 'inspector'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
             >
               <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
-              <span>Lokasi</span>
+              <span class="truncate text-[11px] sm:text-xs">Lokasi</span>
               <span
                 v-if="clickedCoordinate"
                 class="size-1.5 rounded-full bg-blue-500 shrink-0"
@@ -962,29 +1020,32 @@ function handleSelectDataset(dataset: any) {
 
       <!-- Content Body inside Sheet (Persistent with v-show to avoid unmounting & refetching) -->
       <div class="h-full flex flex-col min-h-0">
-        <!-- 1 & 2. Layer & Wilayah (Kecamatan) Tabs (Unified single persistent LeftPanel instance) -->
+        <!-- 1, 2 & 3. Layer, Geoportal & Wilayah (Kecamatan) Tabs (Unified single persistent LeftPanel instance) -->
         <div
-          v-show="mobileDrawerTab === 'layer' || mobileDrawerTab === 'kecamatan'"
+          v-show="mobileDrawerTab === 'layer' || mobileDrawerTab === 'geoportal' || mobileDrawerTab === 'kecamatan'"
           class="h-full flex flex-col min-h-0"
         >
           <LeftPanel
             v-model:current-basemap="currentBasemap"
             :is-mobile-drawer="true"
             :active-layers="activeLayers"
-            :active-tab="mobileDrawerTab === 'kecamatan' ? 'kecamatan' : 'layers'"
+            :active-tab="mobileDrawerTab === 'geoportal' ? 'geoportal' : mobileDrawerTab === 'kecamatan' ? 'kecamatan' : 'layers'"
+            :selected-kecamatan-filter="selectedKecamatanFilter"
             @close="mobileDrawerOpen = false"
-            @zoom-to-home="mapCanvasRef?.resetView(); mobileDrawerOpen = false"
-            @select-kecamatan="handleSelectLocation"
-            @open-katalog-dialog="isKatalogDialogOpen = true; mobileDrawerOpen = false"
+            @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView(); mobileDrawerOpen = false"
+            @select-kecamatan="handleSelectKecamatan"
+            @filter-wilayah="handleFilterWilayah"
+            @reorder-layers="handleReorderLayers"
             @zoom-to-layer="handleZoomToLayer"
             @toggle-layer-visibility="handleToggleLayerVisibility"
             @update-layer-opacity="handleUpdateLayerOpacity"
             @update-layer-filter="handleUpdateLayerFilter"
             @remove-layer="handleRemoveLayer"
+            @add-layer="handleSelectDataset"
           />
         </div>
 
-        <!-- 3. Lokasi / Detail Tab (Persistent BottomLocationBar) -->
+        <!-- 4. Lokasi / Detail Tab (Persistent BottomLocationBar) -->
         <div
           v-show="mobileDrawerTab === 'inspector'"
           class="h-full flex flex-col min-h-0"
@@ -1003,13 +1064,6 @@ function handleSelectDataset(dataset: any) {
       </div>
     </MapMobileBottomSheet>
 
-    <!-- ═══ 9. DIALOG KATALOG DATA SPASIAL ═════════════════════════════════════ -->
-    <KatalogDialog
-      v-model:open="isKatalogDialogOpen"
-      :layers-data="layersData"
-      :active-layer-ids="activeLayerIds"
-      @select-dataset="handleSelectDataset"
-    />
 
     <!-- ═══ 10. DIALOG BAGIKAN PETA & POSTINGAN SOSIAL MEDIA ═══════════════════ -->
     <MapShareModal

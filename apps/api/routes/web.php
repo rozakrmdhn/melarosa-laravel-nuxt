@@ -12,7 +12,9 @@ use App\Http\Controllers\Admin\InfrastrukturSegmenController;
 use App\Http\Controllers\Admin\InfrastrukturTipeController;
 use App\Http\Controllers\Admin\InfrastrukturVerifikasiController;
 use App\Http\Controllers\Admin\JalanPorosDesaController;
+use App\Http\Controllers\Admin\GeoportalLayerController;
 use App\Http\Controllers\Admin\LayerController;
+use App\Http\Controllers\Gis\GeoportalPublicLayerController;
 use App\Http\Controllers\Admin\MonitoringRealisasiController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\PlottingAnggaranController;
@@ -166,6 +168,8 @@ Route::prefix('api/v1')->group(function () {
             Route::get('layers', [LayerController::class, 'index'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.index');
             Route::post('layers', [LayerController::class, 'store'])->middleware('permission:layers-create|layers-manage')->name('admin.layers.store');
             Route::post('layers/reorder', [LayerController::class, 'reorder'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.reorder');
+            Route::post('layers/geoportal/sync', [GeoportalLayerController::class, 'sync'])->middleware('permission:layers-create|layers-update|layers-manage')->name('admin.layers.geoportal.sync');
+            Route::get('layers/geoportal/sync-history', [GeoportalLayerController::class, 'syncHistory'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.geoportal.history');
             Route::get('layers/{layer}', [LayerController::class, 'show'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.show');
             Route::put('layers/{layer}', [LayerController::class, 'update'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.update');
             Route::delete('layers/{layer}', [LayerController::class, 'destroy'])->middleware('permission:layers-delete|layers-manage')->name('admin.layers.destroy');
@@ -216,6 +220,10 @@ Route::prefix('api/v1')->group(function () {
 
     // Map Viewer Active Layers Feed (Public / Map accessible)
     Route::get('layers', [LayerController::class, 'activeLayers'])->name('layers.active');
+    Route::get('layers/geoportal', [GeoportalPublicLayerController::class, 'index'])->name('layers.geoportal.index');
+    Route::get('layers/geoportal/{layer}/metadata', [GeoportalPublicLayerController::class, 'metadata'])->name('layers.geoportal.metadata');
+    Route::get('layers/geoportal/{layer}/attributes', [GeoportalPublicLayerController::class, 'attributes'])->name('layers.geoportal.attributes');
+    Route::get('layers/geoportal/{layer}/csw-xml', [GeoportalPublicLayerController::class, 'cswXml'])->name('layers.geoportal.cswXml');
 
     // WMS GetFeatureInfo Proxy
     Route::get('wms/feature-info', function (\Illuminate\Http\Request $request) {

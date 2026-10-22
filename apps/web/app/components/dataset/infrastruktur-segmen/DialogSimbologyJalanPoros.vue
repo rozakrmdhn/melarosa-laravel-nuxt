@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import SimbologyContent from '~/components/dataset/infrastruktur-segmen/SimbologyContent.vue';
 import type { LayerSymbology } from '~/types/dataset-editor';
-import { DEFAULT_SYMBOLOGY } from '~/types/dataset-editor';
+import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from '~/types/dataset-editor';
 
 interface Props {
   open?: boolean;
@@ -11,9 +11,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   open: false,
   symbology: () => ({
-    ...DEFAULT_SYMBOLOGY,
-    lineColor: '#FF9100',
-    lineWidth: 2,
+    ...DEFAULT_JALAN_POROS_SYMBOLOGY,
   }),
 });
 

@@ -3,6 +3,7 @@ interface Props {
   isLocating?: boolean;
   hasLocation?: boolean;
   showLocate?: boolean;
+  showGrid?: boolean;
   speed?: number | null; // km/jam
   heading?: number | null; // derajat 0-360
   accuracy?: number | null; // meter
@@ -12,6 +13,7 @@ const props = withDefaults(defineProps<Props>(), {
   isLocating: false,
   hasLocation: false,
   showLocate: true,
+  showGrid: false,
   speed: null,
   heading: null,
   accuracy: null,
@@ -22,6 +24,7 @@ const emit = defineEmits<{
   (e: "zoom-in"): void;
   (e: "zoom-out"): void;
   (e: "share"): void;
+  (e: "toggle-grid"): void;
 }>();
 
 function getCardinal(deg: number): string {
@@ -176,6 +179,29 @@ const locationTooltip = computed(() => {
           @click="emit('zoom-out')"
         >
           <UIcon name="i-lucide-minus" class="size-4 stroke-[2.25]" />
+        </button>
+      </UTooltip>
+    </div>
+
+    <!-- ═══ 4. CARTOGRAPHIC GRID TOGGLE (Directly Underneath Zoom Controls) ═══ -->
+    <div
+      class="pointer-events-auto flex items-center bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border rounded-lg sm:rounded-xl shadow-md hover:shadow-lg transition-all duration-200 overflow-hidden"
+      :class="props.showGrid
+        ? 'border-blue-500/80 dark:border-blue-600/80 ring-2 ring-blue-500/25 shadow-blue-500/15'
+        : 'border-gray-200/90 dark:border-gray-800'"
+    >
+      <UTooltip :text="props.showGrid ? 'Sembunyikan Grid Kartografi & Koordinat' : 'Tampilkan Grid Kartografi & Koordinat Tepi'">
+        <button
+          type="button"
+          class="min-w-[44px] min-h-[44px] flex items-center justify-center transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-1.5 focus-visible:ring-blue-500 z-10 active:scale-90"
+          :class="props.showGrid
+            ? 'text-blue-600 dark:text-blue-400 bg-blue-50/70 dark:bg-blue-950/50 hover:bg-blue-100/70 dark:hover:bg-blue-900/50'
+            : 'text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100/80 dark:hover:bg-slate-800/80'"
+          :aria-pressed="props.showGrid"
+          aria-label="Toggle Grid Kartografi & Koordinat Tepi"
+          @click="emit('toggle-grid')"
+        >
+          <UIcon name="i-lucide-grid-3x3" class="size-4 stroke-[2.25]" />
         </button>
       </UTooltip>
     </div>

@@ -37,8 +37,15 @@ export interface ActiveLayerItem {
   filterKecamatan?: string | null;
   filterStatus?: string | null;
 
-  // Optional legacy fields for backward compatibility
+  // Geoportal fields
+  geoportal_id?: string | null;
   category?: string;
+  opd_name?: string | null;
+  legend_url?: string | null;
+  csw_metadata?: Record<string, any> | null;
+  last_synced_at?: string | null;
+
+  // Optional legacy fields for backward compatibility
   format?: string[];
   crs?: string;
   featuresCount?: string;

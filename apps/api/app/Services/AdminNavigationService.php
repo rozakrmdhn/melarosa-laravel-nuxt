@@ -106,6 +106,12 @@ class AdminNavigationService
                         'permission' => ['infrastruktur-segmen-view', 'infrastruktur-segmen-create'],
                     ],
                     [
+                        'label' => 'Rekapitulasi Jalan',
+                        'icon' => 'i-lucide-table-properties',
+                        'to' => '/admin/rekap-jalan',
+                        'permission' => ['infrastruktur-segmen-view', 'jalan-poros-desa-view'],
+                    ],
+                    [
                         'label' => 'Verifikasi Lapangan',
                         'icon' => 'i-lucide-check-check',
                         'to' => '/admin/verifikasi-segmen',
@@ -206,6 +212,8 @@ class AdminNavigationService
                         'label' => 'Public Site',
                         'icon' => 'i-lucide-external-link',
                         'to' => '/',
+                        'target' => '_blank',
+                        'exact' => true,
                     ],
                 ],
             ],

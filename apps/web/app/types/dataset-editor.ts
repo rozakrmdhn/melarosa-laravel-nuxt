@@ -102,6 +102,14 @@ export const DEFAULT_SYMBOLOGY: LayerSymbology = {
   labelMinZoom: 13,
 };
 
+export const DEFAULT_JALAN_POROS_SYMBOLOGY: LayerSymbology = {
+  ...DEFAULT_SYMBOLOGY,
+  colorMode: "kondisi",
+  lineColor: "#2563eb",
+  lineWidth: 2,
+  lineDash: "solid",
+};
+
 export type LayerId = 'infrastruktur-segmen' | 'jalan-poros-desa' | string;
 
 export interface GisLayerItem {

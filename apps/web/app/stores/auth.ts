@@ -4,6 +4,7 @@ export interface NavItem {
   label: string;
   icon: string;
   to?: string;
+  target?: string;
   exact?: boolean;
   children?: NavItem[];
 }

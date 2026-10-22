@@ -22,6 +22,12 @@ interface DatasetItem {
   mvtUrl?: string;
   martinSource?: string;
   apiEndpoint?: string;
+  geoportal_id?: string | null;
+  category?: string | null;
+  opd_name?: string | null;
+  legend_url?: string | null;
+  csw_metadata?: any;
+  last_synced_at?: string | null;
 }
 
 const props = withDefaults(
@@ -100,6 +106,12 @@ const allDatasets = computed<DatasetItem[]>(() => {
         mvtUrl: isMvt ? item.url : undefined,
         martinSource: isMvt ? item.layer_name : undefined,
         apiEndpoint: item.url,
+        geoportal_id: item.geoportal_id,
+        category: item.category,
+        opd_name: item.opd_name,
+        legend_url: item.legend_url,
+        csw_metadata: item.csw_metadata,
+        last_synced_at: item.last_synced_at,
       };
     })
     .sort((a, b) => {
@@ -262,12 +274,31 @@ async function copyEndpoint(item: DatasetItem) {
                     class="text-[10px] px-2 py-0.5 rounded-lg font-mono uppercase"
                   />
                   <UBadge
-                    v-if="item.source_type"
+                    v-if="item.source_type === 'geoportal'"
+                    label="Geoportal Bojonegoro"
+                    size="xs"
+                    color="info"
+                    variant="subtle"
+                    class="text-[10px] px-2 py-0.5 rounded-lg font-bold flex items-center gap-1"
+                  >
+                    <UIcon name="i-lucide-globe-2" class="size-3" />
+                    <span>Geoportal Bojonegoro</span>
+                  </UBadge>
+                  <UBadge
+                    v-else-if="item.source_type"
                     :label="item.source_type"
                     size="xs"
                     color="neutral"
                     variant="subtle"
                     class="text-[10px] px-2 py-0.5 rounded-lg capitalize"
+                  />
+                  <UBadge
+                    v-if="item.category"
+                    :label="item.category"
+                    size="xs"
+                    color="neutral"
+                    variant="outline"
+                    class="text-[10px] px-2 py-0.5 rounded-lg"
                   />
                 </div>
 

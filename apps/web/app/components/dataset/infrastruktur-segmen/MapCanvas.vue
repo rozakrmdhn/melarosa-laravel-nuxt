@@ -3,7 +3,7 @@ import 'ol/ol.css';
 import { $http } from '~/utils/helpers';
 import type { GeoJsonFeatureCollection, InfrastrukturSegmen } from '~/types/infrastruktur';
 import type { BasemapType, LayerSymbology } from '~/types/dataset-editor';
-import { DEFAULT_SYMBOLOGY } from '~/types/dataset-editor';
+import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from '~/types/dataset-editor';
 
 interface Props {
   apiBase?: string;
@@ -23,6 +23,7 @@ interface Props {
   symbology?: LayerSymbology;
   bbox?: [number, number, number, number] | null;
   clickedCoordinate?: [number, number] | null;
+  activeLayerId?: string;
 
   // Jalan Poros Desa Layer Props
   jalanPorosDesaVisible?: boolean;
@@ -36,6 +37,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   apiBase: 'http://localhost:9000',
+  activeLayerId: 'infrastruktur-segmen',
   geojsonData: null,
   selectedSegmenId: null,
   selectedSegmen: null,
@@ -56,9 +58,7 @@ const props = withDefaults(defineProps<Props>(), {
   jalanPorosDesaVisible: true,
   jalanPorosDesaOpacity: 0.85,
   jalanPorosDesaSymbology: () => ({
-    ...DEFAULT_SYMBOLOGY,
-    lineColor: '#2563eb',
-    lineWidth: 2,
+    ...DEFAULT_JALAN_POROS_SYMBOLOGY,
   }),
   jalanPorosDesaKecamatanFilter: null,
   jalanPorosDesaDesaFilter: null,
@@ -137,17 +137,120 @@ let resizeObserver: ResizeObserver | null = null;
 let resizeRaf: number | null = null;
 let pointerRafId: number | null = null;
 
-// Hover & Tooltip State
-const hoveredFeature = ref<any>(null);
-const tooltipData = ref<{
+// Hover & Tooltip / Popup Feature State
+export interface PopupFeatureData {
   id: string;
+  layerId: string;
+  layerTitle: string;
   namobj: string;
-  tipe_kode: string;
+  kode_ruas?: string | null;
+  tipe_kode?: string | null;
   kondisi: string;
+  perkerasan?: string | null;
   panjang: number;
+  lebar?: number | null;
   desa: string;
   kecamatan: string;
-} | null>(null);
+  sumber_dana?: string | null;
+  tahun?: number | string | null;
+  status_kondisi?: string | null;
+  status_verifikasi?: string | null;
+  status_eksisting?: string | null;
+  sumber_data?: string | null;
+}
+
+const hoveredFeature = ref<any>(null);
+const tooltipData = ref<PopupFeatureData | null>(null);
+const isPopupPinned = ref(false);
+
+function closePopup() {
+  isPopupPinned.value = false;
+  tooltipData.value = null;
+  hoveredFeature.value = null;
+  if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+  vectorTileLayer?.changed();
+  jalanPorosVectorTileLayer?.changed();
+}
+
+function showTooltipAt(coord: any) {
+  if (!tooltipOverlay) return;
+  try {
+    tooltipOverlay.setOffset([24, -20]);
+    tooltipOverlay.setPositioning('bottom-left');
+    tooltipOverlay.setPosition(coord);
+  } catch {
+    tooltipOverlay.setPosition(coord);
+  }
+}
+
+function getTargetVectorTileLayer() {
+  if (props.activeLayerId === 'jalan-poros-desa') {
+    return jalanPorosVectorTileLayer;
+  }
+  return vectorTileLayer;
+}
+
+function isTargetLayerVisible() {
+  if (props.activeLayerId === 'jalan-poros-desa') {
+    return !!props.jalanPorosDesaVisible;
+  }
+  return !!props.layerVisible;
+}
+
+function extractFeatureData(feature: any, layerId: string): PopupFeatureData {
+  const p = feature.getProperties?.() ?? {};
+  const featId = String(p.id || feature.getId?.() || feature.get?.('id') || '');
+  const pMeter = p.panjang_meter_gis != null && p.panjang_meter_gis !== '' ? parseFloat(p.panjang_meter_gis) : null;
+  const pManual = p.panjang != null && p.panjang !== '' ? parseFloat(p.panjang) : null;
+  const panjang = pMeter ?? pManual ?? 0;
+  const lebar = p.lebar != null && p.lebar !== '' ? parseFloat(p.lebar) : null;
+
+  if (layerId === 'jalan-poros-desa') {
+    return {
+      id: featId,
+      layerId: 'jalan-poros-desa',
+      layerTitle: 'Jalan Poros Desa',
+      namobj: p.nama_ruas || p.namobj || 'Jalan Poros Desa',
+      kode_ruas: p.kode_ruas || null,
+      tipe_kode: p.kode_ruas || 'Jalan Poros',
+      kondisi: p.kondisi || 'Baik',
+      perkerasan: p.perkerasan || null,
+      panjang,
+      lebar,
+      desa: p.desa || '-',
+      kecamatan: p.kecamatan || '-',
+      status_kondisi: p.status_eksisting || p.status_kondisi || null,
+      status_eksisting: p.status_eksisting || null,
+      sumber_data: p.sumber_data || null,
+    };
+  }
+
+  return {
+    id: featId,
+    layerId: 'infrastruktur-segmen',
+    layerTitle: 'Segmen Fisik Infrastruktur',
+    namobj: p.namobj || 'Segmen Fisik',
+    kode_ruas: null,
+    tipe_kode: p.tipe_kode || '-',
+    kondisi: p.kondisi || 'Baik',
+    perkerasan: p.jenis_perkerasan || p.perkerasan || null,
+    panjang,
+    lebar,
+    desa: p.desa || '-',
+    kecamatan: p.kecamatan || '-',
+    status_kondisi: p.status_kondisi || 'Eksisting',
+    status_verifikasi: p.status_verifikasi || 'draft',
+    sumber_dana: p.sumber_dana || null,
+    tahun: p.tahun_pembangunan || null,
+  };
+}
+
+watch(
+  () => props.activeLayerId,
+  () => {
+    closePopup();
+  }
+);
 
 // ─── Digitizing (Draw) State ──────────────────────────────────────────────────
 const isDrawing = ref(false);
@@ -309,22 +412,26 @@ function getJalanPorosStyle(feature: any) {
     if (!fPerk.includes(filterPerk)) return null;
   }
 
-  const sym = props.jalanPorosDesaSymbology || DEFAULT_SYMBOLOGY;
+  const sym = props.jalanPorosDesaSymbology || DEFAULT_JALAN_POROS_SYMBOLOGY;
 
   let strokeColor = sym.lineColor || '#2563eb';
   const kondisi = feature.get('kondisi');
   const perkerasan = feature.get('perkerasan');
 
   if (sym.colorMode === 'kondisi') {
-    if (kondisi === 'Baik') strokeColor = '#10b981';
-    else if (kondisi === 'Sedang') strokeColor = '#f59e0b';
-    else if (kondisi === 'Rusak Ringan') strokeColor = '#f97316';
-    else if (kondisi === 'Rusak Berat') strokeColor = '#ef4444';
+    const k = String(kondisi || '').toLowerCase();
+    if (k.includes('rusak berat')) strokeColor = '#ef4444';
+    else if (k.includes('rusak ringan')) strokeColor = '#f97316';
+    else if (k.includes('sedang')) strokeColor = '#f59e0b';
+    else if (k.includes('rusak')) strokeColor = '#f97316';
+    else if (k.includes('baik')) strokeColor = '#10b981';
+    else strokeColor = sym.lineColor || '#2563eb';
   } else if (sym.colorMode === 'perkerasan') {
-    if (perkerasan === 'Aspal') strokeColor = '#3b82f6';
-    else if (perkerasan === 'Beton') strokeColor = '#10b981';
-    else if (perkerasan === 'Kerikil') strokeColor = '#f59e0b';
-    else if (perkerasan === 'Tanah') strokeColor = '#8b5cf6';
+    const p = String(perkerasan || '').toLowerCase();
+    if (p.includes('aspal')) strokeColor = '#3b82f6';
+    else if (p.includes('beton')) strokeColor = '#10b981';
+    else if (p.includes('kerikil')) strokeColor = '#f59e0b';
+    else if (p.includes('tanah')) strokeColor = '#8b5cf6';
   }
 
   let lineDash: number[] | undefined = undefined;
@@ -353,6 +460,37 @@ function getJalanPorosStyle(feature: any) {
         });
       }
     }
+  }
+
+  const featId = String(feature.get('id') || feature.getId() || '');
+  const hoverId = hoveredFeature.value ? String(hoveredFeature.value.get('id') || hoveredFeature.value.getId() || '') : '';
+  const isHovered = Boolean(props.activeLayerId === 'jalan-poros-desa' && hoverId && hoverId === featId);
+  const isPinned = Boolean(props.activeLayerId === 'jalan-poros-desa' && isPopupPinned.value && tooltipData.value?.id === featId);
+
+  if (isPinned) {
+    return new Style({
+      stroke: new Stroke({
+        color: '#0284c7',
+        width: Math.max(strokeWidth + 2.5, 4.5),
+        lineCap: 'round',
+        lineJoin: 'round',
+      }),
+      text: textStyle,
+      zIndex: 100,
+    });
+  }
+
+  if (isHovered) {
+    return new Style({
+      stroke: new Stroke({
+        color: '#38bdf8',
+        width: Math.max(strokeWidth + 1.5, 3.5),
+        lineCap: 'round',
+        lineJoin: 'round',
+      }),
+      text: textStyle,
+      zIndex: 90,
+    });
   }
 
   return new Style({
@@ -489,8 +627,9 @@ function getFeatureStyle(feature: any) {
     (props.selectedSegmenId && String(props.selectedSegmenId) === featId) ||
     (props.selectedSegmen?.id && String(props.selectedSegmen.id) === featId)
   );
+  const isPinned = Boolean(props.activeLayerId !== 'jalan-poros-desa' && isPopupPinned.value && tooltipData.value?.id === featId);
   const hoverId = hoveredFeature.value ? String(hoveredFeature.value.get('id') || hoveredFeature.value.getId() || '') : '';
-  const isHovered = Boolean(hoverId && hoverId === featId);
+  const isHovered = Boolean(props.activeLayerId !== 'jalan-poros-desa' && hoverId && hoverId === featId);
 
   const sym = props.symbology || DEFAULT_SYMBOLOGY;
   const isDark = colorMode.value === 'dark';
@@ -525,7 +664,7 @@ function getFeatureStyle(feature: any) {
     }
   }
 
-  if (isSelected) {
+  if (isSelected || isPinned) {
     return new Style({
       stroke: new Stroke({
         color: '#0284c7',
@@ -1568,8 +1707,8 @@ async function initMap() {
     if (tooltipEl.value) {
       tooltipOverlay = new Overlay({
         element: tooltipEl.value,
-        offset: [0, -10],
-        positioning: 'bottom-center',
+        offset: [24, -20],
+        positioning: 'bottom-left',
         stopEvent: false,
       });
     }
@@ -1610,15 +1749,17 @@ async function initMap() {
     // ─── Pointer Move Interaction (Coords & Hover Tooltip) ────────────────────
     mapInstance.on('pointermove', (e: any) => {
       if (e.dragging) {
-        if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+        if (!isPopupPinned.value && tooltipOverlay) tooltipOverlay.setPosition(undefined);
         return;
       }
 
       if (isDrawing.value || isEditGeometryMode.value || isSplitMode.value) {
         if (mapContainer.value) mapContainer.value.style.cursor = isSplitMode.value ? 'crosshair' : (isDrawing.value ? 'crosshair' : 'default');
         hoveredFeature.value = null;
-        tooltipData.value = null;
-        if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+        if (!isPopupPinned.value) {
+          tooltipData.value = null;
+          if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+        }
         return;
       }
 
@@ -1634,18 +1775,23 @@ async function initMap() {
       pointerRafId = requestAnimationFrame(() => {
         pointerRafId = null;
 
+        const targetLayer = getTargetVectorTileLayer();
+        const targetVisible = isTargetLayerVisible();
+
         let hit: any = null;
-        mapInstance.forEachFeatureAtPixel(
-          pixel,
-          (f: any) => {
-            hit = f;
-            return true;
-          },
-          {
-            layerFilter: (l: any) => l === vectorTileLayer,
-            hitTolerance: 8,
-          }
-        );
+        if (targetVisible && targetLayer) {
+          mapInstance.forEachFeatureAtPixel(
+            pixel,
+            (f: any) => {
+              hit = f;
+              return true;
+            },
+            {
+              layerFilter: (l: any) => l === targetLayer,
+              hitTolerance: 8,
+            }
+          );
+        }
 
         const prevHoverId = hoveredFeature.value ? String(hoveredFeature.value.get('id') || hoveredFeature.value.getId() || '') : '';
         const currentHitId = hit ? String(hit.get('id') || hit.getId() || '') : '';
@@ -1653,33 +1799,38 @@ async function initMap() {
         if (hit) {
           if (mapContainer.value) mapContainer.value.style.cursor = 'pointer';
           hoveredFeature.value = hit;
-          const p = hit.getProperties?.() ?? {};
-          tooltipData.value = {
-            id: currentHitId,
-            namobj: p.namobj || 'Segmen Fisik',
-            tipe_kode: p.tipe_kode || '-',
-            kondisi: p.kondisi || '-',
-            panjang: parseFloat(p.panjang_meter_gis || p.panjang || '0'),
-            desa: p.desa || '-',
-            kecamatan: p.kecamatan || '-',
-          };
-          if (tooltipOverlay) tooltipOverlay.setPosition(e.coordinate);
+          if (!isPopupPinned.value) {
+            tooltipData.value = extractFeatureData(hit, props.activeLayerId || 'infrastruktur-segmen');
+            showTooltipAt(e.coordinate);
+          }
         } else {
           if (mapContainer.value) mapContainer.value.style.cursor = '';
           hoveredFeature.value = null;
-          tooltipData.value = null;
-          if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+          if (!isPopupPinned.value) {
+            tooltipData.value = null;
+            if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+          }
         }
 
         if (currentHitId !== prevHoverId) {
-          vectorTileLayer?.changed();
+          if (props.activeLayerId === 'jalan-poros-desa') {
+            jalanPorosVectorTileLayer?.changed();
+          } else {
+            vectorTileLayer?.changed();
+          }
         }
       });
     });
 
-    // ─── Click Interaction (Feature Select) ────────────────────────────────────
+    // ─── Click Interaction (Feature Select & Popup) ───────────────────────────
     mapInstance.on('click', (e: any) => {
       if (isDrawing.value || isEditGeometryMode.value || isSplitMode.value) return;
+
+      // Ignore clicks originating inside the popup card
+      const origTarget = e.originalEvent?.target as HTMLElement | null;
+      if (origTarget && tooltipEl.value && tooltipEl.value.contains(origTarget)) {
+        return;
+      }
 
       if (e.coordinate && pulseOverlay) {
         pulseOverlay.setPosition(e.coordinate);
@@ -1693,7 +1844,14 @@ async function initMap() {
         }
       }
 
-      if (!props.layerVisible) return;
+      const targetLayer = getTargetVectorTileLayer();
+      const targetVisible = isTargetLayerVisible();
+
+      if (!targetVisible || !targetLayer) {
+        closePopup();
+        emit('select', null);
+        return;
+      }
 
       const pixel = mapInstance.getEventPixel(e.originalEvent);
       let clicked: any = null;
@@ -1704,70 +1862,84 @@ async function initMap() {
           return true;
         },
         {
-          layerFilter: (l: any) => l === vectorTileLayer,
+          layerFilter: (l: any) => l === targetLayer,
           hitTolerance: 8,
         }
       );
 
       if (clicked) {
         try {
-          const propsObj = clicked.getProperties?.() ?? {};
-          const featId = String(propsObj.id || clicked.getId() || clicked.get?.('id') || '');
+          const featureData = extractFeatureData(clicked, props.activeLayerId || 'infrastruktur-segmen');
+          tooltipData.value = featureData;
+          isPopupPinned.value = true;
+          showTooltipAt(e.coordinate);
 
-          let centroid = null;
-          if (propsObj.centroid) {
-            try {
-              centroid = typeof propsObj.centroid === 'string' ? JSON.parse(propsObj.centroid) : propsObj.centroid;
-            } catch {
-              centroid = null;
+          if (props.activeLayerId === 'jalan-poros-desa') {
+            emit('log', 'INFO', `Jalan Poros Desa dipilih: ${featureData.namobj}`);
+          } else {
+            const propsObj = clicked.getProperties?.() ?? {};
+            const featId = String(propsObj.id || clicked.getId() || clicked.get?.('id') || '');
+
+            let centroid = null;
+            if (propsObj.centroid) {
+              try {
+                centroid = typeof propsObj.centroid === 'string' ? JSON.parse(propsObj.centroid) : propsObj.centroid;
+              } catch {
+                centroid = null;
+              }
             }
-          }
 
-          const pMeter = propsObj.panjang_meter_gis != null && propsObj.panjang_meter_gis !== ''
-            ? parseFloat(propsObj.panjang_meter_gis)
-            : null;
-          const pManual = propsObj.panjang != null && propsObj.panjang !== ''
-            ? parseFloat(propsObj.panjang)
-            : null;
-          const finalPanjang = pMeter ?? pManual ?? 0;
+            const pMeter = propsObj.panjang_meter_gis != null && propsObj.panjang_meter_gis !== ''
+              ? parseFloat(propsObj.panjang_meter_gis)
+              : null;
+            const pManual = propsObj.panjang != null && propsObj.panjang !== ''
+              ? parseFloat(propsObj.panjang)
+              : null;
+            const finalPanjang = pMeter ?? pManual ?? 0;
 
-          const normalizedFeature = {
-            id: featId,
-            type: 'Feature',
-            geometry: null,
-            properties: {
-              ...propsObj,
+            const normalizedFeature = {
               id: featId,
-              namobj: propsObj.namobj || 'Segmen Fisik',
-              tipe_kode: propsObj.tipe_kode || '-',
-              kondisi: propsObj.kondisi || 'Baik',
-              status_kondisi: propsObj.status_kondisi || 'Eksisting',
-              panjang: pManual ?? pMeter ?? 0,
-              panjang_meter_gis: finalPanjang,
-              lebar: propsObj.lebar != null && propsObj.lebar !== '' ? parseFloat(propsObj.lebar) : 3.5,
-              tahun_pembangunan: propsObj.tahun_pembangunan ? Number(propsObj.tahun_pembangunan) : null,
-              sumber_dana: propsObj.sumber_dana || null,
-              status_verifikasi: propsObj.status_verifikasi || 'draft',
-              status_aset: propsObj.status_aset || null,
-              desa: propsObj.desa || null,
-              kecamatan: propsObj.kecamatan || null,
-              id_desa: propsObj.id_desa != null && propsObj.id_desa !== '' ? Number(propsObj.id_desa) : null,
-              id_kecamatan: propsObj.id_kecamatan != null && propsObj.id_kecamatan !== '' ? Number(propsObj.id_kecamatan) : null,
-              plotting_id: propsObj.plotting_id || null,
-              centroid,
-            },
-          };
+              type: 'Feature',
+              geometry: null,
+              properties: {
+                ...propsObj,
+                id: featId,
+                namobj: propsObj.namobj || 'Segmen Fisik',
+                tipe_kode: propsObj.tipe_kode || '-',
+                kondisi: propsObj.kondisi || 'Baik',
+                status_kondisi: propsObj.status_kondisi || 'Eksisting',
+                panjang: pManual ?? pMeter ?? 0,
+                panjang_meter_gis: finalPanjang,
+                lebar: propsObj.lebar != null && propsObj.lebar !== '' ? parseFloat(propsObj.lebar) : 3.5,
+                tahun_pembangunan: propsObj.tahun_pembangunan ? Number(propsObj.tahun_pembangunan) : null,
+                sumber_dana: propsObj.sumber_dana || null,
+                status_verifikasi: propsObj.status_verifikasi || 'draft',
+                status_aset: propsObj.status_aset || null,
+                desa: propsObj.desa || null,
+                kecamatan: propsObj.kecamatan || null,
+                id_desa: propsObj.id_desa != null && propsObj.id_desa !== '' ? Number(propsObj.id_desa) : null,
+                id_kecamatan: propsObj.id_kecamatan != null && propsObj.id_kecamatan !== '' ? Number(propsObj.id_kecamatan) : null,
+                plotting_id: propsObj.plotting_id || null,
+                centroid,
+              },
+            };
 
-          emit('select', normalizedFeature);
-          emit('log', 'INFO', `Segmen dipilih: ${normalizedFeature.properties.namobj}`);
+            emit('select', normalizedFeature);
+            emit('log', 'INFO', `Segmen dipilih: ${normalizedFeature.properties.namobj}`);
+          }
         } catch (err) {
-          console.error('Gagal memproses fitur segmen klik:', err);
+          console.error('Gagal memproses fitur klik:', err);
         }
       } else {
+        closePopup();
         emit('select', null);
       }
 
-      vectorTileLayer?.changed();
+      if (props.activeLayerId === 'jalan-poros-desa') {
+        jalanPorosVectorTileLayer?.changed();
+      } else {
+        vectorTileLayer?.changed();
+      }
     });
 
     isMapLoaded.value = true;
@@ -1969,6 +2141,7 @@ defineExpose({
   zoomIn,
   zoomOut,
   setBasemap,
+  closePopup,
   refreshVectorTiles,
   refreshJalanPorosVectorTiles,
   startDrawing,
@@ -2325,19 +2498,115 @@ defineExpose({
       class="absolute bottom-16 sm:bottom-3 right-3 z-20 pointer-events-none select-none"
     />
 
-    <!-- ═══ MAP HOVER TOOLTIP OVERLAY ═══════════════════════════════════════════ -->
+    <!-- ═══ MAP FEATURE POPUP / TOOLTIP OVERLAY ═══════════════════════════════════ -->
     <div
       ref="tooltipEl"
-      class="pointer-events-none transition-transform duration-75"
+      :class="[
+        'transition-all duration-75 z-30 select-none relative',
+        isPopupPinned ? 'pointer-events-auto' : 'pointer-events-none'
+      ]"
     >
       <div
         v-if="tooltipData"
-        class="p-2.5 rounded-lg bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-gray-200 dark:border-gray-800 shadow-xl max-w-xs text-xs space-y-1"
+        class="relative p-3 rounded-xl bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-gray-200/90 dark:border-gray-800/90 shadow-2xl max-w-xs text-xs space-y-2 min-w-[220px]"
       >
-        <div class="font-bold text-gray-900 dark:text-white line-clamp-1">
+        <!-- ═══ CALLOUT LEADER GEOMETRY & TARGET PINPOINT ═══ -->
+        <!-- Anchored at Card Bottom-Left Corner, pointing down-left (-24px, +20px) to Mouse Pointer -->
+        <div
+          class="absolute -left-6 top-[calc(100%-4px)] w-8 h-7 pointer-events-none z-30 overflow-visible"
+        >
+          <!-- SVG Leader Line connecting Card Corner (24, 4) down-left to Mouse/Target Anchor (0, 24) -->
+          <svg
+            class="w-full h-full overflow-visible"
+            viewBox="0 0 32 28"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <!-- White/Dark High-Contrast Casing Line -->
+            <line
+              x1="24"
+              y1="4"
+              x2="0"
+              y2="24"
+              :stroke="colorMode.value === 'dark' ? '#020617' : '#ffffff'"
+              stroke-width="5"
+              stroke-linecap="round"
+            />
+            <!-- Main Accent Leader Line -->
+            <line
+              x1="24"
+              y1="4"
+              x2="0"
+              y2="24"
+              :stroke="tooltipData.layerId === 'jalan-poros-desa' ? '#2563eb' : '#059669'"
+              stroke-width="2.5"
+              stroke-linecap="round"
+            />
+            <!-- Connector Dot on Card Border -->
+            <circle
+              cx="24"
+              cy="4"
+              r="2.5"
+              :fill="tooltipData.layerId === 'jalan-poros-desa' ? '#2563eb' : '#059669'"
+              stroke="#ffffff"
+              stroke-width="1"
+            />
+          </svg>
+
+          <!-- Pin Target Anchor Pinpoint directly on Mouse / Feature Coordinate (0, 24) -->
+          <div
+            class="absolute -left-1.5 top-[18px] size-3 flex items-center justify-center pointer-events-none"
+          >
+            <span
+              class="absolute size-4 rounded-full animate-ping"
+              :class="tooltipData.layerId === 'jalan-poros-desa' ? 'bg-blue-500/50' : 'bg-emerald-500/50'"
+            />
+            <span
+              class="relative size-2.5 rounded-full ring-2 ring-white dark:ring-gray-950 shadow-md"
+              :class="tooltipData.layerId === 'jalan-poros-desa' ? 'bg-blue-600' : 'bg-emerald-600'"
+            />
+          </div>
+        </div>
+        <!-- Header: Layer Indicator Tag & Close Button -->
+        <div class="flex items-center justify-between gap-1.5 pb-1.5 border-b border-gray-100 dark:border-gray-800/80">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span
+              class="size-2 rounded-full shrink-0"
+              :class="tooltipData.layerId === 'jalan-poros-desa' ? 'bg-blue-500 ring-2 ring-blue-500/20' : 'bg-emerald-500 ring-2 ring-emerald-500/20'"
+            />
+            <span class="text-[11px] font-semibold text-gray-700 dark:text-gray-300 truncate">
+              {{ tooltipData.layerTitle }}
+            </span>
+          </div>
+
+          <div class="flex items-center gap-1 shrink-0">
+            <UBadge
+              v-if="tooltipData.kode_ruas"
+              :label="tooltipData.kode_ruas"
+              color="primary"
+              variant="subtle"
+              size="xs"
+              class="text-[9px] px-1 py-0 h-4 font-mono font-medium"
+            />
+            <button
+              v-if="isPopupPinned"
+              type="button"
+              class="size-5 rounded flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+              title="Tutup popup"
+              @click.stop="closePopup"
+            >
+              <UIcon name="i-lucide-x" class="size-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Nama Ruas / Nama Objek -->
+        <div class="font-bold text-gray-900 dark:text-white line-clamp-2 text-xs leading-snug">
           {{ tooltipData.namobj }}
         </div>
-        <div class="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+
+        <!-- Badges & Ukuran -->
+        <div class="flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-400 flex-wrap">
           <UBadge
             :label="tooltipData.kondisi"
             :color="
@@ -2346,13 +2615,41 @@ defineExpose({
             "
             variant="subtle"
             size="xs"
+            class="text-[10px] font-medium"
           />
-          <span v-if="tooltipData.panjang > 0" class="font-mono">
+          <UBadge
+            v-if="tooltipData.perkerasan"
+            :label="tooltipData.perkerasan"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            class="text-[10px]"
+          />
+          <span v-if="tooltipData.panjang > 0" class="font-mono text-gray-800 dark:text-gray-200 font-semibold text-[11px]">
             {{ Math.round(tooltipData.panjang).toLocaleString('id-ID') }} m
           </span>
+          <span v-if="tooltipData.lebar" class="text-gray-500 dark:text-gray-400 text-[10px] font-mono">
+            (L: {{ tooltipData.lebar }} m)
+          </span>
         </div>
-        <div class="text-[10px] text-gray-400 dark:text-gray-500">
-          {{ tooltipData.desa }}, Kec. {{ tooltipData.kecamatan }}
+
+        <!-- Info Wilayah Desa & Kecamatan -->
+        <div class="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 pt-0.5">
+          <UIcon name="i-lucide-map-pin" class="size-3 shrink-0 text-blue-500" />
+          <span class="truncate">{{ tooltipData.desa }}, Kec. {{ tooltipData.kecamatan }}</span>
+        </div>
+
+        <!-- Status Kondisi / Verifikasi Footer -->
+        <div
+          v-if="tooltipData.status_kondisi || tooltipData.status_eksisting || tooltipData.status_verifikasi"
+          class="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800/80 pt-1 font-mono"
+        >
+          <span v-if="tooltipData.status_kondisi || tooltipData.status_eksisting" class="capitalize">
+            Status: {{ tooltipData.status_kondisi || tooltipData.status_eksisting }}
+          </span>
+          <span v-if="tooltipData.status_verifikasi" class="capitalize ml-auto">
+            {{ tooltipData.status_verifikasi }}
+          </span>
         </div>
       </div>
     </div>

@@ -5,6 +5,14 @@ import MapScaleCoordinateBar from "./MapScaleCoordinateBar.vue";
 import type { ActiveLayerItem, BasemapKey } from "~/types/map-layers";
 import { $http } from "~/utils/helpers";
 import type { IdentifiedFeature } from "./IdentifyFeatures.vue";
+import type { GeoparkSite } from "~/composables/useGeoparkSites";
+import {
+  isCanvasTainted,
+  cropCanvasTo16_9,
+  generateFallbackMapCanvas,
+  type MapThumbnailOptions,
+  type MapThumbnailMeta,
+} from "~/composables/useMapThumbnail";
 
 export type { BasemapKey };
 
@@ -25,6 +33,9 @@ const props = withDefaults(
     activeLayers?: ActiveLayerItem[];
     mobileDrawerOpen?: boolean;
     mobileSheetSnap?: "min" | "peek" | "full";
+    geoparkSites?: GeoparkSite[];
+    selectedGeoparkSite?: GeoparkSite | null;
+    activeTab?: string;
   }>(),
   {
     currentBasemap: "esri",
@@ -36,11 +47,15 @@ const props = withDefaults(
     activeLayers: () => [],
     mobileDrawerOpen: false,
     mobileSheetSnap: "min",
+    geoparkSites: () => [],
+    selectedGeoparkSite: null,
+    activeTab: "layers",
   }
 );
 
 const emit = defineEmits<{
   (e: "map-click", coordinate: [number, number]): void;
+  (e: "canvas-tap-dismiss"): void;
   (e: "select-feature", feature: any): void;
   (e: "identify-features", features: IdentifiedFeature[]): void;
   (e: "identifying-features", loading: boolean): void;
@@ -49,10 +64,10 @@ const emit = defineEmits<{
   (e: "loaded"): void;
   (e: "dismiss-popup"): void;
   (e: "share"): void;
+  (e: "select-geopark", site: GeoparkSite): void;
 }>();
 
 const mapContainer = ref<HTMLElement | null>(null);
-const pulseEl = ref<HTMLElement | null>(null);
 const scaleLineTarget = ref<HTMLElement | null>(null);
 let scaleLineControlInstance: any = null;
 
@@ -154,15 +169,13 @@ function handleSelectScale(targetDenom: number) {
 }
 
 const mapLoaded = ref(false);
-const isPulseVisible = ref(false);
-const isBadgeVisible = ref(Boolean(props.clickedCoordinate));
 const isFullscreen = ref(false);
 const isLocating = ref(false);
 const hasUserLocation = ref(false);
 const isUserLocationVisible = ref(false);
 const userLocationCoords = ref<[number, number] | null>(null);
-const clickAnimKey = ref(0);
 const activeNamobj = ref<string | null>(null);
+const activeSelectedFeature = ref<IdentifiedFeature | null>(null);
 const isIdentifyingFeatures = ref(false);
 const userSpeed = ref<number | null>(null);
 const userHeading = ref<number | null>(null);
@@ -241,16 +254,8 @@ function extractNamobj(properties: Record<string, any> | undefined): string | nu
   return null;
 }
 
-const effectivePopupTitle = computed(() => {
-  if (activeNamobj.value) return activeNamobj.value;
-  if (props.locationLabel) return props.locationLabel;
-  if (isIdentifyingFeatures.value) return "Memeriksa objek spasial...";
-  return "Titik Koordinat";
-});
-
 let mapInstance: any = null;
 let tileLayer: any = null;
-let pulseOverlay: any = null;
 let olModules: any = null;
 const wmsLayersMap = new Map<string, any>();
 const mvtLayersMap = new Map<string, any>();
@@ -259,6 +264,7 @@ let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Cartographic Graticule (Grid Kartografi & Koordinat Tepi Peta)
 const showCartoGrid = ref(false);
+const currentRotation = ref(0);
 let graticuleLayer: any = null;
 let themeMutationObserver: MutationObserver | null = null;
 
@@ -268,6 +274,10 @@ let geoVectorLayer: any = null;
 let geoAccuracyFeature: any = null;
 let geoPointFeature: any = null;
 let geoHeadingFeature: any = null;
+
+// Selection Highlight: VectorLayer dengan gaya trayek UI modern
+let selectionVectorSource: any = null;
+let selectionVectorLayer: any = null;
 
 // Geolocation smooth animation state
 let geoAnimFrameId: number | null = null;
@@ -354,15 +364,10 @@ watch(
 watch(
   () => props.clickedCoordinate,
   (coord) => {
-    if (!coord || !pulseOverlay || !olModules) {
-      isBadgeVisible.value = false;
-      return;
+    if (!coord && selectionVectorSource) {
+      selectionVectorSource.clear();
+      activeSelectedFeature.value = null;
     }
-    clickAnimKey.value++;
-    isBadgeVisible.value = true;
-    isPulseVisible.value = true;
-    const mercator = olModules.fromLonLat(coord);
-    pulseOverlay.setPosition(mercator);
   },
   { deep: true }
 );
@@ -375,23 +380,525 @@ watch(
   { deep: true }
 );
 
-function dismissPulse() {
-  if (!isBadgeVisible.value) return;
-  isBadgeVisible.value = false;
-  emit("dismiss-popup");
+function getConditionColors(properties?: Record<string, any>, isDark = false) {
+  let kondisiVal = "";
+  if (properties) {
+    for (const [k, v] of Object.entries(properties)) {
+      const lower = k.toLowerCase();
+      if (lower === "kondisi" || lower === "status" || lower.includes("kondisi")) {
+        if (typeof v === "string" && v.trim()) {
+          kondisiVal = v.trim().toLowerCase();
+          break;
+        }
+      }
+    }
+  }
 
-  // Block the OL singleclick that will fire from this same pointer event.
-  // OL delays singleclick by ~250ms to separate it from double-click.
-  isDismissing = true;
-  if (dismissTimer) clearTimeout(dismissTimer);
-  dismissTimer = setTimeout(() => { isDismissing = false; }, 500);
+  // 1. Rusak Berat
+  if (kondisiVal.includes("rusak berat") || kondisiVal.includes("berat")) {
+    return {
+      core: isDark ? "#f87171" : "#ef4444",
+      glow: isDark ? "rgba(248, 113, 113, 0.48)" : "rgba(239, 68, 68, 0.35)",
+      fill: isDark ? "rgba(248, 113, 113, 0.18)" : "rgba(239, 68, 68, 0.12)",
+    };
+  }
+
+  // 2. Rusak Ringan / Rusak
+  if (kondisiVal.includes("rusak ringan") || kondisiVal.includes("rusak")) {
+    return {
+      core: isDark ? "#fb923c" : "#f97316",
+      glow: isDark ? "rgba(251, 146, 60, 0.48)" : "rgba(249, 115, 22, 0.35)",
+      fill: isDark ? "rgba(251, 146, 60, 0.18)" : "rgba(249, 115, 22, 0.12)",
+    };
+  }
+
+  // 3. Sedang
+  if (kondisiVal.includes("sedang") || kondisiVal.includes("cukup")) {
+    return {
+      core: isDark ? "#fbbf24" : "#f59e0b",
+      glow: isDark ? "rgba(251, 191, 36, 0.48)" : "rgba(245, 158, 11, 0.35)",
+      fill: isDark ? "rgba(251, 191, 36, 0.18)" : "rgba(245, 158, 11, 0.12)",
+    };
+  }
+
+  // 4. Baik
+  if (kondisiVal.includes("baik")) {
+    return {
+      core: isDark ? "#34d399" : "#10b981",
+      glow: isDark ? "rgba(52, 211, 153, 0.48)" : "rgba(16, 185, 129, 0.35)",
+      fill: isDark ? "rgba(52, 211, 153, 0.18)" : "rgba(16, 185, 129, 0.12)",
+    };
+  }
+
+  // 5. Default / Netral (Brand Cyan/Blue Bojonegoro)
+  return {
+    core: isDark ? "#38bdf8" : "#0284c7",
+    glow: isDark ? "rgba(56, 189, 248, 0.48)" : "rgba(2, 132, 199, 0.32)",
+    fill: isDark ? "rgba(56, 189, 248, 0.16)" : "rgba(2, 132, 199, 0.12)",
+  };
 }
 
-function onBadgeAfterLeave() {
-  if (!isBadgeVisible.value) {
-    isPulseVisible.value = false;
-    if (pulseOverlay) pulseOverlay.setPosition(undefined);
+function createModernTransitStyle(geometryType?: string, properties?: Record<string, any>) {
+  if (!olModules) return null;
+  const { OlStyle, Stroke, Fill, CircleStyle } = olModules;
+  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const type = (geometryType || "").toLowerCase();
+  const theme = getConditionColors(properties, isDark);
+
+  if (type.includes("line")) {
+    return [
+      // 1. Underlay Shadow Glow lembut berpendar (Warna mengikuti kondisi jalan)
+      new OlStyle({
+        stroke: new Stroke({
+          color: theme.glow,
+          width: 14,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        zIndex: 1010,
+      }),
+      // 2. Kontras Halo Casing (Pemisah tegas berlatar gelap/putih)
+      new OlStyle({
+        stroke: new Stroke({
+          color: isDark ? "#070b14" : "#ffffff",
+          width: 8.5,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        zIndex: 1011,
+      }),
+      // 3. Core Route Solid (Warna kondisi solid tanpa pola putus-putus)
+      new OlStyle({
+        stroke: new Stroke({
+          color: theme.core,
+          width: 5,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        zIndex: 1012,
+      }),
+      // 4. Center Illumination Core (Garis solid poros tengah untuk kedalaman 3D gloss)
+      new OlStyle({
+        stroke: new Stroke({
+          color: "rgba(255, 255, 255, 0.85)",
+          width: 1.75,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        zIndex: 1013,
+      }),
+    ];
   }
+
+  if (type.includes("polygon")) {
+    return [
+      // 1. Halo Casing & Ambient Fill Lembut
+      new OlStyle({
+        stroke: new Stroke({
+          color: isDark ? "rgba(7, 11, 20, 0.95)" : "rgba(255, 255, 255, 0.95)",
+          width: 6,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        fill: new Fill({
+          color: theme.fill,
+        }),
+        zIndex: 1010,
+      }),
+      // 2. Underlay Shadow Glow Perimeter
+      new OlStyle({
+        stroke: new Stroke({
+          color: theme.glow,
+          width: 8,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        zIndex: 1011,
+      }),
+      // 3. Vibrant Solid Perimeter (Warna kondisi solid tanpa pola putus-putus)
+      new OlStyle({
+        stroke: new Stroke({
+          color: theme.core,
+          width: 3.5,
+          lineCap: "round",
+          lineJoin: "round",
+        }),
+        zIndex: 1012,
+      }),
+    ];
+  }
+
+  // Point / Titik (Indikator Transit Node & Garis Radius Luar untuk Titik WMS)
+  return [
+    // 1. Lingkaran Garis Radius Luar Casing (Outer Radius Halo Reticle)
+    new OlStyle({
+      image: new CircleStyle({
+        radius: 30,
+        stroke: new Stroke({
+          color: isDark ? "rgba(7, 11, 20, 0.95)" : "rgba(255, 255, 255, 0.95)",
+          width: 5,
+        }),
+        fill: new Fill({
+          color: isDark ? "rgba(37, 99, 235, 0.12)" : "rgba(37, 99, 235, 0.08)",
+        }),
+      }),
+      zIndex: 1010,
+    }),
+    // 2. Lingkaran Garis Radius Luar Solid (Outer Radius Line Berdasarkan Warna Tema)
+    new OlStyle({
+      image: new CircleStyle({
+        radius: 30,
+        stroke: new Stroke({
+          color: theme.core,
+          width: 2.25,
+        }),
+      }),
+      zIndex: 1011,
+    }),
+    // 3. Ring Pembatas Intermediet (Mid Range Halo Ring)
+    new OlStyle({
+      image: new CircleStyle({
+        radius: 12,
+        stroke: new Stroke({
+          color: isDark ? "rgba(7, 11, 20, 0.9)" : "rgba(255, 255, 255, 0.95)",
+          width: 3,
+        }),
+        fill: new Fill({
+          color: theme.glow,
+        }),
+      }),
+      zIndex: 1012,
+    }),
+    // 4. Center Focal Point Dot (Titik Pusat Presisi Tanpa Menutupi Ikon WMS)
+    new OlStyle({
+      image: new CircleStyle({
+        radius: 4.5,
+        fill: new Fill({ color: theme.core }),
+        stroke: new Stroke({ color: "#ffffff", width: 1.5 }),
+      }),
+      zIndex: 1013,
+    }),
+  ];
+}
+
+function extractFirstCoordinate(geom: any): [number, number] | null {
+  if (!geom || !geom.coordinates) return null;
+  let c = geom.coordinates;
+  while (Array.isArray(c) && c.length > 0 && Array.isArray(c[0])) {
+    c = c[0];
+  }
+  if (Array.isArray(c) && c.length >= 2 && typeof c[0] === "number" && typeof c[1] === "number") {
+    return [c[0], c[1]];
+  }
+  return null;
+}
+
+function getFeatureIdentifiers(f: any): string[] {
+  if (!f) return [];
+  const props = typeof f.getProperties === "function" ? f.getProperties() : f.properties || {};
+  const ids: string[] = [];
+
+  const rawId = typeof f.getId === "function" ? f.getId() : f.id;
+  if (rawId !== undefined && rawId !== null && String(rawId).trim() !== "" && !String(rawId).startsWith("undefined")) {
+    ids.push(String(rawId).trim());
+  }
+
+  const idProps = [
+    "id",
+    "id_segmen",
+    "ID",
+    "gid",
+    "GID",
+    "fid",
+    "FID",
+    "objectid",
+    "OBJECTID",
+    "kode_ruas",
+    "KODE_RUAS",
+    "no_ruas",
+    "NO_RUAS",
+  ];
+  for (const p of idProps) {
+    if (props[p] !== undefined && props[p] !== null && String(props[p]).trim() !== "") {
+      ids.push(String(props[p]).trim());
+    }
+  }
+  return ids;
+}
+
+function collectAllMvtFeatureFragments(olLayer: any, seedFeature: any): any[] {
+  if (!olLayer || !seedFeature) return [];
+  const seedKeys = new Set(getFeatureIdentifiers(seedFeature));
+  if (seedKeys.size === 0) return [seedFeature];
+
+  const fragments: any[] = [];
+  const seenGeoms = new Set<string>();
+
+  const addIfMatch = (f: any) => {
+    if (!f) return;
+    const fKeys = getFeatureIdentifiers(f);
+    const isMatch = fKeys.some((k) => seedKeys.has(k));
+    if (!isMatch) return;
+
+    let geomSig = "";
+    try {
+      const geom = f.getGeometry?.();
+      if (geom) {
+        const ext = geom.getExtent?.();
+        if (ext) {
+          geomSig = `${Math.round(ext[0])}_${Math.round(ext[1])}_${Math.round(ext[2])}_${Math.round(ext[3])}`;
+        }
+      }
+    } catch {}
+
+    if (geomSig && seenGeoms.has(geomSig)) return;
+    if (geomSig) seenGeoms.add(geomSig);
+
+    fragments.push(f);
+  };
+
+  try {
+    if (typeof olLayer.getFeaturesInExtent === "function" && mapInstance) {
+      const extent = mapInstance.getView().calculateExtent();
+      const renderedFeats = olLayer.getFeaturesInExtent(extent);
+      if (Array.isArray(renderedFeats)) {
+        for (const f of renderedFeats) addIfMatch(f);
+      }
+    }
+  } catch {}
+
+  const source = olLayer.getSource?.();
+  if (source && source.sourceTiles_) {
+    try {
+      for (const key of Object.keys(source.sourceTiles_)) {
+        const tile = source.sourceTiles_[key];
+        const tileFeats = tile?.getFeatures?.();
+        if (Array.isArray(tileFeats)) {
+          for (const f of tileFeats) addIfMatch(f);
+        }
+      }
+    } catch {}
+  }
+
+  return fragments.length > 0 ? fragments : [seedFeature];
+}
+
+function joinConnectingLines(lines: number[][][], tolerance = 10.0): number[][][] {
+  if (lines.length <= 1) return lines;
+  const remaining = lines.map((l) => [...l]);
+  const joined: number[][][] = [];
+
+  const distSq = (p1: number[], p2: number[]) => {
+    const dx = p1[0] - p2[0];
+    const dy = p1[1] - p2[1];
+    return dx * dx + dy * dy;
+  };
+  const tolSq = tolerance * tolerance;
+
+  while (remaining.length > 0) {
+    let current = remaining.pop()!;
+    let found = true;
+
+    while (found) {
+      found = false;
+      for (let i = 0; i < remaining.length; i++) {
+        const candidate = remaining[i];
+        const startCur = current[0];
+        const endCur = current[current.length - 1];
+        const startCand = candidate[0];
+        const endCand = candidate[candidate.length - 1];
+
+        if (distSq(endCur, startCand) <= tolSq) {
+          current = current.concat(candidate.slice(1));
+          remaining.splice(i, 1);
+          found = true;
+          break;
+        } else if (distSq(endCur, endCand) <= tolSq) {
+          current = current.concat(candidate.slice().reverse().slice(1));
+          remaining.splice(i, 1);
+          found = true;
+          break;
+        } else if (distSq(startCur, endCand) <= tolSq) {
+          current = candidate.concat(current.slice(1));
+          remaining.splice(i, 1);
+          found = true;
+          break;
+        } else if (distSq(startCur, startCand) <= tolSq) {
+          current = candidate.slice().reverse().concat(current.slice(1));
+          remaining.splice(i, 1);
+          found = true;
+          break;
+        }
+      }
+    }
+    joined.push(current);
+  }
+
+  return joined;
+}
+
+function stitchFeatureGeometries(fragments: any[], modules: any): any {
+  if (!fragments || fragments.length === 0 || !modules) return null;
+  if (fragments.length === 1) {
+    if (modules.toGeometry) {
+      try {
+        const g = modules.toGeometry(fragments[0]);
+        if (g) return g;
+      } catch {}
+    }
+    return fragments[0].getGeometry?.() || null;
+  }
+
+  const sampleGeom = fragments[0].getGeometry?.();
+  const sampleType = sampleGeom?.getType?.() || "";
+
+  if (sampleType.includes("Line")) {
+    const lineCoords: number[][][] = [];
+    for (const f of fragments) {
+      let g: any = null;
+      if (modules.toGeometry) {
+        try {
+          g = modules.toGeometry(f);
+        } catch {}
+      }
+      if (!g) g = f.getGeometry?.();
+      if (!g) continue;
+
+      const t = g.getType?.() || "";
+      if (t === "LineString") {
+        lineCoords.push(g.getCoordinates());
+      } else if (t === "MultiLineString") {
+        lineCoords.push(...g.getCoordinates());
+      }
+    }
+
+    if (lineCoords.length > 0) {
+      const joined = joinConnectingLines(lineCoords, 10.0);
+      if (joined.length === 1 && modules.LineString) {
+        return new modules.LineString(joined[0]);
+      } else if (modules.MultiLineString) {
+        return new modules.MultiLineString(joined);
+      }
+    }
+  } else if (sampleType.includes("Polygon")) {
+    const polyCoords: number[][][][] = [];
+    for (const f of fragments) {
+      let g: any = null;
+      if (modules.toGeometry) {
+        try {
+          g = modules.toGeometry(f);
+        } catch {}
+      }
+      if (!g) g = f.getGeometry?.();
+      if (!g) continue;
+
+      const t = g.getType?.() || "";
+      if (t === "Polygon") {
+        polyCoords.push(g.getCoordinates());
+      } else if (t === "MultiPolygon") {
+        polyCoords.push(...g.getCoordinates());
+      }
+    }
+
+    if (polyCoords.length > 0) {
+      if (polyCoords.length === 1 && modules.Polygon) {
+        return new modules.Polygon(polyCoords[0]);
+      } else if (modules.MultiPolygon) {
+        return new modules.MultiPolygon(polyCoords);
+      }
+    }
+  }
+
+  if (modules.toGeometry) {
+    try {
+      const g = modules.toGeometry(fragments[0]);
+      if (g) return g;
+    } catch {}
+  }
+  return fragments[0].getGeometry?.() || null;
+}
+
+function renderSelectedFeature(feat: IdentifiedFeature | null) {
+  activeSelectedFeature.value = feat;
+  if (!selectionVectorSource || !olModules) return;
+  selectionVectorSource.clear();
+  if (!feat) return;
+
+  try {
+    let olGeom: any = null;
+
+    // Kumpulkan seluruh pecahan dari layer MVT jika feature terpotong oleh batas tile
+    if (feat.layerId && mvtLayersMap.has(feat.layerId)) {
+      const olLayer = mvtLayersMap.get(feat.layerId);
+      const fragments = collectAllMvtFeatureFragments(olLayer, feat);
+      if (fragments.length > 1) {
+        olGeom = stitchFeatureGeometries(fragments, olModules);
+      }
+    }
+
+    if (!olGeom && feat.olGeometry) {
+      olGeom = typeof feat.olGeometry.clone === "function" ? feat.olGeometry.clone() : feat.olGeometry;
+    } else if (!olGeom && feat.geojsonGeometry && olModules.GeoJSON) {
+      const sample = extractFirstCoordinate(feat.geojsonGeometry);
+      const isMercator = sample && (Math.abs(sample[0]) > 180 || Math.abs(sample[1]) > 90);
+      const geoJsonFormat = new olModules.GeoJSON();
+      olGeom = geoJsonFormat.readGeometry(feat.geojsonGeometry, {
+        dataProjection: isMercator ? "EPSG:3857" : "EPSG:4326",
+        featureProjection: "EPSG:3857",
+      });
+    }
+
+    if (!olGeom && feat.coordinate && olModules.PointGeom) {
+      const mercator = olModules.fromLonLat(feat.coordinate);
+      olGeom = new olModules.PointGeom(mercator);
+    }
+
+    if (olGeom && olModules.Feature) {
+      const highlightFeature = new olModules.Feature({
+        geometry: olGeom,
+      });
+      const resolvedGeomType = feat.geometryType || (typeof olGeom.getType === "function" ? olGeom.getType() : "");
+      const styles = createModernTransitStyle(resolvedGeomType, feat.properties);
+      if (styles) {
+        highlightFeature.setStyle(styles);
+      }
+      selectionVectorSource.addFeature(highlightFeature);
+    }
+  } catch (err) {
+    console.warn("Gagal merender selected feature highlight:", err);
+  }
+}
+
+function refreshSelectedMvtFeature() {
+  if (!activeSelectedFeature.value || !activeSelectedFeature.value.layerId || !olModules) return;
+  const olLayer = mvtLayersMap.get(activeSelectedFeature.value.layerId);
+  if (!olLayer) return;
+
+  const fragments = collectAllMvtFeatureFragments(olLayer, activeSelectedFeature.value);
+  if (fragments.length > 1) {
+    const stitched = stitchFeatureGeometries(fragments, olModules);
+    if (stitched && selectionVectorSource) {
+      selectionVectorSource.clear();
+      const highlightFeature = new olModules.Feature({
+        geometry: stitched,
+      });
+      const resolvedGeomType =
+        activeSelectedFeature.value.geometryType || (typeof stitched.getType === "function" ? stitched.getType() : "");
+      const styles = createModernTransitStyle(resolvedGeomType, activeSelectedFeature.value.properties);
+      if (styles) {
+        highlightFeature.setStyle(styles);
+      }
+      selectionVectorSource.addFeature(highlightFeature);
+    }
+  }
+}
+
+function dismissPulse() {
+  activeSelectedFeature.value = null;
+  if (selectionVectorSource) {
+    selectionVectorSource.clear();
+  }
+  emit("dismiss-popup");
 }
 
 // Ease-out cubic untuk animasi marker geolocation yang terasa natural
@@ -453,14 +960,31 @@ function resetView() {
   mapInstance.getView().animate({
     center: olModules.fromLonLat(BOJONEGORO_CENTER),
     zoom: DEFAULT_ZOOM,
+    rotation: 0,
     duration: 500,
   });
 }
 
-function flyTo(coordinate: [number, number], zoom = 14) {
+function resetNorth() {
+  if (!mapInstance) return;
+  const view = mapInstance.getView();
+  if (!view) return;
+  view.animate({
+    rotation: 0,
+    duration: 350,
+  });
+}
+
+function flyTo(coordinate: [number, number], zoom = 14, snapOverride?: "min" | "peek" | "full") {
   if (!mapInstance || !olModules) return;
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  if (isMobile) {
+    fitCoordinateWithPadding(coordinate, zoom, 600, snapOverride);
+    return;
+  }
+  const cleanCoord = normalizeCoordLonLat(coordinate);
   mapInstance.getView().animate({
-    center: olModules.fromLonLat(coordinate),
+    center: olModules.fromLonLat(cleanCoord),
     zoom,
     duration: 600,
   });
@@ -574,11 +1098,16 @@ function startLiveTracking() {
 
         // Kunci ke tengah peta hanya pada pembacaan pertama kali
         if (isFirstLocationLock) {
-          mapInstance.getView().animate({
-            center: mercator,
-            zoom: Math.max(mapInstance.getView().getZoom() || 11, 16),
-            duration: 700,
-          });
+          const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+          if (isMobile) {
+            fitCoordinateWithPadding(newCoords, Math.max(mapInstance.getView().getZoom() || 11, 16), 700);
+          } else {
+            mapInstance.getView().animate({
+              center: mercator,
+              zoom: Math.max(mapInstance.getView().getZoom() || 11, 16),
+              duration: 700,
+            });
+          }
           isFirstLocationLock = false;
         }
       }
@@ -714,6 +1243,12 @@ async function initMap() {
       { default: RegularShape },
       { default: OlIcon },
       { default: Graticule },
+      { default: GeoJSONFormat },
+      { toFeature, toGeometry },
+      { default: LineString },
+      { default: MultiLineString },
+      { default: Polygon },
+      { default: MultiPolygon },
     ] = await Promise.all([
       import("ol/Map.js"),
       import("ol/View.js"),
@@ -742,6 +1277,12 @@ async function initMap() {
       import("ol/style/RegularShape.js"),
       import("ol/style/Icon.js"),
       import("ol/layer/Graticule.js"),
+      import("ol/format/GeoJSON.js"),
+      import("ol/render/Feature.js"),
+      import("ol/geom/LineString.js"),
+      import("ol/geom/MultiLineString.js"),
+      import("ol/geom/Polygon.js"),
+      import("ol/geom/MultiPolygon.js"),
     ]);
 
     olModules = {
@@ -764,6 +1305,15 @@ async function initMap() {
       transformExtent: projPkg.transformExtent,
       Overlay,
       ScaleLine,
+      Feature,
+      PointGeom,
+      GeoJSON: GeoJSONFormat,
+      toFeature,
+      toGeometry,
+      LineString,
+      MultiLineString,
+      Polygon,
+      MultiPolygon,
     };
 
     tileLayer = new TileLayer({
@@ -771,19 +1321,6 @@ async function initMap() {
       visible: props.currentBasemap !== "none",
       zIndex: 0,
     });
-
-    if (pulseEl.value) {
-      pulseOverlay = new Overlay({
-        element: pulseEl.value,
-        positioning: "center-center",
-        stopEvent: false,
-      });
-      if (props.clickedCoordinate) {
-        const mercator = olModules.fromLonLat(props.clickedCoordinate);
-        pulseOverlay.setPosition(mercator);
-        isPulseVisible.value = true;
-      }
-    }
 
     // Geolocation VectorLayer: accuracy circle + standard blue dot + heading beam (Google Maps style)
     geoVectorSource = new VectorSource();
@@ -855,6 +1392,14 @@ async function initMap() {
       visible: false,
     });
 
+    // Selection Highlight VectorLayer: rendering objek terpilih dengan style trayek UI modern
+    selectionVectorSource = new VectorSource();
+    selectionVectorLayer = new VectorLayer({
+      source: selectionVectorSource,
+      zIndex: 1000,
+      visible: true,
+    });
+
     const scaleLineControl = new ScaleLine({
       target: scaleLineTarget.value || undefined,
       units: "metric",
@@ -875,7 +1420,6 @@ async function initMap() {
     }
 
     const overlaysList: any[] = [];
-    if (pulseOverlay) overlaysList.push(pulseOverlay);
 
     // Pastikan scroll mouse langsung dapat melakukan zoom tanpa perlu klik fokus terlebih dahulu
     const defaultInteractionsList = defaultInteractions({
@@ -986,6 +1530,9 @@ async function initMap() {
 
     themeMutationObserver = new MutationObserver(() => {
       updateGraticuleTheme();
+      if (activeSelectedFeature.value) {
+        renderSelectedFeature(activeSelectedFeature.value);
+      }
     });
     themeMutationObserver.observe(document.documentElement, {
       attributes: true,
@@ -994,7 +1541,7 @@ async function initMap() {
 
     mapInstance = new Map({
       target: mapContainer.value,
-      layers: [tileLayer, geoVectorLayer, graticuleLayer],
+      layers: [tileLayer, geoVectorLayer, selectionVectorLayer, graticuleLayer],
       view: new View({
         center: initialCenter,
         zoom: initialZoomLevel,
@@ -1016,6 +1563,9 @@ async function initMap() {
       });
     }
 
+    syncPinMarker();
+    syncGeoparkMarkers();
+
     // Inisialisasi posisi center dan zoom status bar awal
     updateMapCenterAndZoom();
 
@@ -1028,6 +1578,12 @@ async function initMap() {
     // Sinkronkan skala rasio peta secara langsung saat user melakukan zoom / pinch
     mapInstance.getView().on("change:resolution", () => {
       updateMapCenterAndZoom();
+    });
+
+    // Sinkronkan rotasi peta untuk indikator arah mata angin & kompas reset
+    mapInstance.getView().on("change:rotation", () => {
+      const rad = mapInstance.getView()?.getRotation() || 0;
+      currentRotation.value = (rad * 180) / Math.PI;
     });
 
     // Pointer move listener for live mouse coordinates & feature hover detection
@@ -1055,33 +1611,27 @@ async function initMap() {
       // Abaikan klik yang berasal dari tombol tutup popup
       if (isDismissing) return;
 
+      const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+      if (isMobile && props.mobileDrawerOpen && props.mobileSheetSnap && props.mobileSheetSnap !== "min") {
+        emit("canvas-tap-dismiss");
+        return;
+      }
+
       const coords = olModules.toLonLat(evt.coordinate);
       if (coords && coords.length >= 2) {
         const lng = Number(coords[0]);
         const lat = Number(coords[1]);
 
-        clickAnimKey.value++;
         activeNamobj.value = null;
-        if (pulseOverlay) {
-          pulseOverlay.setPosition(evt.coordinate);
-          isPulseVisible.value = true;
-          isBadgeVisible.value = true;
+        if (selectionVectorSource) {
+          selectionVectorSource.clear();
         }
+        activeSelectedFeature.value = null;
 
         emit("map-click", [lng, lat]);
         performWmsIdentify(evt.coordinate);
       }
     });
-
-    // If initial coordinate is provided, show pulse marker
-    if (props.clickedCoordinate) {
-      const mercator = olModules.fromLonLat(props.clickedCoordinate);
-      if (pulseOverlay) {
-        pulseOverlay.setPosition(mercator);
-        isPulseVisible.value = true;
-        isBadgeVisible.value = true;
-      }
-    }
 
     mapLoaded.value = true;
     syncActiveWmsLayers();
@@ -1287,6 +1837,12 @@ function syncActiveWmsLayers() {
             cacheSize: 512,
           });
 
+          source.on("tileloadend", () => {
+            if (activeSelectedFeature.value && activeSelectedFeature.value.layerId === layer.id) {
+              refreshSelectedMvtFeature();
+            }
+          });
+
           const olLayer = new VectorTileLayer({
             source,
             renderMode: "hybrid",
@@ -1357,11 +1913,29 @@ function syncActiveWmsLayers() {
   });
 }
 
+function isLayerIdentifyDisabled(layer: any): boolean {
+  if (!layer) return false;
+  if (layer.disableIdentify === true) return true;
+  const id = String(layer.id || "").toLowerCase();
+  const layerName = String(layer.layer_name || layer.wmsLayerName || layer.name || "").toLowerCase();
+  const martinSource = String(layer.martinSource || "").toLowerCase();
+  const title = String(layer.title || "").toLowerCase();
+  const url = String(layer.url || layer.mvtUrl || layer.wmsUrl || "").toLowerCase();
+
+  return (
+    layerName === "bataswilayah_kabupaten" ||
+    martinSource === "bataswilayah_kabupaten" ||
+    url.includes("bataswilayah_kabupaten") ||
+    id.includes("bataswilayah_kabupaten") ||
+    title.includes("batas wilayah kabupaten")
+  );
+}
+
 async function performWmsIdentify(olCoord: any) {
   if (!mapInstance || !olModules) return;
   const currentLayers = props.activeLayers || [];
   const visibleWmsLayers = currentLayers.filter(
-    (l) => (l.wmsUrl || l.url) && (l.wmsLayerName || l.layer_name) && l.visible !== false
+    (l) => (l.wmsUrl || l.url) && (l.wmsLayerName || l.layer_name) && l.visible !== false && !isLayerIdentifyDisabled(l)
   );
 
   activeNamobj.value = null;
@@ -1370,6 +1944,11 @@ async function performWmsIdentify(olCoord: any) {
 
   // 1. Cek fitur vektor langsung dari Martin MVT layer pada titik piksel klik
   const vectorIdentified: IdentifiedFeature[] = [];
+  const getActiveLayerOrder = (layerId: string) => {
+    const idx = currentLayers.findIndex((l) => l.id === layerId || l.layer_name === layerId);
+    return idx >= 0 ? idx : 999;
+  };
+
   try {
     const pixel = mapInstance.getPixelFromCoordinate(olCoord);
     if (pixel) {
@@ -1378,29 +1957,87 @@ async function performWmsIdentify(olCoord: any) {
         (feature: any, layer: any) => {
           for (const [id, olLayer] of mvtLayersMap.entries()) {
             if (olLayer === layer) {
+              const match = currentLayers.find((l) => l.id === id);
+              if (match && (match.visible === false || isLayerIdentifyDisabled(match))) return;
+              if (isLayerIdentifyDisabled({ id })) return;
+
               const styleFn = olLayer.getStyleFunction();
               if (styleFn) {
                 const computedStyle = styleFn(feature, mapInstance.getView().getResolution());
                 if (!computedStyle) return;
               }
-              const match = currentLayers.find((l) => l.id === id);
               if (match && match.visible !== false) {
                 const rawProps = feature.getProperties() || {};
+                const featureId = String(feature.getId?.() || rawProps.id || "");
+                if (featureId.toLowerCase().includes("bataswilayah_kabupaten")) return;
+
                 const cleanProps: Record<string, any> = {};
                 for (const [k, v] of Object.entries(rawProps)) {
                   if (k !== "geometry" && v !== undefined && v !== null && v !== "") {
                     cleanProps[k] = v;
                   }
                 }
+
+                let featExtent: [number, number, number, number] | undefined = undefined;
+                let geojsonGeom: any = null;
+                let olGeomInstance: any = null;
+
+                // Kumpulkan seluruh pecahan dari layer MVT jika feature terpotong oleh batas tile
+                const matchingFragments = collectAllMvtFeatureFragments(olLayer, feature);
+                if (matchingFragments.length > 1) {
+                  olGeomInstance = stitchFeatureGeometries(matchingFragments, olModules);
+                } else if (olModules.toGeometry) {
+                  try {
+                    olGeomInstance = olModules.toGeometry(feature);
+                  } catch (convErr) {
+                    console.warn("Gagal konversi toGeometry:", convErr);
+                  }
+                }
+
+                if (!olGeomInstance) {
+                  const geom = feature.getGeometry?.();
+                  olGeomInstance = geom;
+                }
+
+                if (olGeomInstance) {
+                  const ext3857 = typeof olGeomInstance.getExtent === "function" ? olGeomInstance.getExtent() : null;
+                  if (ext3857 && ext3857.length === 4 && Number.isFinite(ext3857[0])) {
+                    const ext4426 = olModules.transformExtent(ext3857, "EPSG:3857", "EPSG:4326");
+                    featExtent = [
+                      Number(ext4426[0].toFixed(6)),
+                      Number(ext4426[1].toFixed(6)),
+                      Number(ext4426[2].toFixed(6)),
+                      Number(ext4426[3].toFixed(6)),
+                    ];
+                  }
+
+                  if (olModules.GeoJSON) {
+                    try {
+                      const geoJsonFormat = new olModules.GeoJSON();
+                      geojsonGeom = geoJsonFormat.writeGeometryObject(olGeomInstance, {
+                        dataProjection: "EPSG:4326",
+                        featureProjection: "EPSG:3857",
+                      });
+                    } catch {}
+                  }
+                }
+
+                const layerOrder = getActiveLayerOrder(id);
+                const geomType = olGeomInstance?.getType?.() || feature.getType?.() || feature.getGeometry?.()?.getType?.() || "LineString";
+
                 vectorIdentified.push({
                   id: String(feature.getId?.() || cleanProps.id || Math.random()),
                   layerId: id,
                   layerTitle: match.title || match.name || id,
                   layerAttribution: match.instansi || match.attribution || match.agency,
                   layerInstansi: match.instansi || match.attribution || match.agency,
-                  geometryType: feature.getGeometry?.()?.getType?.() || "LineString",
+                  geometryType: geomType,
                   properties: cleanProps,
                   coordinate: olModules.toLonLat(olCoord),
+                  extent: featExtent,
+                  geojsonGeometry: geojsonGeom,
+                  olGeometry: olGeomInstance,
+                  layerIndex: layerOrder,
                 });
               }
               break;
@@ -1417,19 +2054,27 @@ async function performWmsIdentify(olCoord: any) {
     console.warn("Gagal membaca fitur MVT at pixel:", err);
   }
 
-  // Prioritaskan fitur garis ruas/segmen atau titik di atas poligon wilayah agar jalan teridentifikasi lebih dahulu
-  vectorIdentified.sort((a, b) => {
-    const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
-    const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
-    if (isPolyA && !isPolyB) return 1;
-    if (!isPolyA && isPolyB) return -1;
-    return 0;
-  });
-
   // Jika tidak ada layer WMS yang aktif dan fitur vektor sudah ditemukan atau kosong
   if (visibleWmsLayers.length === 0) {
+    // Prioritaskan layer aktif teratas dan garis di atas poligon
+    vectorIdentified.sort((a, b) => {
+      const orderA = a.layerIndex ?? 999;
+      const orderB = b.layerIndex ?? 999;
+      if (orderA !== orderB) return orderA - orderB;
+
+      const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
+      const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
+      if (isPolyA && !isPolyB) return 1;
+      if (!isPolyA && isPolyB) return -1;
+      return 0;
+    });
+
     if (vectorIdentified.length > 0) {
       activeNamobj.value = extractNamobj(vectorIdentified[0].properties);
+      renderSelectedFeature(vectorIdentified[0]);
+    } else {
+      activeNamobj.value = null;
+      renderSelectedFeature(null);
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
     isIdentifyingFeatures.value = false;
@@ -1462,32 +2107,90 @@ async function performWmsIdentify(olCoord: any) {
     try {
       let data: any = null;
 
-      // 1. Coba direct fetch langsung dari browser (~80ms, GeoServer mendukung Access-Control-Allow-Origin: *)
+      // 1. Prioritaskan proxy backend wms/feature-info (menghindari CORS dan SSL handshake error)
       try {
-        const directRes = await fetch(url, {
-          signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined,
-        });
-        if (directRes.ok) {
-          data = await directRes.json();
-        }
-      } catch {
-        // 2. Fallback otomatis ke proxy backend jika direct fetch mengalami kendala
         data = await $http("wms/feature-info", {
           query: { url },
         });
+      } catch (proxyErr) {
+        // 2. Fallback otomatis ke direct browser fetch jika proxy backend mengalami kendala
+        try {
+          const directRes = await fetch(url, {
+            signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined,
+          });
+          if (directRes.ok) {
+            data = await directRes.json();
+          }
+        } catch {}
       }
 
       if (data && Array.isArray(data.features) && data.features.length > 0) {
-        return data.features.map((f: any) => ({
-          id: f.id,
-          layerId: layer.id,
-          layerTitle: layer.title || layer.name,
-          layerAttribution: layer.instansi || layer.attribution || layer.agency,
-          layerInstansi: layer.instansi || layer.attribution || layer.agency,
-          geometryType: f.geometry?.type,
-          properties: f.properties || {},
-          coordinate: olModules.toLonLat(olCoord),
-        }));
+        const layerOrder = getActiveLayerOrder(layer.id);
+        const isResponse3857 = Boolean(data.crs?.properties?.name?.includes("3857"));
+
+        return data.features.map((f: any) => {
+          let featExtent: [number, number, number, number] | undefined = undefined;
+          let olGeomInstance: any = null;
+          let featureCoordinate: [number, number] = olModules.toLonLat(olCoord);
+
+          if (f.geometry && olModules?.GeoJSON) {
+            try {
+              const sample = extractFirstCoordinate(f.geometry);
+              const isCoordsMercator = isResponse3857 || Boolean(sample && (Math.abs(sample[0]) > 180 || Math.abs(sample[1]) > 90));
+
+              const geoJsonFormat = new olModules.GeoJSON();
+              olGeomInstance = geoJsonFormat.readGeometry(f.geometry, {
+                dataProjection: isCoordsMercator ? "EPSG:3857" : "EPSG:4326",
+                featureProjection: "EPSG:3857",
+              });
+
+              if (olGeomInstance) {
+                const ext3857 = olGeomInstance.getExtent();
+                if (ext3857 && ext3857.length === 4 && Number.isFinite(ext3857[0]) && Number.isFinite(ext3857[1])) {
+                  const ext4326 = olModules.transformExtent(ext3857, "EPSG:3857", "EPSG:4326");
+                  featExtent = [
+                    Number(ext4326[0].toFixed(6)),
+                    Number(ext4326[1].toFixed(6)),
+                    Number(ext4326[2].toFixed(6)),
+                    Number(ext4326[3].toFixed(6)),
+                  ];
+                }
+
+                if (sample) {
+                  if (isCoordsMercator) {
+                    featureCoordinate = olModules.toLonLat([sample[0], sample[1]]);
+                  } else {
+                    featureCoordinate = normalizeCoordLonLat([sample[0], sample[1]]);
+                  }
+                }
+              }
+            } catch (errGeom) {
+              console.warn("Gagal membaca geometri WMS GeoJSON:", errGeom);
+            }
+          }
+
+          if (!featExtent && (f.bbox || data.bbox)) {
+            const rawBbox = f.bbox || data.bbox;
+            if (Array.isArray(rawBbox) && rawBbox.length === 4) {
+              featExtent = normalizeBbox4326(rawBbox as [number, number, number, number], olModules);
+            }
+          }
+
+          return {
+            id: f.id,
+            layerId: layer.id,
+            layerTitle: layer.title || layer.name,
+            layerAttribution: layer.instansi || layer.attribution || layer.agency,
+            layerInstansi: layer.instansi || layer.attribution || layer.agency,
+            geometryType: f.geometry?.type || olGeomInstance?.getType?.(),
+            properties: f.properties || {},
+            coordinate: featureCoordinate,
+            extent: featExtent,
+            geojsonGeometry: f.geometry,
+            olGeometry: olGeomInstance,
+            layerIndex: layerOrder,
+          };
+        });
       }
       return [];
     } catch (err) {
@@ -1512,11 +2215,29 @@ async function performWmsIdentify(olCoord: any) {
     }
   }
 
-  // Tampilkan namobj dari fitur yang teridentifikasi ke popup koordinat
+  // Prioritaskan secara mutlak:
+  // 1. Layer teratas di daftar layer aktif (layerIndex terendah / index 0 adalah top of stack)
+  // 2. Tipe garis ruas/segmen (LineString) & titik (Point) di atas poligon wilayah
+  identifiedList.sort((a, b) => {
+    const orderA = a.layerIndex ?? 999;
+    const orderB = b.layerIndex ?? 999;
+    if (orderA !== orderB) return orderA - orderB;
+
+    const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
+    const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
+    if (isPolyA && !isPolyB) return 1;
+    if (!isPolyA && isPolyB) return -1;
+
+    return 0;
+  });
+
+  // Tampilkan namobj dan render highlight style trayek modern dari fitur yang teridentifikasi ke kanvas peta
   if (identifiedList.length > 0) {
     activeNamobj.value = extractNamobj(identifiedList[0].properties);
+    renderSelectedFeature(identifiedList[0]);
   } else {
     activeNamobj.value = null;
+    renderSelectedFeature(null);
   }
 
   isIdentifyingFeatures.value = false;
@@ -1551,15 +2272,165 @@ function emitViewportUpdate() {
   });
 }
 
-function fitBbox(bbox: [number, number, number, number], targetZoom?: number, duration = 0) {
+function getDeviceMapPadding(snapOverride?: "min" | "peek" | "full"): [number, number, number, number] {
+  if (typeof window === "undefined") return [60, 40, 60, 40];
+  const isMobile = window.innerWidth < 768;
+  if (isMobile) {
+    const snap = snapOverride || props.mobileSheetSnap || "peek";
+    const h = window.innerHeight;
+    const bottomPadding = snap === "full"
+      ? Math.round(h * 0.82)
+      : snap === "peek"
+        ? Math.round(h * 0.50) + 28
+        : 170;
+    return [80, 24, bottomPadding, 24];
+  }
+  return [80, 64, 52, 48];
+}
+
+function normalizeCoordLonLat(coord: [number, number]): [number, number] {
+  if (!coord || coord.length < 2) return [111.89, -7.15];
+  let [lon, lat] = coord;
+  if (Math.abs(lon) <= 90 && Math.abs(lat) > 90) {
+    return [lat, lon];
+  }
+  return [lon, lat];
+}
+
+function normalizeBbox4326(
+  rawBbox: [number, number, number, number],
+  modules?: any
+): [number, number, number, number] {
+  if (!rawBbox || rawBbox.length !== 4) return [111.5, -7.4, 112.2, -7.0];
+  let [a, b, c, d] = rawBbox;
+
+  if (Math.abs(a) > 180 || Math.abs(c) > 180) {
+    if (modules?.transformExtent) {
+      try {
+        const trans = modules.transformExtent(rawBbox, "EPSG:3857", "EPSG:4326");
+        if (trans && Number.isFinite(trans[0])) {
+          return [trans[0], trans[1], trans[2], trans[3]];
+        }
+      } catch {}
+    }
+  }
+
+  if (Math.abs(a) <= 90 && Math.abs(c) <= 90 && (Math.abs(b) > 90 || Math.abs(d) > 90)) {
+    return [
+      Math.min(b, d),
+      Math.min(a, c),
+      Math.max(b, d),
+      Math.max(a, c),
+    ];
+  }
+
+  return [
+    Math.min(a, c),
+    Math.min(b, d),
+    Math.max(a, c),
+    Math.max(b, d),
+  ];
+}
+
+function getResolutionForScale(scaleDenominator: number, centerCoord?: [number, number]): number {
+  const lat = centerCoord && centerCoord.length >= 2 ? centerCoord[1] : BOJONEGORO_CENTER[1];
+  const latRad = (lat * Math.PI) / 180;
+  const cosLat = Math.cos(latRad);
+  return scaleDenominator / (cosLat * 3779.527559);
+}
+
+function fitCoordinateWithPadding(
+  coord: [number, number],
+  targetZoom?: number,
+  duration = 450,
+  snapOverride?: "min" | "peek" | "full"
+) {
   if (!mapInstance || !olModules) return;
-  const extent3857 = olModules.transformExtent(bbox, "EPSG:4326", "EPSG:3857");
+  const cleanCoord = normalizeCoordLonLat(coord);
+  const padding = getDeviceMapPadding(snapOverride);
   const view = mapInstance.getView();
+
+  // Batasi fitbound maksimal pada skala 1:5.000
+  const minRes5000 = getResolutionForScale(5000, cleanCoord);
+  const zoom5000 = view.getZoomForResolution(minRes5000) ?? 16.8;
+  const currentZoom = view.getZoom() || DEFAULT_ZOOM;
+  const target = typeof targetZoom === "number" ? targetZoom : Math.max(currentZoom, 15);
+  const resolvedZoom = Math.min(target, zoom5000);
+
+  const delta = 0.00005;
+  const microBbox: [number, number, number, number] = [
+    cleanCoord[0] - delta,
+    cleanCoord[1] - delta,
+    cleanCoord[0] + delta,
+    cleanCoord[1] + delta,
+  ];
+  const extent3857 = olModules.transformExtent(microBbox, "EPSG:4326", "EPSG:3857");
+
   view.fit(extent3857, {
     size: mapInstance.getSize(),
-    padding: [10, 10, 10, 10],
+    padding,
     duration,
-    maxZoom: targetZoom ?? 19,
+    minResolution: minRes5000,
+    maxZoom: resolvedZoom,
+  });
+}
+
+function fitFeatureExtent(
+  extent: [number, number, number, number],
+  maxZoom?: number,
+  duration = 500,
+  snapOverride?: "min" | "peek" | "full"
+) {
+  if (!mapInstance || !olModules || !extent || extent.length !== 4) return;
+  const normalized = normalizeBbox4326(extent, olModules);
+  const [minX, minY, maxX, maxY] = normalized;
+  const centerCoord: [number, number] = [(minX + maxX) / 2, (minY + maxY) / 2];
+
+  // Batasi fitbound maksimal pada skala 1:5.000
+  const minRes5000 = getResolutionForScale(5000, centerCoord);
+  const view = mapInstance.getView();
+  const zoom5000 = view.getZoomForResolution(minRes5000) ?? 16.8;
+  const resolvedMaxZoom = typeof maxZoom === "number" ? Math.min(maxZoom, zoom5000) : zoom5000;
+
+  if (Math.abs(maxX - minX) < 0.0001 && Math.abs(maxY - minY) < 0.0001) {
+    fitCoordinateWithPadding(centerCoord, resolvedMaxZoom, duration, snapOverride);
+    return;
+  }
+
+  const padding = getDeviceMapPadding(snapOverride);
+  const extent3857 = olModules.transformExtent(normalized, "EPSG:4326", "EPSG:3857");
+
+  view.fit(extent3857, {
+    size: mapInstance.getSize(),
+    padding,
+    duration,
+    minResolution: minRes5000,
+    maxZoom: resolvedMaxZoom,
+  });
+}
+
+function fitBbox(
+  bbox: [number, number, number, number],
+  targetZoom?: number,
+  duration = 0,
+  snapOverride?: "min" | "peek" | "full"
+) {
+  if (!mapInstance || !olModules || !bbox || bbox.length !== 4) return;
+  const normalized = normalizeBbox4326(bbox, olModules);
+  const extent3857 = olModules.transformExtent(normalized, "EPSG:4326", "EPSG:3857");
+  const view = mapInstance.getView();
+  const centerCoord: [number, number] = [(normalized[0] + normalized[2]) / 2, (normalized[1] + normalized[3]) / 2];
+  const minRes5000 = getResolutionForScale(5000, centerCoord);
+  const zoom5000 = view.getZoomForResolution(minRes5000) ?? 16.8;
+  const resolvedMaxZoom = typeof targetZoom === "number" ? Math.min(targetZoom, zoom5000) : zoom5000;
+  const padding = getDeviceMapPadding(snapOverride);
+
+  view.fit(extent3857, {
+    size: mapInstance.getSize(),
+    padding,
+    duration,
+    minResolution: minRes5000,
+    maxZoom: resolvedMaxZoom,
   });
 }
 
@@ -1590,6 +2461,199 @@ function getViewport(): MapViewportPayload | null {
   };
 }
 
+const FIRE_MARKER_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 1.5c.9 3.6 5.6 5.6 5.6 11.2A5.6 5.6 0 0 1 12 22.5a5.6 5.6 0 0 1-5.6-9.8c.3 1.4 1 2.2 1.9 2.6C8 10.6 9.8 4.2 12 1.5z" fill="#ea580c" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/><path d="M12 11.5c.5 1.8 2.6 2.7 2.6 5a2.6 2.6 0 0 1-5.2 0c0-1.2.5-1.9 1.2-2.5.2.6.5 1 .9 1.2-.3-1.5-.2-2.8.5-3.7z" fill="#fcd34d"/></svg>';
+const PIN_MARKER_SVG =
+  '<svg viewBox="0 0 24 32" aria-hidden="true" focusable="false"><path d="M12 1.5C6.8 1.5 2.5 5.8 2.5 11c0 7.2 9.5 19.5 9.5 19.5S21.5 18.2 21.5 11c0-5.2-4.3-9.5-9.5-9.5z" fill="#dc2626" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10.8" r="3.2" fill="#ffffff"/></svg>';
+
+let pinOverlay: any = null;
+let geoparkOverlays: any[] = [];
+
+interface GeoparkMarkerEntry {
+  site: GeoparkSite;
+  overlay: any;
+  containerEl: HTMLElement;
+  labelEl: HTMLElement;
+  buttonEl: HTMLButtonElement;
+}
+let geoparkMarkerEntries: GeoparkMarkerEntry[] = [];
+const activeGeoparkSite = ref<GeoparkSite | null>(props.selectedGeoparkSite || null);
+
+// Perbarui visual aktif: animasi loncat-loncat dan label holo HANYA pada situs yang sedang dipilih
+function updateGeoparkMarkersActiveState() {
+  const current = activeGeoparkSite.value;
+  for (const entry of geoparkMarkerEntries) {
+    const isMatch = Boolean(
+      current &&
+        (current.id === entry.site.id ||
+          current.slug === entry.site.slug ||
+          (current.code && current.code === entry.site.code))
+    );
+
+    if (isMatch) {
+      entry.containerEl.classList.add("is-active");
+      if (typeof entry.overlay.setZIndex === "function") {
+        entry.overlay.setZIndex(120);
+      }
+    } else {
+      entry.containerEl.classList.remove("is-active");
+      if (typeof entry.overlay.setZIndex === "function") {
+        entry.overlay.setZIndex(10);
+      }
+    }
+  }
+}
+
+// Pin standar ukuran diperkecil untuk seluruh fitur non-Geopark (WMS identify, pencarian, koordinat).
+// Khusus Geopark, pin standar ditiadakan karena Geopark menggunakan marker animasi loncat-loncat.
+function syncPinMarker() {
+  if (!mapInstance || !olModules) return;
+  if (props.activeTab === "geopark") {
+    pinOverlay?.setPosition(undefined);
+    return;
+  }
+  const coord = props.clickedCoordinate;
+  if (!coord || coord.length < 2) {
+    pinOverlay?.setPosition(undefined);
+    return;
+  }
+  if (!pinOverlay) {
+    const el = document.createElement("div");
+    el.className = "mr-pin-marker";
+    el.innerHTML = PIN_MARKER_SVG;
+    pinOverlay = new olModules.Overlay({ element: el, positioning: "bottom-center", stopEvent: false });
+    mapInstance.addOverlay(pinOverlay);
+  }
+  pinOverlay.setPosition(olModules.fromLonLat([coord[0], coord[1]]));
+  const pinEl = pinOverlay.getElement();
+  pinEl.classList.remove("is-dropping");
+  void pinEl.offsetWidth;
+  pinEl.classList.add("is-dropping");
+}
+
+function syncGeoparkMarkers() {
+  if (!mapInstance || !olModules) return;
+
+  if (props.activeTab !== "geopark") {
+    if (geoparkMarkerEntries.length > 0) {
+      for (const entry of geoparkMarkerEntries) {
+        mapInstance.removeOverlay(entry.overlay);
+      }
+      geoparkMarkerEntries = [];
+      geoparkOverlays = [];
+    }
+    return;
+  }
+
+  const validSites = (props.geoparkSites || []).filter((s) => s.hasCoordinate);
+
+  // Jika marker sudah terpasang dan jumlahnya sama, cukup update status aktif tanpa render ulang DOM
+  if (geoparkMarkerEntries.length > 0 && geoparkMarkerEntries.length === validSites.length) {
+    updateGeoparkMarkersActiveState();
+    return;
+  }
+
+  for (const entry of geoparkMarkerEntries) {
+    mapInstance.removeOverlay(entry.overlay);
+  }
+  geoparkMarkerEntries = [];
+  geoparkOverlays = [];
+
+  validSites.forEach((site) => {
+
+    const container = document.createElement("div");
+    container.className = "mr-geopark-marker-container";
+
+    // 1. Label Nama Geopark Simple Minimalis dengan Efek Holo
+    const label = document.createElement("div");
+    label.className = "mr-geopark-holo-label";
+    label.setAttribute("role", "tooltip");
+
+    const codeSpan = document.createElement("span");
+    codeSpan.className = "mr-holo-code";
+    codeSpan.textContent = site.code || "SITE";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "mr-holo-name";
+    nameSpan.textContent = site.name;
+
+    const caret = document.createElement("div");
+    caret.className = "mr-holo-caret";
+
+    label.appendChild(codeSpan);
+    label.appendChild(nameSpan);
+    label.appendChild(caret);
+
+    // Handler klik terpadu untuk marker dan label holo Geopark
+    const handleGeoparkClick = (e: MouseEvent) => {
+      e.stopPropagation();
+      activeGeoparkSite.value = site;
+      updateGeoparkMarkersActiveState();
+
+      // Fitbound kamera ke titik geosite dengan device-aware padding
+      fitCoordinateWithPadding(
+        [site.longitude, site.latitude],
+        site.zoom || 15,
+        500,
+        props.mobileDrawerOpen ? "peek" : undefined
+      );
+
+      emit("select-geopark", site);
+    };
+
+    label.addEventListener("click", handleGeoparkClick);
+
+    // 2. Tombol Marker Api Geopark (target sentuh 44x44px)
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mr-fire-marker";
+    btn.title = site.name;
+    btn.setAttribute("aria-label", `Situs Geopark: ${site.name}`);
+    btn.innerHTML = FIRE_MARKER_SVG;
+
+    btn.addEventListener("click", handleGeoparkClick);
+
+    container.appendChild(label);
+    container.appendChild(btn);
+
+    const overlay = new olModules.Overlay({
+      element: container,
+      positioning: "bottom-center",
+      position: olModules.fromLonLat([site.longitude, site.latitude]),
+      stopEvent: true,
+    });
+
+    mapInstance.addOverlay(overlay);
+    geoparkOverlays.push(overlay);
+    geoparkMarkerEntries.push({
+      site,
+      overlay,
+      containerEl: container,
+      labelEl: label,
+      buttonEl: btn,
+    });
+  });
+
+  updateGeoparkMarkersActiveState();
+}
+
+watch(() => props.clickedCoordinate, syncPinMarker, { deep: true });
+watch(() => props.geoparkSites, syncGeoparkMarkers);
+watch(
+  () => props.selectedGeoparkSite,
+  (site) => {
+    activeGeoparkSite.value = site || null;
+    updateGeoparkMarkersActiveState();
+  }
+);
+watch(
+  () => props.activeTab,
+  () => {
+    syncPinMarker();
+    syncGeoparkMarkers();
+  }
+);
+
 onMounted(() => {
   initMap();
 
@@ -1617,23 +2681,34 @@ onMounted(() => {
       themeMutationObserver = null;
     }
     if (mapInstance) {
+      if (pinOverlay) {
+        mapInstance.removeOverlay(pinOverlay);
+        pinOverlay = null;
+      }
+      for (const overlay of geoparkOverlays) {
+        mapInstance.removeOverlay(overlay);
+      }
+      geoparkOverlays = [];
+      geoparkMarkerEntries = [];
       mapInstance.setTarget(undefined);
       mapInstance = null;
     }
   });
 });
 
-function toggleCartoGrid() {
-  showCartoGrid.value = !showCartoGrid.value;
+function toggleCartoGrid(forceState?: boolean) {
+  showCartoGrid.value = typeof forceState === "boolean" ? forceState : !showCartoGrid.value;
   if (graticuleLayer) {
     graticuleLayer.setVisible(showCartoGrid.value);
   }
+  return showCartoGrid.value;
 }
 
 function setCenterAndZoom(center: [number, number], zoom?: number, animate = false) {
   if (!mapInstance || !olModules) return;
+  const cleanCoord = normalizeCoordLonLat(center);
   const view = mapInstance.getView();
-  const mercator = olModules.fromLonLat(center);
+  const mercator = olModules.fromLonLat(cleanCoord);
   if (animate) {
     view.animate({
       center: mercator,
@@ -1655,14 +2730,44 @@ function updateCursorOnHover(pixel: [number, number]) {
   const viewport = mapInstance.getViewport();
   if (!viewport) return;
 
+  const currentLayers = props.activeLayers || [];
   let hasFeature = false;
 
-  // 1. Cek layer vektor jika ada
+  // 1. Cek layer vektor jika ada, kecualikan basemap, utility layers, dan bataswilayah_kabupaten
   try {
-    hasFeature = Boolean(
-      mapInstance.hasFeatureAtPixel(pixel, {
-        layerFilter: (layer: any) => layer !== tileLayer,
-      })
+    mapInstance.forEachFeatureAtPixel(
+      pixel,
+      (feature: any, layer: any) => {
+        for (const [id, olLayer] of mvtLayersMap.entries()) {
+          if (olLayer === layer) {
+            const match = currentLayers.find((l) => l.id === id);
+            if (match && (match.visible === false || isLayerIdentifyDisabled(match))) return;
+            if (isLayerIdentifyDisabled({ id })) return;
+
+            const rawProps = feature.getProperties?.() || {};
+            const featureId = String(feature.getId?.() || rawProps.id || "").toLowerCase();
+            if (featureId.includes("bataswilayah_kabupaten")) return;
+
+            hasFeature = true;
+            return true;
+          }
+        }
+      },
+      {
+        hitTolerance: 5,
+        layerFilter: (layer: any) => {
+          if (layer === tileLayer || layer === geoVectorLayer || layer === graticuleLayer) return false;
+          for (const [id, olLayer] of mvtLayersMap.entries()) {
+            if (olLayer === layer) {
+              const match = currentLayers.find((l) => l.id === id);
+              if (match && (match.visible === false || isLayerIdentifyDisabled(match))) return false;
+              if (isLayerIdentifyDisabled({ id })) return false;
+              return true;
+            }
+          }
+          return false;
+        },
+      }
     );
   } catch {
     hasFeature = false;
@@ -1682,8 +2787,12 @@ function updateCursorOnHover(pixel: [number, number]) {
       [2, -2],
     ];
 
-    for (const [_, olLayer] of wmsLayersMap.entries()) {
+    for (const [id, olLayer] of wmsLayersMap.entries()) {
       if (!olLayer || !olLayer.getVisible()) continue;
+      const match = currentLayers.find((l) => l.id === id);
+      if (match && (match.visible === false || isLayerIdentifyDisabled(match))) continue;
+      if (isLayerIdentifyDisabled({ id })) continue;
+
       try {
         for (const [dx, dy] of offsets) {
           const testPixel = [pixel[0] + dx, pixel[1] + dy] as [number, number];
@@ -1737,10 +2846,27 @@ onBeforeUnmount(() => {
   geoHeadingFeature = null;
 });
 
-async function getMapSnapshot(): Promise<string | null> {
+function buildCurrentMapThumbnailMeta(): MapThumbnailMeta {
+  const vp = getViewport();
+  return {
+    center: vp?.center || props.clickedCoordinate || [111.89, -7.15],
+    zoom: vp?.zoom || props.initialZoom || 13.5,
+    extent: vp?.bbox || null,
+    basemap: props.currentBasemap,
+    activeLayers: props.activeLayers,
+    filterWilayah: props.activeLayers?.find((l) => l.filterKecamatan)?.filterKecamatan || null,
+    title: props.locationLabel || "Peta Spasial Kabupaten Bojonegoro",
+  };
+}
+
+async function getMapSnapshot(options?: { crop16_9?: boolean; width?: number; height?: number }): Promise<string | null> {
+  if (options?.crop16_9) {
+    return getMapThumbnail(options);
+  }
   return new Promise((resolve) => {
     if (!mapInstance || !mapContainer.value) return resolve(null);
     try {
+      mapInstance.renderSync();
       const size = mapInstance.getSize();
       if (!size) return resolve(null);
       const [width, height] = size;
@@ -1751,10 +2877,15 @@ async function getMapSnapshot(): Promise<string | null> {
       if (!ctx) return resolve(null);
 
       const canvases = mapContainer.value.querySelectorAll(".ol-layer canvas, canvas.ol-layer");
+      let taintedCount = 0;
       if (canvases.length > 0) {
         canvases.forEach((c) => {
           const canvasEl = c as HTMLCanvasElement;
           if (canvasEl.width > 0 && canvasEl.height > 0) {
+            if (isCanvasTainted(canvasEl)) {
+              taintedCount++;
+              return;
+            }
             const parent = canvasEl.parentNode as HTMLElement | null;
             const opacity = parent?.style.opacity || canvasEl.style.opacity || "1";
             ctx.globalAlpha = parseFloat(opacity) || 1;
@@ -1771,10 +2902,104 @@ async function getMapSnapshot(): Promise<string | null> {
         });
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       }
+
+      if (taintedCount > 0 && taintedCount === canvases.length) {
+        const meta = buildCurrentMapThumbnailMeta();
+        return resolve(generateFallbackMapCanvas(meta, 640, 360, true));
+      }
+
       resolve(exportCanvas.toDataURL("image/png"));
     } catch (err) {
       console.warn("Snapshot notice (cross-origin fallback):", err);
-      resolve(null);
+      const meta = buildCurrentMapThumbnailMeta();
+      resolve(generateFallbackMapCanvas(meta, 640, 360, true));
+    }
+  });
+}
+
+async function getMapThumbnail(options: MapThumbnailOptions = {}): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!mapInstance || !mapContainer.value) return resolve(null);
+    try {
+      mapInstance.renderSync();
+      const size = mapInstance.getSize();
+      if (!size) return resolve(null);
+      const [width, height] = size;
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = width;
+      exportCanvas.height = height;
+      const ctx = exportCanvas.getContext("2d");
+      if (!ctx) return resolve(null);
+
+      if (props.currentBasemap === "none") {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      const canvases = mapContainer.value.querySelectorAll(".ol-layer canvas, canvas.ol-layer");
+      let taintedCount = 0;
+      if (canvases.length > 0) {
+        canvases.forEach((c) => {
+          const canvasEl = c as HTMLCanvasElement;
+          if (canvasEl.width > 0 && canvasEl.height > 0) {
+            if (isCanvasTainted(canvasEl)) {
+              taintedCount++;
+              return;
+            }
+            const parent = canvasEl.parentNode as HTMLElement | null;
+            const opacity = parent?.style.opacity || canvasEl.style.opacity || "1";
+            ctx.globalAlpha = parseFloat(opacity) || 1;
+            const transform = canvasEl.style.transform;
+            if (transform) {
+              const matrixMatch = transform.match(/^matrix\(([^\(]*)\)$/);
+              if (matrixMatch) {
+                const m = matrixMatch[1].split(",").map(Number);
+                ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+              }
+            }
+            ctx.drawImage(canvasEl, 0, 0);
+          }
+        });
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+
+      const meta = buildCurrentMapThumbnailMeta();
+      const targetW = options.width || 640;
+      const targetH = options.height || Math.round((targetW * 9) / 16);
+
+      if (taintedCount > 0 && taintedCount === canvases.length) {
+        const fallback = generateFallbackMapCanvas(
+          meta,
+          targetW,
+          targetH,
+          options.includeWatermark !== false
+        );
+        return resolve(fallback);
+      }
+
+      const resultDataUrl = cropCanvasTo16_9(
+        exportCanvas,
+        targetW,
+        targetH,
+        options.quality ?? 0.92,
+        options.format ?? "image/png",
+        options.includeWatermark !== false,
+        meta
+      );
+
+      resolve(resultDataUrl || null);
+    } catch (err) {
+      console.warn("Ekspor thumbnail peta dialihkan ke fallback kartografis:", err);
+      const meta = buildCurrentMapThumbnailMeta();
+      const targetW = options.width || 640;
+      const targetH = options.height || Math.round((targetW * 9) / 16);
+      const fallback = generateFallbackMapCanvas(
+        meta,
+        targetW,
+        targetH,
+        options.includeWatermark !== false
+      );
+      resolve(fallback);
     }
   });
 }
@@ -1783,13 +3008,23 @@ defineExpose({
   zoomIn,
   zoomOut,
   resetView,
+  resetNorth,
   flyTo,
   locateUser,
   fitBbox,
+  fitCoordinateWithPadding,
+  fitFeatureExtent,
+  getDeviceMapPadding,
+  renderSelectedFeature,
   setCenterAndZoom,
   getViewport,
   dismissPulse,
   getMapSnapshot,
+  getMapThumbnail,
+  getThumbnailMeta: buildCurrentMapThumbnailMeta,
+  toggleCartoGrid,
+  showCartoGrid: () => showCartoGrid.value,
+  currentRotation: () => currentRotation.value,
   mapInstance: () => mapInstance,
 });
 </script>
@@ -1810,138 +3045,6 @@ defineExpose({
       @mouseleave="handleMapMouseLeave"
     />
 
-    <!-- ═══ PULSE MARKER OVERLAY (SEARCHED / CLICKED LOCATION) ═══════════════ -->
-    <div
-      ref="pulseEl"
-      class="pointer-events-none z-30 select-none relative size-0"
-      :class="isPulseVisible ? 'block' : 'hidden'"
-    >
-      <!-- Floating Label Badge above the Pin -->
-      <div class="absolute bottom-[44px] left-0 -translate-x-1/2 flex flex-col items-center pointer-events-none">
-        <Transition
-          enter-active-class="transition-all duration-300 ease-out"
-          enter-from-class="opacity-0 translate-y-3.5 scale-95"
-          enter-to-class="opacity-100 translate-y-0 scale-100"
-          leave-active-class="transition-all duration-200 ease-in"
-          leave-from-class="opacity-100 translate-y-0 scale-100"
-          leave-to-class="opacity-0 translate-y-3.5 scale-95"
-          @after-leave="onBadgeAfterLeave"
-        >
-          <div
-            v-if="isBadgeVisible && (effectivePopupTitle || clickedCoordinate)"
-            class="flex flex-col items-center pointer-events-auto"
-          >
-            <!-- Badge Pill Card -->
-            <div
-              class="group relative flex items-center justify-between gap-2.5 px-3.5 py-1.5 rounded-xl border backdrop-blur-xl transition-all shadow-xl min-w-[200px] max-w-[280px]"
-              :class="[
-                'bg-white/95 text-slate-800 border-slate-200/90 shadow-slate-900/10',
-                'dark:bg-[#09111e]/95 dark:text-white dark:border-white/20 dark:shadow-2xl dark:shadow-black/70'
-              ]"
-            >
-              <!-- Left content: Indicator + Texts -->
-              <div class="flex items-center gap-2.5 min-w-0 flex-1">
-                <!-- Glowing Dot Indicator -->
-                <span class="relative flex size-2 shrink-0">
-                  <span
-                    class="absolute inline-flex h-full w-full rounded-full opacity-75"
-                    :class="isIdentifyingFeatures ? 'bg-amber-400 animate-ping' : 'bg-blue-400 animate-ping'"
-                  />
-                  <span
-                    class="relative inline-flex size-2 rounded-full"
-                    :class="isIdentifyingFeatures ? 'bg-amber-500' : 'bg-blue-600 dark:bg-blue-400'"
-                  />
-                </span>
-
-                <!-- Label & Subtitle -->
-                <div class="flex flex-col min-w-0 flex-1">
-                  <span class="text-xs font-semibold tracking-tight truncate leading-tight">
-                    {{ effectivePopupTitle }}
-                  </span>
-                  <span
-                    v-if="clickedCoordinate"
-                    class="text-[10px] font-mono leading-tight text-slate-500 dark:text-slate-400 mt-0.5"
-                  >
-                    {{ clickedCoordinate[1].toFixed(5) }}, {{ clickedCoordinate[0].toFixed(5) }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Close Button (Min 44x44px touch target on mobile per antislop-layoutmobile) -->
-              <button
-                type="button"
-                class="relative -mr-1 ml-1.5 shrink-0 flex items-center justify-center size-7 sm:size-6 rounded-lg transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95 touch-manipulation before:absolute before:inset-[-8px] before:content-['']"
-                :class="[
-                  'text-slate-400 hover:text-slate-700 hover:bg-slate-100 active:bg-slate-200',
-                  'dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-white/10 dark:active:bg-white/20'
-                ]"
-                aria-label="Tutup popup lokasi"
-                @pointerdown.stop
-                @mousedown.stop
-                @touchstart.stop.prevent
-                @touchend.stop="dismissPulse"
-                @click.stop="dismissPulse"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" class="size-3.5 stroke-current" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </button>
-            </div>
-
-            <!-- Bottom Caret Arrow pointing to Pin Core -->
-            <div
-              class="size-2 -mt-1 rotate-45 border-r border-b transition-colors"
-              :class="[
-                'bg-white border-slate-200/90',
-                'dark:bg-[#09111e] dark:border-white/20'
-              ]"
-            />
-          </div>
-        </Transition>
-      </div>
-
-      <!-- Singleclick pin: teardrop SVG shape with crosshair, blue = query/action -->
-      <div :key="clickAnimKey" class="absolute inset-0 pointer-events-none">
-        <!-- Ground pinpoint dot directly on the exact clicked coordinate (0, 0) -->
-        <span class="absolute size-1.5 rounded-full bg-blue-600 dark:bg-blue-400 -translate-x-1/2 -translate-y-1/2" />
-
-        <!-- Ripple shockwave ring originating from exact click point -->
-        <span class="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2 size-12 flex items-center justify-center pointer-events-none">
-          <span
-            class="size-full rounded-full ring-wave pointer-events-none border border-blue-500/50 bg-blue-500/10 dark:border-blue-400/60 dark:bg-blue-400/15"
-          />
-        </span>
-
-        <!-- Outer radar ping centered on (0, 0) -->
-        <span
-          class="absolute size-8 rounded-full animate-ping -translate-x-1/2 -translate-y-1/2"
-          style="animation-duration: 1.4s;"
-          :class="[
-            'bg-blue-500/20 border border-blue-500/30',
-            'dark:bg-blue-400/25 dark:border-blue-400/40'
-          ]"
-        />
-
-        <!-- Teardrop pin SVG: anchored at bottom tip (x=14, y=36) directly onto (0, 0) -->
-        <div class="absolute left-0 bottom-0 -translate-x-1/2">
-          <div class="scale-animation" style="transform-origin: 50% 100%;">
-            <svg width="28" height="36" viewBox="0 0 28 36" fill="none" xmlns="http://www.w3.org/2000/svg" class="drop-shadow-md block overflow-visible">
-              <!-- Pin body: tip is at (14, 36) -->
-              <path
-                d="M14 0C6.268 0 0 6.268 0 14c0 9.188 12.375 20.813 13.406 21.781a.813.813 0 0 0 1.188 0C15.625 34.813 28 23.188 28 14 28 6.268 21.732 0 14 0z"
-                class="fill-blue-600 dark:fill-blue-500"
-              />
-              <!-- Crosshair lines inside pin -->
-              <line x1="14" y1="7" x2="14" y2="21" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
-              <line x1="7" y1="14" x2="21" y2="14" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
-              <!-- Center dot -->
-              <circle cx="14" cy="14" r="2.5" fill="white" opacity="0.95"/>
-            </svg>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Floating Navigation Controls (Bottom Right with Dynamic Mobile Clearance) -->
     <div
       class="absolute right-3 md:right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"
@@ -1951,7 +3054,7 @@ defineExpose({
           : mobileDrawerOpen && mobileSheetSnap === 'peek'
             ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4 md:opacity-100'
             : mobileDrawerOpen && mobileSheetSnap === 'min'
-              ? 'bottom-[calc(200px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
+              ? 'bottom-[calc(150px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
               : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
       ]"
     >
@@ -1962,12 +3065,11 @@ defineExpose({
         :speed="userSpeed"
         :heading="userHeading"
         :accuracy="userAccuracy"
-        :show-grid="showCartoGrid"
+        :rotation="currentRotation"
         @locate="locateUser"
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
-        @share="emit('share')"
-        @toggle-grid="toggleCartoGrid"
+        @reset-north="resetNorth"
       />
     </div>
 
@@ -2044,38 +3146,182 @@ defineExpose({
   border: 1.5px solid #94a3b8;
   border-top: none;
 }
+</style>
 
-/* ─── Click Shockwave Ring & Pin Pop Animation ───────────────────────────── */
-@keyframes ring-expand {
-  0% {
-    transform: scale(0.2);
-    opacity: 0.95;
+<style>
+/* Marker dibuat lewat DOM oleh OL Overlay, jadi di luar scope komponen. */
+.mr-pin-marker {
+  width: 20px;
+  height: 28px;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.35));
+}
+.mr-pin-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.mr-pin-marker.is-dropping svg {
+  transform-origin: 50% 100%;
+  animation: mr-pin-drop 240ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+@keyframes mr-pin-drop {
+  from { transform: translateY(-14px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ─── Geopark Marker Container ────────────────────────────────────────────── */
+.mr-geopark-marker-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: auto;
+  user-select: none;
+}
+
+/* ─── Holo Label: Simple Minimalist with Holographic Halo Glow ────────────── */
+.mr-geopark-holo-label {
+  display: none;
+  position: absolute;
+  bottom: calc(100% - 2px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  opacity: 0;
+  white-space: nowrap;
+  padding: 4px 10px 4px 6px;
+  border-radius: 9999px;
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  /* Holographic halo border: prismatic amber edge dengan soft ambient glow */
+  border: 1px solid rgba(249, 115, 22, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset,
+    0 0 16px 2px rgba(249, 115, 22, 0.32),
+    0 4px 14px rgba(15, 23, 42, 0.14);
+  z-index: 60;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:global(.dark) .mr-geopark-holo-label,
+.dark .mr-geopark-holo-label {
+  color: #f8fafc;
+  background: rgba(11, 19, 34, 0.94);
+  border: 1px solid rgba(251, 146, 60, 0.6);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset,
+    0 0 18px 2px rgba(249, 115, 22, 0.42),
+    0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.mr-geopark-marker-container.is-active .mr-geopark-holo-label {
+  display: flex;
+  align-items: center;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Caret Arrow */
+.mr-holo-caret {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid rgba(249, 115, 22, 0.6);
+}
+
+/* Code Badge di dalam Holo Pill */
+.mr-holo-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 9999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #c2410c;
+  background: rgba(254, 215, 170, 0.7);
+}
+
+:global(.dark) .mr-holo-code,
+.dark .mr-holo-code {
+  color: #fed7aa;
+  background: rgba(194, 65, 12, 0.45);
+}
+
+.mr-holo-name {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Fire Marker Button ──────────────────────────────────────────────────── */
+.mr-fire-marker {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.mr-fire-marker svg {
+  width: 30px;
+  height: 30px;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 2px 2.5px rgba(15, 23, 42, 0.4));
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mr-fire-marker:hover svg {
+  transform: translateY(-2px) scale(1.08);
+}
+
+.mr-fire-marker:focus-visible {
+  outline: 2px solid #ffffff;
+  box-shadow: 0 0 0 4px #1d4ed8;
+}
+
+/* Animasi Loncat-loncat: HANYA aktif saat feature geopark diklik / terpilih */
+.mr-geopark-marker-container.is-active .mr-fire-marker svg {
+  filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.75)) drop-shadow(0 2px 4px rgba(15, 23, 42, 0.5));
+  animation: mr-fire-hop 0.95s cubic-bezier(0.3, 0.8, 0.4, 1) infinite;
+}
+
+@keyframes mr-fire-hop {
+  0%, 100% {
+    transform: translateY(0) scaleY(0.95);
   }
-  100% {
-    transform: scale(1.6);
-    opacity: 0;
+  45% {
+    transform: translateY(-15px) scaleY(1.05);
   }
 }
 
-.ring-wave {
-  animation: ring-expand 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes pin-pop {
-  0% {
-    transform: scale(0.35);
-    opacity: 0.6;
+@media (prefers-reduced-motion: reduce) {
+  .mr-geopark-marker-container.is-active .mr-fire-marker svg {
+    animation: none;
+    transform: translateY(-4px) scale(1.1);
   }
-  60% {
-    transform: scale(1.15);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.scale-animation {
-  animation: pin-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 </style>

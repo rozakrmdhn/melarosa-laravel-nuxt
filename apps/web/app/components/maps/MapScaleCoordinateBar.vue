@@ -125,7 +125,7 @@ defineExpose({
         : mobileDrawerOpen && mobileSheetSnap === 'peek'
           ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4 md:opacity-100'
           : mobileDrawerOpen && mobileSheetSnap === 'min'
-            ? 'bottom-[calc(200px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
+            ? 'bottom-[calc(150px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
             : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
     ]"
   >
@@ -147,7 +147,7 @@ defineExpose({
       <div ref="scaleDropdownRef" class="relative flex items-center shrink-0">
         <button
           type="button"
-          class="flex items-center gap-0.5 text-[10px] sm:text-[10.5px] font-semibold text-slate-700 dark:text-slate-200 tabular-nums shrink-0 px-1 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-1.5 focus-visible:ring-blue-500 focus:outline-hidden leading-none"
+          class="relative flex items-center gap-0.5 text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums shrink-0 px-1 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-hidden leading-none"
           :class="{ 'bg-slate-100 dark:bg-white/10 text-blue-600 dark:text-blue-400': isScaleDropdownOpen }"
           title="Pilih Skala Kartografis Standar"
           :aria-expanded="isScaleDropdownOpen"
@@ -157,7 +157,7 @@ defineExpose({
           <span>{{ scaleRatio || '1 : 25.000' }}</span>
           <UIcon
             name="i-lucide-chevron-up"
-            class="size-2.5 text-slate-400 dark:text-slate-500 transition-transform duration-200"
+            class="size-2.5 text-slate-500 dark:text-slate-400 transition-transform duration-200"
             :class="{ 'rotate-180 text-blue-600 dark:text-blue-400': isScaleDropdownOpen }"
           />
         </button>
@@ -183,7 +183,7 @@ defineExpose({
               type="button"
               role="option"
               :aria-selected="scaleRatio === scale.label"
-              class="w-full flex items-center justify-between gap-1.5 px-2 py-0.5 text-left text-[10px] transition-colors cursor-pointer rounded-md leading-tight"
+              class="w-full min-h-[44px] flex items-center justify-between gap-1.5 px-3 text-left text-xs transition-colors cursor-pointer rounded-md leading-tight"
               :class="scaleRatio === scale.label
                 ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-bold'
                 : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'"
@@ -208,7 +208,7 @@ defineExpose({
         <div class="flex items-center gap-1 shrink-0 min-w-0">
           <!-- Coordinate Values (Tampilan Bersih Read-Only Tanpa Tombol Salin) -->
           <div
-            class="flex items-center text-[10px] sm:text-[10.5px] text-slate-700 dark:text-slate-200 font-medium px-0.5 select-text leading-none"
+            class="flex items-center text-xs text-slate-700 dark:text-slate-200 font-medium px-0.5 select-text leading-none"
             title="Koordinat Kursor Peta"
           >
             <span v-if="coordDisplayFormat === 'dd'" class="tabular-nums flex items-center">
@@ -217,7 +217,7 @@ defineExpose({
               <span>{{ formattedLngDisplay }}</span>
             </span>
 
-            <span v-else class="tabular-nums text-[10px] truncate max-w-[140px]">
+            <span v-else class="tabular-nums text-xs truncate max-w-[140px]">
               {{ formattedDmsDisplay }}
             </span>
           </div>
@@ -225,7 +225,7 @@ defineExpose({
           <!-- Format Toggle Button (DD / DMS - Minimalis) -->
           <button
             type="button"
-            class="min-h-[19px] min-w-[22px] px-1 py-0 rounded-md text-[9px] font-bold transition-all cursor-pointer active:scale-95 flex items-center justify-center shrink-0 focus-visible:ring-1.5 focus-visible:ring-blue-500 focus:outline-hidden leading-none"
+            class="relative min-h-[19px] min-w-[22px] px-1 py-0 rounded-md text-xs font-bold transition-all cursor-pointer active:scale-95 flex items-center justify-center shrink-0 after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-hidden leading-none"
             :class="coordDisplayFormat === 'dd'
               ? 'bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/15'
               : 'bg-blue-600 text-white shadow-xs'"
@@ -262,7 +262,7 @@ defineExpose({
   color: #334155;
   border: 1.5px solid #475569;
   border-top: none;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   font-family: inherit;
   font-variant-numeric: tabular-nums;

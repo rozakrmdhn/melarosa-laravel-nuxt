@@ -150,10 +150,10 @@ onUnmounted(() => {
       <button
         type="button"
         data-basemap-toggle="true"
-        class="relative size-12 sm:size-14 rounded-xl sm:rounded-2xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer border bg-white dark:bg-slate-900 shrink-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ring-offset-white dark:ring-offset-slate-950 z-20 group-hover:scale-102 active:scale-95"
+        class="relative size-11 rounded-lg sm:rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer border bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md shrink-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ring-offset-white dark:ring-offset-slate-950 z-20 group-hover:scale-102 active:scale-95"
         :class="isOpen
           ? 'border-blue-500 ring-2 ring-blue-500/30'
-          : 'border-slate-200/90 dark:border-slate-700/80 hover:border-blue-400/80'"
+          : 'border-gray-200/90 dark:border-gray-800 hover:border-blue-400/80'"
         :aria-expanded="isOpen"
         aria-label="Pilihan Peta Dasar (Basemap)"
         @click="toggleClicked"
@@ -270,17 +270,17 @@ onUnmounted(() => {
 
       <!-- Bottom Capsule Label (Google Maps style) -->
       <div
-        class="absolute bottom-1 inset-x-1 py-0.5 rounded-md bg-slate-950/75 dark:bg-black/85 backdrop-blur-xs text-[10px] font-bold text-white text-center tracking-tight truncate px-1 shadow-xs pointer-events-none"
+        class="absolute bottom-0.5 inset-x-0.5 py-0.5 rounded text-[9px] font-bold text-white text-center tracking-tight truncate px-0.5 bg-slate-950/75 dark:bg-black/85 backdrop-blur-xs shadow-xs pointer-events-none leading-none"
       >
         {{ activeBasemap.name }}
       </div>
 
       <!-- Subtle Expand Indicator Icon -->
       <div
-        class="absolute top-1 right-1 size-4 rounded-full bg-slate-950/60 text-white flex items-center justify-center transition-transform duration-200 pointer-events-none"
+        class="absolute top-0.5 right-0.5 size-3.5 rounded-full bg-slate-950/60 text-white flex items-center justify-center transition-transform duration-200 pointer-events-none"
         :class="isOpen ? 'rotate-90 bg-blue-600' : ''"
       >
-        <UIcon name="i-lucide-chevron-right" class="size-2.5 stroke-[3]" />
+        <UIcon name="i-lucide-chevron-right" class="size-2 stroke-[3]" />
       </div>
     </button>
     </UTooltip>
@@ -434,7 +434,7 @@ onUnmounted(() => {
 
             <!-- Card Label -->
             <span
-              class="text-[11px] mt-1.5 leading-tight text-center tracking-tight transition-colors"
+              class="text-xs mt-1.5 leading-tight text-center tracking-tight transition-colors"
               :class="currentBasemap === item.key
                 ? 'font-bold text-blue-600 dark:text-blue-400'
                 : 'font-medium text-slate-700 dark:text-slate-300 group-hover/card:text-slate-950 dark:group-hover/card:text-white'"

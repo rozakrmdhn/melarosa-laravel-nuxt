@@ -35,19 +35,26 @@ const emit = defineEmits<{
   (e: "expand"): void;
   (e: "peek"): void;
   (e: "minimize"): void;
+  (e: "backdrop-click"): void;
 }>();
 
 // ─── Snap Constants & Bleed ──────────────────────────────────────────────────
-const MIN_HEIGHT_PX = 200; // resting height showing handle, header, tabs, and search feature
+const MIN_HEIGHT_PX = 150; // resting height showing handle, tabs, and search feature
 const PEEK_RATIO = 0.50; // 50% of viewport (separuh layar)
 const FULL_RATIO = 0.92; // 92% of viewport
-const BOTTOM_BLEED_PX = 80; // extra extension below viewport to eliminate drag-up gap
+const BOTTOM_BLEED_PX = 120; // extra extension below viewport to eliminate drag-up gap and provide solid base
 
-// ─── Viewport Reactive State ─────────────────────────────────────────────────
-const viewportH = ref(typeof window !== "undefined" ? window.innerHeight : 720);
+function getEffectiveViewportHeight() {
+  if (typeof window === "undefined") return 720;
+  return window.innerHeight;
+}
+
+// ─── Viewport & Keyboard Reactive State ──────────────────────────────────────
+const viewportH = ref(getEffectiveViewportHeight());
+const keyboardHeight = ref(0);
 const fullH = computed(() => Math.round(viewportH.value * FULL_RATIO));
 const peekH = computed(() => Math.round(viewportH.value * PEEK_RATIO));
-const minH = computed(() => MIN_HEIGHT_PX);
+const minH = computed(() => Math.min(MIN_HEIGHT_PX, Math.round(viewportH.value * 0.35)));
 
 // Offsets from top of sheet:
 // At full: translateY = 0
@@ -73,6 +80,7 @@ let dragVelocity = 0; // px / ms (positive = moving down, negative = moving up)
 
 // Content scroll container ref for pull-down detection
 const scrollContainerRef = ref<HTMLElement | null>(null);
+const sheetRef = ref<HTMLElement | null>(null);
 
 // ─── Target TranslateY Calculation ────────────────────────────────────────────
 const sheetTranslateY = computed(() => {
@@ -243,13 +251,42 @@ function handleHeaderMouseDown(e: MouseEvent) {
 // ─── Touch & Drag Handling Across All Content & Tab Bar ─────────────────────
 let contentTouchStartX = 0;
 let contentTouchStartY = 0;
-let isPullingFromTop = false;
+let activeScrollableEl: HTMLElement | null = null;
+let touchStartScrollTop = 0;
+
+function findScrollableParent(target: HTMLElement | null, boundary: HTMLElement | null): HTMLElement | null {
+  let curr = target;
+  while (curr && curr !== boundary && curr !== document.body) {
+    const style = window.getComputedStyle(curr);
+    const overflowY = style.overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      curr.scrollHeight > curr.clientHeight + 1
+    ) {
+      return curr;
+    }
+    curr = curr.parentElement;
+  }
+  if (boundary) {
+    const style = window.getComputedStyle(boundary);
+    const overflowY = style.overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      boundary.scrollHeight > boundary.clientHeight + 1
+    ) {
+      return boundary;
+    }
+  }
+  return null;
+}
 
 function handleContentTouchStart(e: TouchEvent) {
   if (e.touches.length !== 1) return;
   contentTouchStartX = e.touches[0].clientX;
   contentTouchStartY = e.touches[0].clientY;
-  isPullingFromTop = false;
+  const target = e.target as HTMLElement | null;
+  activeScrollableEl = findScrollableParent(target, scrollContainerRef.value);
+  touchStartScrollTop = activeScrollableEl ? activeScrollableEl.scrollTop : 0;
 }
 
 function handleContentTouchMove(e: TouchEvent) {
@@ -262,34 +299,82 @@ function handleContentTouchMove(e: TouchEvent) {
   const absDiffX = Math.abs(diffX);
   const absDiffY = Math.abs(diffY);
 
-  // Require minimum 6px movement and vertical gesture priority
-  if (absDiffY < 6 || absDiffY <= absDiffX) return;
+  // Require minimum vertical movement threshold and vertical direction priority
+  if (absDiffY < 8 || absDiffY <= absDiffX) return;
 
-  const scrollEl = scrollContainerRef.value;
-
-  // 1. When NOT at full snap ('peek' or 'min'):
-  // ANY vertical swipe (UP or DOWN) across ALL content directly drags the bottom sheet!
-  if (snapLevel.value !== "full") {
-    if (e.cancelable) e.preventDefault();
-    beginDrag(currentY);
+  // Case 1: When sheet is minimized to resting bottom bar
+  // Any upward swipe expands sheet to peek or full
+  if (snapLevel.value === "min") {
+    if (diffY < -8) {
+      if (e.cancelable) e.preventDefault();
+      beginDrag(currentY);
+    }
     return;
   }
 
-  // 2. When at 'full' snap:
-  // If scrolled to top and pulling DOWN, drag the sheet downwards to peek
-  const isAtTop = !scrollEl || scrollEl.scrollTop <= 0;
-  if (isAtTop && diffY > 8) {
-    if (e.cancelable) e.preventDefault();
-    isPullingFromTop = true;
-    beginDrag(currentY);
+  // Case 2: When user is interacting inside a scrollable container
+  if (activeScrollableEl) {
+    const currentScrollTop = activeScrollableEl.scrollTop;
+
+    // A. Swiping finger UP (diffY < 0): User wants to scroll content DOWN
+    if (diffY < 0) {
+      const isAtBottom =
+        activeScrollableEl.scrollTop + activeScrollableEl.clientHeight >=
+        activeScrollableEl.scrollHeight - 2;
+
+      // If content has room to scroll down, prioritize natural content scrolling
+      if (!isAtBottom) {
+        return;
+      }
+
+      // If at peek and already reached the very bottom, drag up to expand to full
+      if (snapLevel.value === "peek" && diffY < -24) {
+        if (e.cancelable) e.preventDefault();
+        beginDrag(currentY);
+      }
+      return;
+    }
+
+    // B. Swiping finger DOWN (diffY > 0): User wants to scroll content UP towards top
+    if (diffY > 0) {
+      // If content is scrolled down (> 2px), prioritize natural content scrolling back to top
+      if (currentScrollTop > 2) {
+        return;
+      }
+
+      // Only if the touch started while content was already at the top (<= 1)
+      // AND user makes a deliberate downward pull (> 20px)
+      if (touchStartScrollTop <= 1 && diffY > 20) {
+        if (e.cancelable) e.preventDefault();
+        beginDrag(currentY);
+      }
+      return;
+    }
+  }
+
+  // Case 3: When touching non-scrollable area (e.g. tabs or container padding)
+  if (!activeScrollableEl) {
+    if (snapLevel.value === "peek") {
+      if (diffY < -12 || diffY > 12) {
+        if (e.cancelable) e.preventDefault();
+        beginDrag(currentY);
+      }
+    } else if (snapLevel.value === "full") {
+      if (diffY > 16) {
+        if (e.cancelable) e.preventDefault();
+        beginDrag(currentY);
+      }
+    }
   }
 }
 
 function handleContentMouseDown(e: MouseEvent) {
   if (e.button !== 0 || snapLevel.value === "full") return;
-  // Don't intercept clicks on buttons, links, inputs, or interactive controls
   const target = e.target as HTMLElement | null;
   if (target && target.closest("button, a, input, select, textarea, [role='button'], [role='tab'], [role='radio']")) {
+    return;
+  }
+  if (findScrollableParent(target, scrollContainerRef.value)) {
     return;
   }
   beginDrag(e.clientY);
@@ -301,7 +386,23 @@ function snapTo(level: SnapLevel) {
   emit("update:snap", level);
   if (level === "full") emit("expand");
   else if (level === "peek") emit("peek");
-  else if (level === "min") emit("minimize");
+  else if (level === "min") {
+    // Tutup keyboard virtual agar sheet tidak tertinggal di atas keyboard
+    const active = document.activeElement as HTMLElement | null;
+    if (active && sheetRef.value?.contains(active)) active.blur();
+    emit("minimize");
+  }
+}
+
+// Fokus ke kolom teks (pencarian) baik dari mode default (min) maupun separuh layar (peek) membuka sheet secara penuh (full)
+function handleSheetFocusIn(e: FocusEvent) {
+  if (snapLevel.value === "full") return;
+  const el = e.target as HTMLElement | null;
+  if (!el) return;
+  const isTextField =
+    el.tagName === "TEXTAREA" ||
+    (el.tagName === "INPUT" && !/^(checkbox|radio|range|button|submit|color|file)$/i.test((el as HTMLInputElement).type));
+  if (isTextField) snapTo("full");
 }
 
 function toggleSnapFromHandle() {
@@ -316,6 +417,11 @@ function toggleSnapFromHandle() {
 
 function close() {
   snapTo("min");
+}
+
+function handleBackdropClick() {
+  snapTo("min");
+  emit("backdrop-click");
 }
 
 
@@ -367,18 +473,46 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// iOS Safari dan Android Chrome: pertahankan viewportH selalu berdasarkan window.innerHeight yang stabil agar ukuran full konsisten
 function onResize() {
+  if (typeof window === "undefined") return;
   viewportH.value = window.innerHeight;
+
+  const vv = window.visualViewport;
+  if (vv && vv.scale <= 1.01) {
+    const inset = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+    keyboardHeight.value = inset > 100 ? inset : 0;
+  } else {
+    keyboardHeight.value = 0;
+  }
+}
+
+function lockWindowScroll() {
+  if (typeof window !== "undefined" && (window.scrollY !== 0 || window.scrollX !== 0)) {
+    window.scrollTo(0, 0);
+  }
 }
 
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   window.addEventListener("resize", onResize, { passive: true });
+  window.addEventListener("orientationchange", onResize, { passive: true });
+  window.addEventListener("scroll", lockWindowScroll, { passive: true });
+  if (typeof window !== "undefined" && window.visualViewport) {
+    window.visualViewport.addEventListener("resize", onResize, { passive: true });
+    window.visualViewport.addEventListener("scroll", onResize, { passive: true });
+  }
 });
 
 onUnmounted(() => {
   document.removeEventListener("keydown", onKeydown);
   window.removeEventListener("resize", onResize);
+  window.removeEventListener("orientationchange", onResize);
+  window.removeEventListener("scroll", lockWindowScroll);
+  if (typeof window !== "undefined" && window.visualViewport) {
+    window.visualViewport.removeEventListener("resize", onResize);
+    window.visualViewport.removeEventListener("scroll", onResize);
+  }
   if (typeof window !== "undefined") {
     window.removeEventListener("touchmove", onWindowTouchMove);
     window.removeEventListener("touchend", onWindowTouchEnd);
@@ -392,141 +526,38 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
 
+
     <!-- ═══ 2. BOTTOM SHEET WRAPPER (Solid Full Base, Shifted with translateY) ══════ -->
     <Transition name="sheet-slide">
       <div
         v-if="open"
+        ref="sheetRef"
         role="dialog"
         :aria-label="title"
         :aria-modal="snapLevel === 'full'"
         class="fixed inset-x-0 z-[39] will-change-transform md:hidden select-none pointer-events-auto"
         :style="sheetStyle"
+        @focusin="handleSheetFocusIn"
       >
-      <!-- Main Sheet Container with Top Rounded Corners, Border & Depth Shadow -->
+      <!-- Main Sheet Container with Top Rounded Corners, Border & Depth Shadow (Solid Background) -->
       <div
-        class="flex flex-col h-full bg-white dark:bg-[#0b0f19] rounded-t-[24px] border-t border-l border-r border-slate-200/90 dark:border-white/10 shadow-[0_-10px_36px_rgba(15,23,42,0.18)] dark:shadow-[0_-12px_44px_rgba(0,0,0,0.5)] overflow-hidden"
+        class="flex flex-col h-full bg-white dark:bg-[#0b0f19] rounded-t-[24px] border-t border-l border-r border-slate-200/80 dark:border-white/10 shadow-[0_-10px_36px_rgba(15,23,42,0.18)] dark:shadow-[0_-12px_44px_rgba(0,0,0,0.5)] overflow-hidden"
       >
-        <!-- ── Top Drag Zone (Handle + Header Area) ── -->
+        <!-- ── Top Drag Zone (Grab Handle Pill) ── -->
         <div
-          class="shrink-0 touch-none cursor-grab active:cursor-grabbing border-b border-slate-100 dark:border-white/10 bg-slate-50/50 dark:bg-white/[0.02]"
+          class="shrink-0 touch-none cursor-grab active:cursor-grabbing flex items-center justify-center pt-3 pb-2 select-none"
           @touchstart.passive="handleHeaderTouchStart"
           @mousedown="handleHeaderMouseDown"
+          @click.stop="toggleSnapFromHandle"
         >
-          <!-- ── Grab Handle Pill ── -->
           <div
-            class="flex items-center justify-center pt-2.5 pb-1.5"
-            @click.stop="toggleSnapFromHandle"
-          >
-            <div
-              class="h-[4.5px] rounded-full transition-all duration-200"
-              :class="[
-                isDragging
-                  ? 'w-12 bg-blue-600 dark:bg-blue-400 shadow-sm'
-                  : 'w-10 bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500'
-              ]"
-            />
-          </div>
-
-          <!-- ── Sheet Header ── -->
-          <header class="flex items-center gap-2.5 px-3.5 pb-2.5 pt-0.5">
-            <!-- Header Icon / Slot -->
-            <slot name="header-icon">
-              <button
-                type="button"
-                class="size-8.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 shadow-xs cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
-                :aria-label="snapLevel === 'min' ? 'Buka panel ke setengah layar' : 'Ikon panel'"
-                @click.stop="snapLevel === 'min' ? snapTo('peek') : undefined"
-              >
-                <UIcon :name="icon" class="size-4.5 stroke-[2.25]" />
-              </button>
-            </slot>
-
-            <!-- Title & Subtitle (Clickable to Expand when Minimized) -->
-            <div
-              class="flex-1 min-w-0 select-none py-0.5"
-              :class="snapLevel === 'min' ? 'cursor-pointer' : ''"
-              @click="snapLevel === 'min' ? snapTo('peek') : undefined"
-            >
-              <div class="flex items-center gap-1.5">
-                <h2 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate leading-none">
-                  {{ title }}
-                </h2>
-                <!-- Minimal Badge when Minimized -->
-                <span
-                  v-if="snapLevel === 'min'"
-                  class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300 shrink-0"
-                >
-                  Ketuk detail
-                </span>
-              </div>
-              <p
-                v-if="subtitle"
-                class="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 truncate font-medium mt-1"
-              >
-                {{ subtitle }}
-              </p>
-            </div>
-
-            <!-- Extra Action Slot (e.g. Bagikan Peta) -->
-            <div
-              v-show="snapLevel !== 'min'"
-              class="shrink-0 flex items-center"
-              @click.stop
-            >
-              <slot name="header-actions" />
-            </div>
-
-            <!-- Snap Level Controls (Min 44x44px touch targets per antislop-layoutmobile R-03) -->
-            <div class="shrink-0 flex items-center gap-0.5" @click.stop>
-              <!-- When Minimized: Expand to Peek Button -->
-              <button
-                v-if="snapLevel === 'min'"
-                type="button"
-                class="min-w-[44px] min-h-[44px] rounded-full flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
-                aria-label="Buka panel ke setengah layar"
-                title="Buka panel"
-                @click="snapTo('peek')"
-              >
-                <UIcon name="i-lucide-chevron-up" class="size-5" />
-              </button>
-
-              <!-- When Peek: Maximize to Full Button -->
-              <button
-                v-if="snapLevel === 'peek'"
-                type="button"
-                class="min-w-[44px] min-h-[44px] rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
-                aria-label="Perbesar layar penuh"
-                title="Layar penuh"
-                @click="snapTo('full')"
-              >
-                <UIcon name="i-lucide-maximize-2" class="size-4" />
-              </button>
-
-              <!-- When Full: Restore to Peek Button -->
-              <button
-                v-if="snapLevel === 'full'"
-                type="button"
-                class="min-w-[44px] min-h-[44px] rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
-                aria-label="Perkecil panel ke setengah layar"
-                title="Perkecil panel"
-                @click="snapTo('peek')"
-              >
-                <UIcon name="i-lucide-minimize-2" class="size-4" />
-              </button>
-
-              <!-- Tutup (Minimize) Button: Menutup panel kembali ke posisi bar minimal 'min' -->
-              <button
-                v-if="snapLevel !== 'min'"
-                type="button"
-                class="min-w-[44px] min-h-[44px] rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden"
-                aria-label="Kecilkan panel ke bar bawah"
-                title="Kecilkan panel"
-                @click="snapTo('min')"
-              >
-                <UIcon name="i-lucide-chevron-down" class="size-5" />
-              </button>
-            </div>
-          </header>
+            class="h-[4.5px] rounded-full transition-all duration-200 cursor-pointer"
+            :class="[
+              isDragging
+                ? 'w-12 bg-blue-600 dark:bg-blue-400 shadow-sm'
+                : 'w-10 bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500'
+            ]"
+          />
         </div>
 
         <!-- ── Tab Bar Slot (Draggable when swiping, clickable when tapping) ── -->
@@ -539,11 +570,13 @@ onUnmounted(() => {
           <slot name="tabs" />
         </div>
 
-        <!-- ── Scrollable Content Body (Full Drag-Up on all content at min & peek) ── -->
+        <!-- ── Content Body Container (Responsive Internal Clearance for Virtual Keyboard) ── -->
         <div
           ref="scrollContainerRef"
-          class="flex-1 min-h-0 flex flex-col"
-          :class="snapLevel === 'full' ? 'overflow-y-auto overscroll-contain' : 'overflow-hidden'"
+          class="flex-1 min-h-0 flex flex-col overflow-hidden transition-[padding-bottom] duration-200"
+          :style="{
+            paddingBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : '0px'
+          }"
           @touchstart.passive="handleContentTouchStart"
           @touchmove="handleContentTouchMove"
           @mousedown="handleContentMouseDown"
@@ -551,10 +584,14 @@ onUnmounted(() => {
           <slot />
         </div>
 
-        <!-- Bottom Safe Area Inset Spacer -->
+        <!-- Bottom Safe Area Inset Spacer (Solid background to anchor sheet base firmly to the bottom) -->
         <div
-          class="shrink-0 bg-white dark:bg-[#0b0f19]"
-          style="height: calc(env(safe-area-inset-bottom, 0px) + 8px)"
+          class="shrink-0 transition-[height] duration-200 bg-white dark:bg-[#0b0f19]"
+          :style="{
+            height: snapLevel === 'full'
+              ? `${BOTTOM_BLEED_PX}px`
+              : `calc(${BOTTOM_BLEED_PX}px + env(safe-area-inset-bottom, 0px))`
+          }"
         />
       </div>
     </div>
@@ -577,6 +614,15 @@ onUnmounted(() => {
 }
 .sheet-slide-leave-to {
   transform: translate3d(0, calc(100% + 100px), 0) !important;
+}
+
+.sheet-fade-enter-active,
+.sheet-fade-leave-active {
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sheet-fade-enter-from,
+.sheet-fade-leave-to {
+  opacity: 0;
 }
 </style>
 

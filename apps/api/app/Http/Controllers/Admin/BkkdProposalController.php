@@ -41,6 +41,22 @@ class BkkdProposalController extends Controller
             'desa:id,nama_desa',
             'bidang:id,nama,id_opd_default',
             'verifikasiAktif.opd:id,kode,nama',
+            'lampiran:id,id_proposal,tipe_sumber,url_link,nama_asli,jenis_dokumen',
+        ])
+        ->withCount([
+            'lampiran as total_lampiran',
+            'lampiran as total_lampiran_link' => function ($q) {
+                $q->where(function ($sub) {
+                    $sub->where('tipe_sumber', 'link')
+                        ->orWhereNotNull('url_link');
+                });
+            },
+            'lampiran as total_lampiran_file' => function ($q) {
+                $q->where(function ($sub) {
+                    $sub->where('tipe_sumber', 'file')
+                        ->whereNull('url_link');
+                });
+            },
         ])
         ->select([
             'id',
@@ -97,6 +113,24 @@ class BkkdProposalController extends Controller
             $query->where('status', $request->input('status'));
         }
 
+        // Filter kelengkapan lampiran / cloud
+        if ($request->filled('kelengkapan_berkas')) {
+            $kelengkapan = $request->input('kelengkapan_berkas');
+            if ($kelengkapan === 'belum_upload') {
+                $query->whereDoesntHave('lampiran');
+            } elseif ($kelengkapan === 'sudah_upload') {
+                $query->whereHas('lampiran');
+            } elseif ($kelengkapan === 'ada_cloud') {
+                $query->whereHas('lampiran', function ($q) {
+                    $q->where('tipe_sumber', 'link')->orWhereNotNull('url_link');
+                });
+            } elseif ($kelengkapan === 'ada_file') {
+                $query->whereHas('lampiran', function ($q) {
+                    $q->where('tipe_sumber', 'file')->whereNull('url_link');
+                });
+            }
+        }
+
         // Search
         if ($request->filled('search')) {
             $search = '%' . $request->input('search') . '%';
@@ -118,7 +152,8 @@ class BkkdProposalController extends Controller
             COUNT(CASE WHEN status = 'diajukan_opd' THEN 1 END) as jumlah_diajukan,
             COUNT(CASE WHEN status IN ('layak', 'layak_bersyarat') THEN 1 END) as jumlah_layak,
             COUNT(CASE WHEN status = 'tidak_layak' THEN 1 END) as jumlah_tidak_layak,
-            COUNT(CASE WHEN status = 'ditetapkan_tapd' THEN 1 END) as jumlah_ditetapkan
+            COUNT(CASE WHEN status = 'ditetapkan_tapd' THEN 1 END) as jumlah_ditetapkan,
+            COUNT(CASE WHEN NOT EXISTS (SELECT 1 FROM bkkd_proposal_lampiran WHERE bkkd_proposal_lampiran.id_proposal = bkkd_proposal.id) THEN 1 END) as jumlah_belum_upload
         ")->first();
 
         $summary = [
@@ -129,6 +164,8 @@ class BkkdProposalController extends Controller
             'jumlah_layak' => (int) ($summaryStats->jumlah_layak ?? 0),
             'jumlah_tidak_layak' => (int) ($summaryStats->jumlah_tidak_layak ?? 0),
             'jumlah_ditetapkan' => (int) ($summaryStats->jumlah_ditetapkan ?? 0),
+            'belum_upload' => (int) ($summaryStats->jumlah_belum_upload ?? 0),
+            'jumlah_belum_upload' => (int) ($summaryStats->jumlah_belum_upload ?? 0),
         ];
 
         // Sorting

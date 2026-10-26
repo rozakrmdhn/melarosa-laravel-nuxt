@@ -190,10 +190,7 @@ const showPassword = ref(false);
     </template>
 
     <div class="text-xs text-center text-gray-500 dark:text-gray-400 pt-2">
-      Belum memiliki akun akses?
-      <NuxtLink to="/auth/register" class="text-primary-600 dark:text-primary-400 font-medium hover:underline ml-1">
-        Daftar sekarang
-      </NuxtLink>
+      Akun akses dikelola oleh Administrator. Hubungi admin OPD atau Kecamatan untuk permohonan akses akun.
     </div>
   </div>
 </template>

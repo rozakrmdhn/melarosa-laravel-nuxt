@@ -25,6 +25,10 @@ export interface IdentifiedFeature {
   geometryType?: string;
   properties: Record<string, any>;
   coordinate?: [number, number];
+  extent?: [number, number, number, number];
+  geojsonGeometry?: any;
+  olGeometry?: any;
+  layerIndex?: number;
 }
 
 const props = withDefaults(
@@ -309,8 +313,7 @@ function copyValue(key: string, val: string) {
 
 <template>
   <div class="space-y-3">
-    <Transition name="fade-feature" mode="out-in">
-      <!-- ═══ 1. STATE MEMUAT (LOADING) ═══════════════════════════════════════ -->
+    <!-- ═══ 1. STATE MEMUAT (LOADING) ═══════════════════════════════════════ -->
       <div
         v-if="loading"
         key="loading"
@@ -322,7 +325,7 @@ function copyValue(key: string, val: string) {
             <p class="text-xs font-bold text-blue-900 dark:text-blue-200">
               Memeriksa Data WMS...
             </p>
-            <p class="text-[11px] text-blue-600/80 dark:text-blue-300/80 truncate">
+            <p class="text-xs text-blue-600/80 dark:text-blue-300/80 truncate">
               Mengambil atribut fitur dari Geoportal Bojonegoro
             </p>
           </div>
@@ -341,13 +344,13 @@ function copyValue(key: string, val: string) {
         key="empty"
         class="p-3.5 rounded-2xl border border-slate-200/80 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.02] text-center space-y-1.5"
       >
-        <div class="size-9 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 mx-auto">
+        <div class="size-9 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-500 dark:text-slate-400 mx-auto">
           <UIcon name="i-lucide-mouse-pointer-click" class="size-4.5 stroke-[1.75]" />
         </div>
         <p class="text-xs font-bold text-slate-800 dark:text-slate-200">
           Pilih Objek Peta WMS
         </p>
-        <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed max-w-[260px] mx-auto">
+        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-[260px] mx-auto">
           Klik pada batas wilayah desa atau ruas jalan untuk menampilkan data atribut lengkap.
         </p>
       </div>
@@ -362,7 +365,7 @@ function copyValue(key: string, val: string) {
               <div class="flex items-center flex-wrap gap-1.5">
                 <span
                   v-if="features.length > 1"
-                  class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300"
+                  class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300"
                 >
                   {{ selectedIndex + 1 }} dari {{ features.length }}
                 </span>
@@ -370,7 +373,7 @@ function copyValue(key: string, val: string) {
                 <!-- Badge KUGI jika ada FCODE -->
                 <span
                   v-if="activeKugiMeta"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800/40"
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800/40"
                   :title="activeKugiMeta.definition || activeKugiMeta.typeName"
                 >
                   <UIcon name="i-lucide-badge-check" class="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -380,7 +383,7 @@ function copyValue(key: string, val: string) {
                 <!-- Loading status kamus KUGI -->
                 <span
                   v-else-if="isLoadingKugi"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-blue-100/60 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-medium bg-blue-100/60 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
                 >
                   <UIcon name="i-lucide-loader-2" class="size-3 animate-spin shrink-0" />
                   Kamus KUGI...
@@ -389,7 +392,7 @@ function copyValue(key: string, val: string) {
                 <!-- Badge Kode FCODE -->
                 <span
                   v-if="currentFcode"
-                  class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wide bg-blue-100/80 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
+                  class="px-1.5 py-0.5 rounded-md text-xs font-semibold tracking-wide bg-blue-100/80 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
                 >
                   FCODE: {{ currentFcode }}
                 </span>
@@ -399,11 +402,11 @@ function copyValue(key: string, val: string) {
               <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">
                 {{ featureDisplayName }}
               </h4>
-              <p v-if="currentFeature?.layerTitle" class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 truncate pt-0.5">
+              <p v-if="currentFeature?.layerTitle" class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 truncate pt-0.5">
                 <span class="font-medium text-slate-700 dark:text-slate-300">{{ currentFeature.layerTitle }}</span>
                 <span v-if="currentFeature.layerInstansi || currentFeature.layerAttribution" class="text-slate-300 dark:text-slate-600">•</span>
                 <span v-if="currentFeature.layerInstansi || currentFeature.layerAttribution" class="text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
-                  <UIcon name="i-lucide-building-2" class="size-3 text-slate-400 shrink-0" />
+                  <UIcon name="i-lucide-building-2" class="size-3 text-slate-500 shrink-0" />
                   {{ currentFeature.layerInstansi || currentFeature.layerAttribution }}
                 </span>
               </p>
@@ -435,11 +438,11 @@ function copyValue(key: string, val: string) {
           <!-- Keterangan Definisi Resmi KUGI jika tersedia -->
           <div
             v-if="activeKugiMeta?.definition"
-            class="p-2 rounded-lg bg-white/70 dark:bg-black/25 border border-blue-100 dark:border-blue-900/30 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed"
+            class="p-2 rounded-lg bg-white/70 dark:bg-black/25 border border-blue-100 dark:border-blue-900/30 text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
           >
             <span class="font-semibold text-blue-700 dark:text-blue-400">Definisi KUGI: </span>
             <span>{{ activeKugiMeta.definition }}</span>
-            <div v-if="activeKugiMeta.producer" class="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">
+            <div v-if="activeKugiMeta.producer" class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               Walidata: {{ activeKugiMeta.producer }}
             </div>
           </div>
@@ -449,18 +452,18 @@ function copyValue(key: string, val: string) {
         <div v-if="formattedProperties.length > 5 || searchQuery" class="relative">
           <UIcon
             name="i-lucide-search"
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-400 dark:text-slate-500"
+            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-500 dark:text-slate-400"
           />
           <input
             v-model="searchQuery"
             type="text"
             placeholder="Cari atribut KUGI atau nilai..."
-            class="w-full h-8 pl-8 pr-3 text-xs rounded-lg border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition-all"
+            class="w-full h-8 pl-8 pr-3 text-base sm:text-xs rounded-lg border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition-all"
           />
           <button
             v-if="searchQuery"
             type="button"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600 dark:hover:text-slate-200"
             aria-label="Hapus Pencarian"
             @click="searchQuery = ''"
           >
@@ -477,17 +480,17 @@ function copyValue(key: string, val: string) {
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+                <span class="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
                   {{ prop.label }}
                 </span>
                 <!-- Kode field teknis GIS -->
-                <span class="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                <span class="text-xs font-medium text-slate-500 dark:text-slate-400">
                   [{{ prop.key }}]
                 </span>
                 <!-- Indikator validasi KUGI -->
                 <span
                   v-if="prop.isKugi"
-                  class="px-1 py-0.2 rounded text-[9px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40"
+                  class="px-1 py-0.2 rounded text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40"
                   title="Sesuai Kamus KUGI Resmi BIG"
                 >
                   KUGI
@@ -502,7 +505,7 @@ function copyValue(key: string, val: string) {
             <UTooltip :text="copiedKey === prop.key ? 'Nilai disalin' : 'Salin nilai'">
               <button
                 type="button"
-                class="size-7 rounded-md flex items-center justify-center text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 opacity-60 group-hover:opacity-100 transition-all cursor-pointer shrink-0"
+                class="relative after:absolute after:-inset-2 after:content-[''] size-7 rounded-md flex items-center justify-center text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 opacity-60 group-hover:opacity-100 transition-all cursor-pointer shrink-0"
                 aria-label="Salin nilai atribut"
                 @click="copyValue(prop.key, String(prop.raw))"
               >
@@ -517,29 +520,11 @@ function copyValue(key: string, val: string) {
 
           <div
             v-if="formattedProperties.length === 0"
-            class="p-4 text-center text-xs text-slate-400 dark:text-slate-500"
+            class="p-4 text-center text-xs text-slate-500 dark:text-slate-400"
           >
             Tidak ada atribut yang cocok dengan pencarian
           </div>
         </div>
       </div>
-    </Transition>
   </div>
 </template>
-
-<style scoped>
-.fade-feature-enter-active,
-.fade-feature-leave-active {
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.fade-feature-enter-from {
-  opacity: 0;
-  transform: translateY(4px);
-}
-
-.fade-feature-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-</style>

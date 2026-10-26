@@ -90,11 +90,16 @@ export default defineEventHandler(async (event) => {
         }
       }
 
+      const rawSlug = String(x.slug || "").trim();
+      const fallbackSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      const slug = rawSlug || fallbackSlug || code.toLowerCase();
+
       return {
         id: String(x.id),
         code,
         title: rawTitle,
         name,
+        slug,
         category: x.diversity_nama_id || "Keragaman Geologi",
         categorySlug: (x.diversity_slug || "geo-diversity") as string,
         tag: x.tag_id || "",

@@ -423,7 +423,7 @@ const spatialExtent = computed(() => {
               <span>Atribut Data</span>
               <span
                 v-if="attributesData?.attributes_count"
-                class="px-1.5 py-0.2 rounded-full text-[10px] font-mono"
+                class="px-1.5 py-0.2 rounded-full text-xs font-mono"
                 :class="activeTab === 'attributes' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-slate-200/80 dark:bg-white/10 text-slate-600 dark:text-slate-400'"
               >
                 {{ attributesData.attributes_count }}
@@ -440,7 +440,7 @@ const spatialExtent = computed(() => {
             >
               <UIcon name="i-lucide-globe" class="size-3.5" />
               <span>Katalog pyCSW</span>
-              <span class="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
+              <span class="px-1.5 py-0.2 rounded-full text-xs font-mono bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
                 2.6.0
               </span>
             </button>
@@ -467,7 +467,7 @@ const spatialExtent = computed(() => {
           <!-- Overview Cards -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="p-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] space-y-1">
-              <span class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Kategori / Urusan</span>
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Kategori / Urusan</span>
               <div class="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
                 <UIcon name="i-lucide-folder-git-2" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span>{{ props.layer.category || 'Tematik Umum' }}</span>
@@ -475,7 +475,7 @@ const spatialExtent = computed(() => {
             </div>
 
             <div class="p-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] space-y-1">
-              <span class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Wali Data / OPD</span>
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Wali Data / OPD</span>
               <div class="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
                 <UIcon name="i-lucide-landmark" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span class="truncate" :title="props.layer.opd_name || props.layer.attribution || ''">
@@ -502,7 +502,7 @@ const spatialExtent = computed(() => {
               <UIcon name="i-lucide-server" class="size-4 text-slate-400" />
               <span>Spesifikasi Layanan OGC Service</span>
             </div>
-            <div class="space-y-2 font-mono text-[11px]">
+            <div class="space-y-2 font-mono text-xs">
               <div class="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-1.5">
                 <span class="text-slate-500">Protokol & Format:</span>
                 <span class="font-bold text-blue-600 dark:text-blue-400 uppercase">
@@ -576,7 +576,7 @@ const spatialExtent = computed(() => {
               <UIcon name="i-lucide-alert-circle" class="size-4" />
               <span>Layanan WFS Tidak Menghasilkan Atribut</span>
             </div>
-            <p class="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+            <p class="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
               {{ attributesData?.message || 'Layer ini mungkin berupa raster (citra/peta dasar) atau tidak mengekspos endpoint OGC WFS DescribeFeatureType.' }}
             </p>
           </div>
@@ -591,27 +591,27 @@ const spatialExtent = computed(() => {
               <div class="flex items-start justify-between gap-2.5">
                 <div class="space-y-0.5 min-w-0">
                   <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-emerald-600 text-white shadow-xs">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono font-bold bg-emerald-600 text-white shadow-xs">
                       <UIcon name="i-lucide-award" class="size-3" />
                       FCODE: {{ activeKugiMeta.fcode }}
                     </span>
                     <span class="text-xs font-bold text-slate-900 dark:text-slate-100">
                       {{ activeKugiMeta.aliases || activeKugiMeta.typeName }}
                     </span>
-                    <span v-if="activeKugiMeta.category" class="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300">
+                    <span v-if="activeKugiMeta.category" class="px-1.5 py-0.2 rounded text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300">
                       {{ activeKugiMeta.category }}
                     </span>
                   </div>
-                  <p v-if="activeKugiMeta.definition" class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-2" :title="activeKugiMeta.definition">
+                  <p v-if="activeKugiMeta.definition" class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-2" :title="activeKugiMeta.definition">
                     {{ activeKugiMeta.definition }}
                   </p>
                 </div>
-                <span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full bg-emerald-100/90 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60">
+                <span class="shrink-0 inline-flex items-center gap-1 text-xs font-mono font-semibold text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full bg-emerald-100/90 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60">
                   <UIcon name="i-lucide-check-circle" class="size-3" />
                   KUGI BIG Resmi
                 </span>
               </div>
-              <div v-if="activeKugiMeta.producer" class="text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-emerald-100 dark:border-white/5 flex items-center gap-1 flex-wrap">
+              <div v-if="activeKugiMeta.producer" class="text-xs text-slate-500 dark:text-slate-400 pt-1 border-t border-emerald-100 dark:border-white/5 flex items-center gap-1 flex-wrap">
                 <span class="font-semibold text-slate-700 dark:text-slate-300">Produsen / Wali Data:</span>
                 <span>{{ activeKugiMeta.producer }}</span>
               </div>
@@ -629,14 +629,14 @@ const spatialExtent = computed(() => {
             <!-- Header Toolbar -->
             <div class="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 sm:p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200/80 dark:border-white/10">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
                   <UIcon name="i-lucide-columns-3" class="size-3.5" />
                   <span>{{ attributesData?.attributes_count || 0 }} Kolom Atribut</span>
                 </span>
 
                 <span
                   v-if="attributesData?.geom_type"
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300"
                 >
                   <UIcon name="i-lucide-shapes" class="size-3.5" />
                   <span>Geometri: {{ attributesData.geom_type }}</span>
@@ -644,7 +644,7 @@ const spatialExtent = computed(() => {
 
                 <span
                   v-if="currentFcode"
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300"
                 >
                   <UIcon name="i-lucide-tag" class="size-3 text-slate-400" />
                   <span>{{ currentFcode }}</span>
@@ -655,7 +655,7 @@ const spatialExtent = computed(() => {
               <div class="flex items-center gap-1 self-end sm:self-auto">
                 <button
                   type="button"
-                  class="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer"
                   :class="attrViewMode === 'schema'
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-200/70 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-300/70'"
@@ -665,7 +665,7 @@ const spatialExtent = computed(() => {
                 </button>
                 <button
                   type="button"
-                  class="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
                   :class="attrViewMode === 'sample'
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-200/70 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-300/70'"
@@ -685,12 +685,12 @@ const spatialExtent = computed(() => {
                   v-model="attrSearch"
                   type="text"
                   placeholder="Cari nama kolom, tipe, atau arti KUGI..."
-                  class="w-full h-8 pl-8 pr-7 rounded-lg bg-white dark:bg-[#0b0f19] border border-slate-200/80 dark:border-white/10 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-blue-500"
+                  class="w-full h-8 pl-8 pr-7 rounded-lg bg-white dark:bg-[#0b0f19] border border-slate-200/80 dark:border-white/10 text-base sm:text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-blue-500"
                 />
               </div>
 
               <div class="flex-1 min-h-0 border border-slate-200/80 dark:border-white/10 rounded-xl overflow-y-auto bg-white dark:bg-[#0b0f19] shadow-xs">
-                <table class="w-full text-left border-collapse text-[11px]">
+                <table class="w-full text-left border-collapse text-xs">
                   <thead class="sticky top-0 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-white/10 z-10 font-mono shadow-xs">
                     <tr>
                       <th class="p-2 font-semibold text-slate-700 dark:text-slate-300">Nama Kolom</th>
@@ -719,18 +719,18 @@ const spatialExtent = computed(() => {
                           <span class="text-slate-800 dark:text-slate-200 font-medium leading-tight block">
                             {{ resolveKugiLabel(attr.name).label }}
                           </span>
-                          <span class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
+                          <span class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-xs font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
                             <UIcon name="i-lucide-check-circle" class="size-2.5" />
                             Standar KUGI
                           </span>
                         </div>
-                        <span v-else class="text-slate-400 italic text-[10px]">
+                        <span v-else class="text-slate-400 italic text-xs">
                           Atribut Lokal / Terkait
                         </span>
                       </td>
 
                       <!-- Tipe Data -->
-                      <td class="p-2 font-mono text-[10px]">
+                      <td class="p-2 font-mono text-xs">
                         <span
                           class="px-1.5 py-0.5 rounded-md font-medium"
                           :class="attr.is_geometry
@@ -742,7 +742,7 @@ const spatialExtent = computed(() => {
                       </td>
 
                       <!-- Sifat -->
-                      <td class="p-2 text-slate-500 text-[10px]">
+                      <td class="p-2 text-slate-500 text-xs">
                         <span v-if="attr.nillable" class="text-slate-400">Dapat Kosong</span>
                         <span v-else class="text-rose-500 font-semibold">Wajib Diisi</span>
                       </td>
@@ -763,7 +763,7 @@ const spatialExtent = computed(() => {
                 Sampel data baris tidak tersedia dari WFS GetFeature.
               </div>
               <div v-else class="flex-1 min-h-0 border border-slate-200/80 dark:border-white/10 rounded-xl overflow-auto bg-white dark:bg-[#0b0f19] shadow-xs">
-                <table class="w-full text-left border-collapse text-[10px] whitespace-nowrap">
+                <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                   <thead class="sticky top-0 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-white/10 z-20">
                     <tr>
                       <th class="p-2 font-semibold text-slate-500 bg-slate-100 dark:bg-slate-900 font-mono sticky left-0 top-0 z-30 border-r border-slate-200 dark:border-white/10 shadow-xs">#</th>
@@ -772,7 +772,7 @@ const spatialExtent = computed(() => {
                           <span class="font-mono">{{ col }}</span>
                           <span
                             v-if="resolveKugiLabel(col).isKugi"
-                            class="block text-[9px] font-sans font-normal text-emerald-600 dark:text-emerald-400 truncate max-w-[130px]"
+                            class="block text-xs font-sans font-normal text-emerald-600 dark:text-emerald-400 truncate max-w-[130px]"
                             :title="resolveKugiLabel(col).label"
                           >
                             {{ resolveKugiLabel(col).label }}
@@ -791,7 +791,7 @@ const spatialExtent = computed(() => {
                   </tbody>
                 </table>
               </div>
-              <div class="shrink-0 flex items-center justify-between text-[10px] text-slate-400 italic">
+              <div class="shrink-0 flex items-center justify-between text-xs text-slate-400 italic">
                 <span>* Menampilkan {{ attributesData?.sample_count }} baris sampel riil yang diambil melalui WFS GetFeature.</span>
                 <span class="font-mono font-normal not-italic text-slate-400 hidden sm:inline">Scroll horizontal & vertikal untuk menjelajah tabel</span>
               </div>
@@ -824,24 +824,24 @@ const spatialExtent = computed(() => {
                     <h4 class="text-xs font-bold text-slate-900 dark:text-slate-100">
                       {{ dcRecord?.title || props.layer.name }}
                     </h4>
-                    <span class="font-mono text-[10px] text-slate-500">
+                    <span class="font-mono text-xs text-slate-500">
                       ID: {{ dcRecord?.identifier || props.layer.geoportal_id || '-' }}
                     </span>
                   </div>
                 </div>
 
-                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
                   pyCSW 2.6.0 (ISO 19139 / Dublin Core)
                 </span>
               </div>
 
               <!-- Keywords / Subjects -->
               <div v-if="dcRecord?.subjects && dcRecord.subjects.length > 0" class="flex items-center gap-1 flex-wrap pt-1 border-t border-blue-100 dark:border-white/5">
-                <span class="text-[10px] font-semibold text-slate-500 mr-1">Kata Kunci:</span>
+                <span class="text-xs font-semibold text-slate-500 mr-1">Kata Kunci:</span>
                 <span
                   v-for="(sub, i) in dcRecord.subjects"
                   :key="i"
-                  class="px-1.5 py-0.5 rounded-md bg-white dark:bg-slate-900 text-[10px] font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10"
+                  class="px-1.5 py-0.5 rounded-md bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10"
                 >
                   {{ sub }}
                 </span>
@@ -858,20 +858,20 @@ const spatialExtent = computed(() => {
                   </span>
                 </div>
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  <span class="px-2 py-0.5 rounded-md font-mono text-xs font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
                     {{ spatialExtent.crs }} (SRGI 2013)
                   </span>
-                  <span class="px-2 py-0.5 rounded-md font-mono text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40">
+                  <span class="px-2 py-0.5 rounded-md font-mono text-xs font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40">
                     Skala {{ spatialExtent.scale }}
                   </span>
                 </div>
               </div>
 
               <!-- 4-Point High-Precision Cardinal Bounding Box Grid -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 font-mono">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 tabular-nums">
                 <!-- Batas Barat -->
                 <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200/70 dark:border-white/5 space-y-1">
-                  <div class="flex items-center justify-between text-[10px]">
+                  <div class="flex items-center justify-between text-xs">
                     <span class="text-slate-400 font-sans font-medium flex items-center gap-1">
                       <UIcon name="i-lucide-arrow-left" class="size-3 text-blue-500" />
                       <span>Batas Barat (West)</span>
@@ -881,14 +881,14 @@ const spatialExtent = computed(() => {
                   <div class="text-xs font-bold text-slate-800 dark:text-slate-100 truncate" :title="String(spatialExtent.west)">
                     {{ formatCoord(spatialExtent.west, 7) }}°
                   </div>
-                  <div class="text-[10px] text-slate-500 dark:text-slate-400 font-sans">
+                  <div class="text-xs text-slate-500 dark:text-slate-400 font-sans">
                     {{ formatDms(spatialExtent.west, false) }}
                   </div>
                 </div>
 
                 <!-- Batas Timur -->
                 <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200/70 dark:border-white/5 space-y-1">
-                  <div class="flex items-center justify-between text-[10px]">
+                  <div class="flex items-center justify-between text-xs">
                     <span class="text-slate-400 font-sans font-medium flex items-center gap-1">
                       <UIcon name="i-lucide-arrow-right" class="size-3 text-blue-500" />
                       <span>Batas Timur (East)</span>
@@ -898,14 +898,14 @@ const spatialExtent = computed(() => {
                   <div class="text-xs font-bold text-slate-800 dark:text-slate-100 truncate" :title="String(spatialExtent.east)">
                     {{ formatCoord(spatialExtent.east, 7) }}°
                   </div>
-                  <div class="text-[10px] text-slate-500 dark:text-slate-400 font-sans">
+                  <div class="text-xs text-slate-500 dark:text-slate-400 font-sans">
                     {{ formatDms(spatialExtent.east, false) }}
                   </div>
                 </div>
 
                 <!-- Batas Selatan -->
                 <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200/70 dark:border-white/5 space-y-1">
-                  <div class="flex items-center justify-between text-[10px]">
+                  <div class="flex items-center justify-between text-xs">
                     <span class="text-slate-400 font-sans font-medium flex items-center gap-1">
                       <UIcon name="i-lucide-arrow-down" class="size-3 text-amber-500" />
                       <span>Batas Selatan (South)</span>
@@ -915,14 +915,14 @@ const spatialExtent = computed(() => {
                   <div class="text-xs font-bold text-slate-800 dark:text-slate-100 truncate" :title="String(spatialExtent.south)">
                     {{ formatCoord(spatialExtent.south, 7) }}°
                   </div>
-                  <div class="text-[10px] text-slate-500 dark:text-slate-400 font-sans">
+                  <div class="text-xs text-slate-500 dark:text-slate-400 font-sans">
                     {{ formatDms(spatialExtent.south, true) }}
                   </div>
                 </div>
 
                 <!-- Batas Utara -->
                 <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200/70 dark:border-white/5 space-y-1">
-                  <div class="flex items-center justify-between text-[10px]">
+                  <div class="flex items-center justify-between text-xs">
                     <span class="text-slate-400 font-sans font-medium flex items-center gap-1">
                       <UIcon name="i-lucide-arrow-up" class="size-3 text-amber-500" />
                       <span>Batas Utara (North)</span>
@@ -932,22 +932,22 @@ const spatialExtent = computed(() => {
                   <div class="text-xs font-bold text-slate-800 dark:text-slate-100 truncate" :title="String(spatialExtent.north)">
                     {{ formatCoord(spatialExtent.north, 7) }}°
                   </div>
-                  <div class="text-[10px] text-slate-500 dark:text-slate-400 font-sans">
+                  <div class="text-xs text-slate-500 dark:text-slate-400 font-sans">
                     {{ formatDms(spatialExtent.north, true) }}
                   </div>
                 </div>
               </div>
 
               <!-- Spatial Diagnostics & Quick Copy Row -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 font-mono text-[10px]">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 tabular-nums text-xs">
                 <!-- Centroid & Dimensions -->
                 <div class="p-2.5 rounded-xl bg-slate-50/70 dark:bg-white/[0.02] border border-slate-200/60 dark:border-white/5 flex items-center justify-between gap-2">
                   <div class="min-w-0 space-y-0.5">
-                    <span class="text-slate-400 font-sans block text-[9px]">Titik Pusat (Centroid / Center):</span>
+                    <span class="text-slate-400 font-sans block text-xs">Titik Pusat (Centroid / Center):</span>
                     <span class="font-bold text-slate-800 dark:text-slate-200 truncate block">
                       {{ spatialExtent.centerStr }}
                     </span>
-                    <span class="text-[9px] text-slate-500 font-sans block">
+                    <span class="text-xs text-slate-500 font-sans block">
                       Rentang: ~{{ spatialExtent.spanLonKm }} km (Bujur) × ~{{ spatialExtent.spanLatKm }} km (Lintang)
                     </span>
                   </div>
@@ -958,18 +958,18 @@ const spatialExtent = computed(() => {
                     @click="copyText(spatialExtent.centerStr, 'bbox_center')"
                   >
                     <UIcon :name="copiedField === 'bbox_center' ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" :class="{ 'text-emerald-500': copiedField === 'bbox_center' }" />
-                    <span class="text-[10px] font-sans font-medium">{{ copiedField === 'bbox_center' ? 'Disalin' : 'Salin' }}</span>
+                    <span class="text-xs font-sans font-medium">{{ copiedField === 'bbox_center' ? 'Disalin' : 'Salin' }}</span>
                   </button>
                 </div>
 
                 <!-- BBOX GeoJSON / WMS Array -->
                 <div class="p-2.5 rounded-xl bg-slate-50/70 dark:bg-white/[0.02] border border-slate-200/60 dark:border-white/5 flex items-center justify-between gap-2">
                   <div class="min-w-0 space-y-0.5">
-                    <span class="text-slate-400 font-sans block text-[9px]">GeoJSON BBOX [W, S, E, N]:</span>
+                    <span class="text-slate-400 font-sans block text-xs">GeoJSON BBOX [W, S, E, N]:</span>
                     <span class="font-bold text-slate-800 dark:text-slate-200 truncate block font-mono" :title="spatialExtent.geojsonBbox">
                       {{ spatialExtent.geojsonBbox }}
                     </span>
-                    <span class="text-[9px] text-slate-500 font-sans block">
+                    <span class="text-xs text-slate-500 font-sans block">
                       Cakupan: Wilayah Kabupaten Bojonegoro
                     </span>
                   </div>
@@ -980,39 +980,39 @@ const spatialExtent = computed(() => {
                     @click="copyText(spatialExtent.geojsonBbox, 'bbox_json')"
                   >
                     <UIcon :name="copiedField === 'bbox_json' ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" :class="{ 'text-emerald-500': copiedField === 'bbox_json' }" />
-                    <span class="text-[10px] font-sans font-medium">{{ copiedField === 'bbox_json' ? 'Disalin' : 'Salin' }}</span>
+                    <span class="text-xs font-sans font-medium">{{ copiedField === 'bbox_json' ? 'Disalin' : 'Salin' }}</span>
                   </button>
                 </div>
               </div>
 
               <!-- Supplemental Information (jika ada catatan spasial resmi) -->
-              <div v-if="isoRecord?.supplemental_info" class="p-2.5 rounded-lg bg-blue-50/40 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/30 text-[11px] space-y-1">
+              <div v-if="isoRecord?.supplemental_info" class="p-2.5 rounded-lg bg-blue-50/40 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/30 text-xs space-y-1">
                 <span class="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1">
                   <UIcon name="i-lucide-info" class="size-3" />
                   <span>Keterangan Cakupan Spasial Tambahan (ISO 19139):</span>
                 </span>
-                <p class="text-slate-600 dark:text-slate-300 leading-relaxed text-[10px]">
+                <p class="text-slate-600 dark:text-slate-300 leading-relaxed text-xs">
                   {{ isoRecord.supplemental_info }}
                 </p>
               </div>
             </div>
 
             <!-- Responsible Party & Dates -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 font-sans text-[11px]">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 font-sans text-xs">
               <div class="p-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-1">
-                <span class="text-slate-400 text-[10px] font-sans">Lembaga Pembuat / Kontak:</span>
+                <span class="text-slate-400 text-xs font-sans">Lembaga Pembuat / Kontak:</span>
                 <p class="font-bold text-slate-800 dark:text-slate-200">
                   {{ isoRecord?.contact?.organisation || dcRecord?.publisher || props.layer.opd_name || 'Bappeda Bojonegoro' }}
                 </p>
-                <span class="text-[10px] text-slate-500">Peran: {{ isoRecord?.contact?.role || 'pointOfContact' }}</span>
+                <span class="text-xs text-slate-500">Peran: {{ isoRecord?.contact?.role || 'pointOfContact' }}</span>
               </div>
 
               <div class="p-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-1">
-                <span class="text-slate-400 text-[10px] font-sans">Tanggal Terbit & Modifikasi:</span>
+                <span class="text-slate-400 text-xs font-sans">Tanggal Terbit & Modifikasi:</span>
                 <p class="font-bold text-slate-800 dark:text-slate-200">
                   {{ dcRecord?.date || isoRecord?.date_stamp || '2021-04-29' }}
                 </p>
-                <span class="text-[10px] text-slate-500">Hak Cipta: {{ dcRecord?.rights || 'JIGN Kab. Bojonegoro' }}</span>
+                <span class="text-xs text-slate-500">Hak Cipta: {{ dcRecord?.rights || 'JIGN Kab. Bojonegoro' }}</span>
               </div>
             </div>
 
@@ -1023,7 +1023,7 @@ const spatialExtent = computed(() => {
                 <span>Endpoint Layanan OGC Terkait (JIGN Bojonegoro)</span>
               </span>
 
-              <div class="space-y-1.5 font-mono text-[10px]">
+              <div class="space-y-1.5 font-mono text-xs">
                 <!-- WMS URL -->
                 <div class="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200/50 dark:border-white/5">
                   <div class="min-w-0 flex-1 truncate">
@@ -1081,7 +1081,7 @@ const spatialExtent = computed(() => {
                   <UIcon name="i-lucide-file-code-2" class="size-3.5 text-blue-600 dark:text-blue-400" />
                   <span>Dokumen Metadata Standar (pyCSW XML)</span>
                 </span>
-                <span class="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                <span class="text-xs text-slate-400 font-mono hidden sm:inline">
                   pyCSW 2.6.0 • CSW 2.0.2
                 </span>
               </div>
@@ -1091,10 +1091,10 @@ const spatialExtent = computed(() => {
                 <div class="p-3 rounded-xl border border-slate-200/90 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] flex flex-col justify-between gap-3 hover:border-blue-200 dark:hover:border-blue-900/40 transition-colors">
                   <div class="space-y-1.5">
                     <div class="flex items-center justify-between gap-2">
-                      <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                      <span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
                         ISO 19139 (GMD)
                       </span>
-                      <span class="text-[10px] text-slate-400 font-mono">
+                      <span class="text-xs text-slate-400 font-mono">
                         SNI / JIGN
                       </span>
                     </div>
@@ -1102,7 +1102,7 @@ const spatialExtent = computed(() => {
                       <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">
                         Metadata Geospasial ISO 19139
                       </h4>
-                      <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
+                      <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
                         Standar skema metadata spasial ISO 19115/19139 SNI resmi untuk pertukaran dan integrasi simpul jaringan nasional.
                       </p>
                     </div>
@@ -1126,7 +1126,7 @@ const spatialExtent = computed(() => {
                       </button>
                       <button
                         type="button"
-                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                         title="Buka XML melalui proxy/cache internal Melarosa (cadangan jika akses portal langsung terkendala)"
                         @click="openMelarosaXmlUrl('iso')"
                       >
@@ -1136,7 +1136,7 @@ const spatialExtent = computed(() => {
 
                       <button
                         type="button"
-                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                         title="Unduh file XML ISO 19139 ke komputer lokal"
                         @click="downloadXml('iso')"
                       >
@@ -1151,10 +1151,10 @@ const spatialExtent = computed(() => {
                 <div class="p-3 rounded-xl border border-slate-200/90 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] flex flex-col justify-between gap-3 hover:border-indigo-200 dark:hover:border-indigo-900/40 transition-colors">
                   <div class="space-y-1.5">
                     <div class="flex items-center justify-between gap-2">
-                      <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40">
+                      <span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40">
                         Dublin Core (Record)
                       </span>
-                      <span class="text-[10px] text-slate-400 font-mono">
+                      <span class="text-xs text-slate-400 font-mono">
                         CSW 2.0.2
                       </span>
                     </div>
@@ -1162,7 +1162,7 @@ const spatialExtent = computed(() => {
                       <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100">
                         Metadata Rekaman Dublin Core
                       </h4>
-                      <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
+                      <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
                         Ringkasan rekaman metadata standar OGC CSW 2.0.2 Dublin Core untuk penemuan cepat dan harvesting katalog.
                       </p>
                     </div>
@@ -1186,7 +1186,7 @@ const spatialExtent = computed(() => {
                       </button>
                       <button
                         type="button"
-                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                         title="Buka XML melalui proxy/cache internal Melarosa (cadangan jika akses portal langsung terkendala)"
                         @click="openMelarosaXmlUrl('dc')"
                       >
@@ -1196,7 +1196,7 @@ const spatialExtent = computed(() => {
 
                       <button
                         type="button"
-                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 font-medium text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                         title="Unduh file XML Dublin Core ke komputer lokal"
                         @click="downloadXml('dc')"
                       >
@@ -1220,7 +1220,7 @@ const spatialExtent = computed(() => {
 
     <template #footer>
       <div class="flex items-center justify-between w-full">
-        <span class="text-[10px] text-slate-400 font-mono">
+        <span class="text-xs text-slate-400 font-mono">
           JIGN Bojonegoro • Simpul Jaringan Nasional
         </span>
         <UButton

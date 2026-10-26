@@ -10,19 +10,20 @@ const publicNavTreeState = ref<PublicNavItem[]>([
     description: 'Portal spasial dan data geospasial Kabupaten Bojonegoro',
   },
   {
-    label: 'Peta',
+    label: 'Peta Interaktif',
     to: '/maps',
+    exact: true,
     description: 'Peta digital batas wilayah desa, batas kecamatan, dan jalan poros',
   },
   {
-    label: 'GeoStory',
-    to: '/geostory',
-    description: 'Peta digital batas wilayah desa, batas kecamatan, dan jalan poros',
+    label: 'Katalog Dataset',
+    to: '/maps?tab=dataset',
+    description: 'Pusat direktori dataset geospasial resmi JIGN Bojonegoro',
   },
   {
-    label: 'Katalog Data',
-    to: '/katalog-data',
-    description: 'Pusat informasi dan direktori data geospasial Kabupaten Bojonegoro',
+    label: 'Geopark',
+    to: '/maps?tab=geopark',
+    description: '20 situs geodiversity dan warisan geologi Kabupaten Bojonegoro',
   },
 ]);
 
@@ -74,6 +75,21 @@ export function usePublicNavigation() {
   const currentHeader = computed<PublicHeaderMeta>(() => {
     const path = route.path.replace(/\/$/, '') || '/';
     const headers = flatHeaderMap.value;
+
+    if (path === '/maps' && route.query.tab) {
+      if (route.query.tab === 'dataset') {
+        return {
+          title: 'Katalog Dataset',
+          description: 'Pusat direktori dataset geospasial resmi JIGN Bojonegoro',
+        };
+      }
+      if (route.query.tab === 'geopark') {
+        return {
+          title: 'Geopark Bojonegoro',
+          description: '20 situs geodiversity dan warisan geologi Kabupaten Bojonegoro',
+        };
+      }
+    }
 
     if (headers[path]) {
       return headers[path];
@@ -205,14 +221,26 @@ export function usePublicNavigation() {
 
   function isPathActive(targetPath?: string, exact?: boolean): boolean {
     if (!targetPath) return false;
-    const current = route.path.split('?')[0].replace(/\/$/, '') || '/';
-    const target = targetPath.split('?')[0].replace(/\/$/, '') || '/';
+    const [targetBase, targetQuery] = targetPath.split('?');
+    const currentBase = route.path.replace(/\/$/, '') || '/';
+    const normalizedTarget = targetBase.replace(/\/$/, '') || '/';
 
-    if (exact || target === '/') {
-      return current === target;
+    // If target has query parameters (e.g. ?tab=dataset)
+    if (targetQuery) {
+      const params = new URLSearchParams(targetQuery);
+      const targetTab = params.get('tab');
+      return currentBase === normalizedTarget && route.query.tab === targetTab;
     }
 
-    return current === target || current.startsWith(`${target}/`);
+    if (exact || normalizedTarget === '/') {
+      if (normalizedTarget === '/maps') {
+        // Peta Interaktif is only active when no tab query is specified
+        return currentBase === '/maps' && !route.query.tab;
+      }
+      return currentBase === normalizedTarget;
+    }
+
+    return currentBase === normalizedTarget || currentBase.startsWith(`${normalizedTarget}/`);
   }
 
   const navMenuItems = computed<NavigationMenuItem[]>(() => {

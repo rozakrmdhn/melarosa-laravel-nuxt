@@ -79,7 +79,15 @@ const HALF_RATIO = 0.54; // Separuh layar (~54% viewport)
 const FULL_RATIO = 0.88; // Layar penuh (~88% viewport)
 const BOTTOM_BLEED_PX = 80;
 
-const viewportH = ref(typeof window !== "undefined" ? window.innerHeight : 720);
+function getEffectiveViewportHeight() {
+  if (typeof window === "undefined") return 720;
+  if (window.visualViewport) {
+    return Math.round(window.visualViewport.height);
+  }
+  return window.innerHeight;
+}
+
+const viewportH = ref(getEffectiveViewportHeight());
 const fullH = computed(() => Math.round(viewportH.value * FULL_RATIO));
 const halfH = computed(() => Math.round(viewportH.value * HALF_RATIO));
 
@@ -365,9 +373,7 @@ function handleKeyDown(e: KeyboardEvent) {
 }
 
 function updateViewportH() {
-  if (typeof window !== "undefined") {
-    viewportH.value = window.innerHeight;
-  }
+  viewportH.value = getEffectiveViewportHeight();
 }
 
 watch(
@@ -399,6 +405,11 @@ onMounted(() => {
   if (typeof window !== "undefined") {
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", updateViewportH, { passive: true });
+    window.addEventListener("orientationchange", updateViewportH, { passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", updateViewportH, { passive: true });
+      window.visualViewport.addEventListener("scroll", updateViewportH, { passive: true });
+    }
     window.addEventListener("pointerdown", handleDocumentClick);
   }
 });
@@ -407,6 +418,11 @@ onUnmounted(() => {
   if (typeof window !== "undefined") {
     window.removeEventListener("keydown", handleKeyDown);
     window.removeEventListener("resize", updateViewportH);
+    window.removeEventListener("orientationchange", updateViewportH);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener("resize", updateViewportH);
+      window.visualViewport.removeEventListener("scroll", updateViewportH);
+    }
     window.removeEventListener("pointerdown", handleDocumentClick);
   }
 });
@@ -433,7 +449,7 @@ onUnmounted(() => {
       >
         <div
           ref="sheetContainerRef"
-          class="pointer-events-auto relative w-full h-full flex flex-col rounded-t-[28px] bg-white dark:bg-[#0b1322] border-t border-slate-200/90 dark:border-white/10 shadow-[0_-12px_40px_rgba(0,0,0,0.22)] overflow-hidden"
+          class="pointer-events-auto relative w-full h-full flex flex-col rounded-t-[28px] bg-white/92 dark:bg-[#0b1322]/92 backdrop-blur-2xl border-t border-slate-200/80 dark:border-white/10 shadow-[0_-12px_40px_rgba(0,0,0,0.22)] overflow-hidden"
           role="dialog"
           aria-modal="true"
           aria-label="Pilihan Peta Dasar (Basemap)"
@@ -474,11 +490,11 @@ onUnmounted(() => {
                     <h2 class="text-sm font-bold text-slate-900 dark:text-slate-100 truncate tracking-tight">
                       Peta Dasar (Basemap)
                     </h2>
-                    <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300">
+                    <span class="px-1.5 py-0.2 rounded-full text-xs font-bold bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300">
                       {{ basemapList.length }} Pilihan
                     </span>
                   </div>
-                  <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  <p class="text-xs text-slate-500 dark:text-slate-400 truncate">
                     Pilih gaya peta dasar untuk eksplorasi wilayah
                   </p>
                 </div>
@@ -487,7 +503,7 @@ onUnmounted(() => {
               <!-- Close Button (Min 44x44px touch target) -->
               <button
                 type="button"
-                class="size-11 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95 shrink-0"
+                class="size-11 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95 shrink-0"
                 aria-label="Tutup Pilihan Peta Dasar"
                 @click.stop="close"
               >
@@ -619,7 +635,7 @@ onUnmounted(() => {
                 <!-- Top Badges Overlay -->
                 <div class="absolute top-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none">
                   <span
-                    class="px-1.5 py-0.2 rounded-md text-[9px] font-bold tracking-tight uppercase shadow-xs backdrop-blur-xs"
+                    class="px-1.5 py-0.2 rounded-md text-xs font-bold tracking-tight uppercase shadow-xs backdrop-blur-xs"
                     :class="item.type === 'vector'
                       ? 'bg-emerald-600/90 text-white'
                       : 'bg-slate-900/80 text-white'"
@@ -647,20 +663,20 @@ onUnmounted(() => {
                 >
                   {{ item.name }}
                 </span>
-                <span class="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5 leading-tight">
+                <span class="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5 leading-tight">
                   {{ item.tagline }}
                 </span>
-                <span class="text-[9px] text-slate-400 dark:text-slate-500 font-medium truncate mt-1">
+                <span class="text-xs text-slate-500 dark:text-slate-400 font-medium truncate mt-1">
                   {{ item.provider }}
                 </span>
               </div>
             </button>
           </div>
 
-          <!-- Safe area spacer for modern bezel-less phones -->
+          <!-- Safe area spacer counteracting bottom bleed so cards are 100% visible above URL bar -->
           <div
             class="shrink-0"
-            style="height: calc(env(safe-area-inset-bottom, 0px) + 12px)"
+            :style="{ height: `calc(env(safe-area-inset-bottom, 0px) + ${BOTTOM_BLEED_PX}px + 20px)` }"
           />
         </div>
       </div>

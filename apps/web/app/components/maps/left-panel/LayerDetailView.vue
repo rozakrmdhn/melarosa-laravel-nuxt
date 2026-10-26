@@ -59,10 +59,10 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
 <template>
   <div class="flex-1 flex flex-col min-h-0">
     <!-- Header Hero Section: Avatar Bulat, Judul Bold, Subtitle, Tombol Circle X -->
-    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-white dark:bg-[#09111e]">
+    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-transparent">
       <div class="flex items-start gap-3 min-w-0 flex-1">
         <!-- Circular Badge Avatar -->
-        <div class="size-11 rounded-full bg-purple-700 dark:bg-purple-600 text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-xs tracking-wider">
+        <div class="size-11 rounded-full bg-purple-700 dark:bg-purple-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs tracking-wider">
           {{ getLayerCode(props.selectedLayer) }}
         </div>
 
@@ -80,7 +80,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
       <!-- Circle X Close Button -->
       <button
         type="button"
-        class="size-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
+        class="relative after:absolute after:-inset-1.5 after:content-[''] size-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
         aria-label="Tutup detail dan kembali ke daftar layer"
         title="Tutup detail dan kembali ke daftar layer"
         @click="emit('close')"
@@ -93,7 +93,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
     <div v-if="props.selectedLayer" class="flex-1 overflow-y-auto px-4 sm:px-5 py-3 space-y-3">
       <!-- Card 1: Visibilitas & Transparansi Layer -->
       <div class="p-3.5 rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200/90 dark:border-white/10 shadow-xs space-y-3">
-        <span class="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+        <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
           Kontrol Tampilan Layer
         </span>
 
@@ -101,7 +101,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
         <div class="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-white/5">
           <div>
             <span class="text-xs font-semibold text-slate-800 dark:text-slate-200 block">Visibilitas Lapisan</span>
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">
+            <span class="text-xs text-slate-500 dark:text-slate-400">
               {{ props.selectedLayer.visible ? 'Layer aktif ditampilkan di atas peta' : 'Layer disembunyikan dari peta' }}
             </span>
           </div>
@@ -144,7 +144,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
               v-for="preset in [0.25, 0.5, 0.75, 1]"
               :key="preset"
               type="button"
-              class="py-1 px-1 rounded-md text-[10px] font-medium tabular-nums transition-colors text-center cursor-pointer min-h-[28px]"
+              class="py-1 px-1 rounded-md text-xs font-medium tabular-nums transition-colors text-center cursor-pointer min-h-[44px]"
               :class="Math.abs(props.selectedLayer.opacity - preset) < 0.05
                 ? 'bg-blue-600 text-white font-bold'
                 : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'"
@@ -158,7 +158,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
 
       <!-- Card 2: Metadata & Spesifikasi Spasial -->
       <div class="p-3.5 rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200/90 dark:border-white/10 shadow-xs space-y-2.5">
-        <span class="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+        <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
           Metadata & Spesifikasi Spasial
         </span>
 
@@ -172,20 +172,20 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
 
           <div v-if="props.selectedLayer.layer_name || props.selectedLayer.wmsLayerName" class="flex justify-between gap-2 pb-1.5 border-b border-slate-100 dark:border-white/5">
             <span class="text-slate-500 dark:text-slate-400 shrink-0">Layer Identitas:</span>
-            <span class="font-mono text-[11px] text-slate-800 dark:text-slate-200 text-right break-all">
+            <span class="font-mono text-xs text-slate-800 dark:text-slate-200 text-right break-all">
               {{ props.selectedLayer.layer_name || props.selectedLayer.wmsLayerName }}
             </span>
           </div>
 
           <div v-if="props.selectedLayer.protocol" class="flex justify-between gap-2 pb-1.5 border-b border-slate-100 dark:border-white/5">
             <span class="text-slate-500 dark:text-slate-400">Protokol Akses:</span>
-            <span class="font-mono uppercase font-bold text-blue-600 dark:text-blue-400 text-[11px]">
+            <span class="font-mono uppercase font-bold text-blue-600 dark:text-blue-400 text-xs">
               {{ props.selectedLayer.protocol }}
             </span>
           </div>
 
           <div v-if="props.selectedLayer.legend_url" class="pt-1 space-y-1.5">
-            <span class="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">Simbol Legenda Resmi:</span>
+            <span class="text-xs text-slate-500 font-semibold block uppercase tracking-wider">Simbol Legenda Resmi:</span>
             <div class="p-2 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 flex items-center justify-center">
               <img
                 :src="props.selectedLayer.legend_url"
@@ -196,33 +196,58 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
             </div>
           </div>
 
-          <p v-if="props.selectedLayer.description" class="text-[11px] text-slate-600 dark:text-slate-400 pt-1.5 border-t border-slate-100 dark:border-white/5 leading-relaxed font-medium">
+          <p v-if="props.selectedLayer.description" class="text-xs text-slate-600 dark:text-slate-400 pt-1.5 border-t border-slate-100 dark:border-white/5 leading-relaxed font-medium">
             {{ props.selectedLayer.description }}
           </p>
         </div>
       </div>
 
       <!-- Card 3: Filter Data Per Kecamatan -->
-      <div class="p-3.5 rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200/90 dark:border-white/10 shadow-xs space-y-2">
+      <div class="p-3.5 rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200/90 dark:border-white/10 shadow-xs space-y-2.5">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+          <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Filter Atribut Wilayah
           </span>
           <button
             v-if="hasLayerFilter(props.selectedLayer)"
             type="button"
-            class="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
+            class="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
             @click="resetLayerFilter(props.selectedLayer)"
           >
             Reset Filter
           </button>
         </div>
 
+        <!-- Indikator & Tombol Hapus Filter Wilayah Aktif -->
+        <div
+          v-if="props.selectedLayer.filterKecamatan && props.selectedLayer.filterKecamatan !== 'ALL'"
+          class="flex items-center justify-between p-2 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/40"
+        >
+          <div class="flex items-center gap-2 min-w-0">
+            <UIcon name="i-lucide-filter" class="size-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+            <div class="min-w-0">
+              <span class="text-xs text-slate-500 dark:text-slate-400 block">Filter Aktif:</span>
+              <span class="text-xs font-bold text-blue-900 dark:text-blue-200 truncate block">
+                Kecamatan {{ props.selectedLayer.filterKecamatan }}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors cursor-pointer shadow-2xs shrink-0"
+            title="Bersihkan filter wilayah pada layer ini"
+            @click="handleFilterKecamatanChange(props.selectedLayer, 'ALL')"
+          >
+            <UIcon name="i-lucide-x" class="size-3.5" />
+            <span>Hapus Filter</span>
+          </button>
+        </div>
+
         <div class="space-y-1">
-          <label class="text-[10px] font-medium text-slate-500 dark:text-slate-400 block">Kecamatan</label>
+          <label class="text-xs font-medium text-slate-500 dark:text-slate-400 block">Pilih Kecamatan</label>
           <select
             :value="props.selectedLayer.filterKecamatan || 'ALL'"
-            class="w-full bg-slate-50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 rounded-xl px-2.5 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-500 min-h-[38px]"
+            class="w-full bg-slate-50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 rounded-xl px-2.5 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-500 min-h-[44px]"
             @change="handleFilterKecamatanChange(props.selectedLayer, ($event.target as HTMLSelectElement).value)"
           >
             <option value="ALL">Semua Kecamatan (28 Wilayah)</option>
@@ -235,7 +260,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
 
       <!-- Card 4: Aksi Navigasi Spasial -->
       <div class="p-3.5 rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200/90 dark:border-white/10 shadow-xs space-y-2">
-        <span class="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+        <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
           Aksi Navigasi Layer
         </span>
 
@@ -260,7 +285,7 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
     </div>
 
     <!-- Fallback -->
-    <div v-else class="p-6 text-center text-xs text-slate-400">
+    <div v-else class="p-6 text-center text-xs text-slate-500">
       Layer tidak ditemukan.
     </div>
   </div>

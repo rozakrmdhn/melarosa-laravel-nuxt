@@ -158,7 +158,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
 <template>
   <div v-if="props.selectedItem && props.selectedItem.data" class="flex-1 flex flex-col min-h-0">
     <!-- Header Hero Section -->
-    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-white dark:bg-[#09111e]">
+    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-transparent">
       <div class="flex items-start gap-3 min-w-0 flex-1">
         <!-- Circular Badge Avatar -->
         <template v-if="itemType === 'kecamatan'">
@@ -167,7 +167,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
           </div>
         </template>
         <template v-else-if="itemType === 'dataset'">
-          <div class="size-11 rounded-full bg-purple-700 dark:bg-purple-600 text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-xs tracking-wider">
+          <div class="size-11 rounded-full bg-purple-700 dark:bg-purple-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs tracking-wider">
             {{ getDatasetCode(itemData) }}
           </div>
         </template>
@@ -195,17 +195,33 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             </p>
           </template>
           <template v-else-if="itemType === 'dataset'">
-            <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
-              {{ itemData.title }}
-            </h1>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                {{ itemData.title }}
+              </h1>
+              <span
+                v-if="itemData.slug"
+                class="px-1.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-white/10 shrink-0"
+              >
+                {{ itemData.slug }}
+              </span>
+            </div>
             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-normal">
               {{ itemData.subtitle }}
             </p>
           </template>
           <template v-else>
-            <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
-              {{ itemData.title || itemData.name }}
-            </h1>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                {{ itemData.title || itemData.name }}
+              </h1>
+              <span
+                v-if="itemData.slug"
+                class="px-1.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-white/10 shrink-0"
+              >
+                {{ itemData.slug }}
+              </span>
+            </div>
             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-normal truncate">
               {{ itemData.category }} · {{ itemData.tag || itemData.kecamatan }}
             </p>
@@ -216,7 +232,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
       <!-- Circle X Close Button -->
       <button
         type="button"
-        class="size-9 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
+        class="relative after:absolute after:-inset-1 after:content-[''] size-9 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
         aria-label="Tutup detail dan kembali ke daftar pencarian"
         title="Tutup detail dan kembali ke daftar pencarian"
         @click="emit('close')"
@@ -232,12 +248,12 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
         <!-- Status & Zona -->
         <div class="flex items-center justify-between text-xs">
           <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300">
+            <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300">
               Zona {{ itemData.zona }}
             </span>
             <span
               v-if="props.selectedKecamatanFilter?.trim().toLowerCase() === itemData.name?.toLowerCase()"
-              class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 flex items-center gap-1"
+              class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 flex items-center gap-1"
             >
               <UIcon name="i-lucide-check-circle" class="size-3.5" />
               Filter Aktif di Peta
@@ -248,7 +264,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
 
         <!-- Karakteristik Wilayah -->
         <div class="space-y-1.5">
-          <h2 class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Karakteristik & Potensi
           </h2>
           <p class="text-xs text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
@@ -259,12 +275,12 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
         <!-- Titik Koordinat -->
         <div v-if="kecamatanCoords" class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <h2 class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+            <h2 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Titik Pusat Geografis
             </h2>
             <button
               type="button"
-              class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 min-h-[36px] px-2"
+              class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 min-h-[44px] px-2"
               @click="copyCoordinates(kecamatanCoords)"
             >
               <UIcon :name="isCopied ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" />
@@ -273,7 +289,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
           </div>
           <div class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] flex items-center justify-between text-xs text-slate-700 dark:text-slate-300">
             <span class="tabular-nums font-semibold">{{ kecamatanCoords[1].toFixed(5) }}°, {{ kecamatanCoords[0].toFixed(5) }}°</span>
-            <span class="text-[11px] text-slate-500 dark:text-slate-400 font-semibold tabular-nums">WGS 84</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold tabular-nums">WGS 84</span>
           </div>
         </div>
 
@@ -311,7 +327,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             </span>
           </div>
 
-          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
+          <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
             {{ itemData.protocol }}
           </span>
         </div>
@@ -385,7 +401,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             :alt="itemData.title || itemData.name || 'Geosite Bojonegoro'"
             class="w-full h-full object-cover max-h-[190px]"
           />
-          <div v-if="itemData.code" class="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-white text-[10px] font-semibold tabular-nums">
+          <div v-if="itemData.code" class="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-white text-xs font-semibold tabular-nums">
             {{ itemData.code }}
           </div>
         </div>
@@ -393,7 +409,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
         <!-- Kategori & Wilayah / Tag -->
         <div class="flex items-center justify-between text-xs flex-wrap gap-2">
           <span
-            class="font-bold px-2.5 py-1 rounded-full text-[11px]"
+            class="font-bold px-2.5 py-1 rounded-full text-xs"
             :class="itemData.categorySlug === 'geo-diversity'
               ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300'
               : itemData.categorySlug === 'bio-diversity'
@@ -403,13 +419,13 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             {{ itemData.category || 'Geosite Resmi' }}
           </span>
           <span class="text-slate-600 dark:text-slate-300 font-medium">
-            {{ itemData.tag || itemData.kecamatan }}
+            {{ itemData.kecamatan || 'Bojonegoro' }}
           </span>
         </div>
 
         <!-- Deskripsi Signifikansi Geosite -->
         <div class="space-y-1.5">
-          <h2 class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Deskripsi & Signifikansi
           </h2>
           <p class="text-xs text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
@@ -420,12 +436,12 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
         <!-- Titik Koordinat Geografis -->
         <div v-if="geoparkCoords" class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <h2 class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+            <h2 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Titik Koordinat Geografis
             </h2>
             <button
               type="button"
-              class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 min-h-[36px] px-2"
+              class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 min-h-[44px] px-2"
               @click="copyCoordinates(geoparkCoords)"
             >
               <UIcon :name="isCopied ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" />
@@ -436,7 +452,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             <span class="tabular-nums font-semibold">
               {{ geoparkCoords[1].toFixed(6) }}°, {{ geoparkCoords[0].toFixed(6) }}°
             </span>
-            <span class="text-[11px] text-slate-500 dark:text-slate-400 font-semibold tabular-nums">
+            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold tabular-nums">
               Zoom {{ itemData.zoom || 14 }}
             </span>
           </div>

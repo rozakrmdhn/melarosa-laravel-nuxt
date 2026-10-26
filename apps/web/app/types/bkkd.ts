@@ -106,6 +106,7 @@ export interface BkkdProposal {
   satuan?: string | null;
   satuan_target?: string | null;
   nilai_usulan?: number | null;
+  nomor_surat?: string | null;
   nomor_surat_desa?: string | null;
   tanggal_surat_desa?: string | null;
   tanggal_diterima?: string | null;
@@ -122,6 +123,11 @@ export interface BkkdProposal {
   ditetapkan_oleh_nama?: string | null;
   verifikasi_aktif?: BkkdVerifikasi | null;
   lampiran?: BkkdProposalLampiran[];
+  total_lampiran?: number;
+  total_lampiran_file?: number;
+  total_lampiran_link?: number;
+  has_lampiran?: boolean;
+  cloud_links?: { id: string; nama: string; url: string }[];
   semua_verifikasi?: BkkdVerifikasi[];
   geom?: any;
   created_at: string;
@@ -139,6 +145,8 @@ export interface BkkdProposalSummary {
   layak_bersyarat: number;
   tidak_layak: number;
   ditetapkan_tapd: number;
+  belum_upload?: number;
+  jumlah_belum_upload?: number;
 }
 
 export interface BkkdRekapitulasiDesaItem {

@@ -80,7 +80,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
 <template>
   <div v-if="props.site" class="flex-1 flex flex-col min-h-0 select-none">
     <!-- Header Hero Section: Avatar Bulat, Judul Bold, Subtitle, Tombol Circle X (Selaras SearchItemAboutView) -->
-    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-white dark:bg-[#09111e]">
+    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-transparent">
       <div class="flex items-start gap-3 min-w-0 flex-1">
         <!-- Circular Badge Avatar -->
         <div
@@ -100,7 +100,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
             {{ props.site.title || props.site.name }}
           </h1>
           <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-normal truncate">
-            {{ props.site.category }} · {{ props.site.tag || 'Bojonegoro' }}
+            {{ props.site.category }} · Bojonegoro
           </p>
         </div>
       </div>
@@ -108,7 +108,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
       <!-- Circle X Close Button -->
       <button
         type="button"
-        class="size-9 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
+        class="relative after:absolute after:-inset-1 after:content-[''] size-9 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
         aria-label="Tutup detail geosite dan kembali ke daftar"
         title="Tutup detail geosite dan kembali ke daftar"
         @click="emit('close')"
@@ -134,7 +134,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
             v-else
             class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-gradient-to-br from-emerald-500/10 via-slate-500/5 to-transparent"
           >
-            <UIcon name="i-lucide-image-off" class="size-8 text-slate-400 dark:text-slate-500 mb-1" />
+            <UIcon name="i-lucide-image-off" class="size-8 text-slate-500 dark:text-slate-400 mb-1" />
             <span class="text-xs text-slate-500 dark:text-slate-400 font-medium">Foto resmi belum tersedia</span>
           </div>
 
@@ -144,7 +144,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
           <!-- Badge Kategori & Kode di Pojok Atas -->
           <div class="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none">
             <span
-              class="px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-xs backdrop-blur-md pointer-events-auto"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold shadow-xs backdrop-blur-md pointer-events-auto"
               :class="site.categorySlug === 'geo-diversity'
                 ? 'bg-blue-600/90 text-white'
                 : site.categorySlug === 'bio-diversity'
@@ -154,7 +154,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
               {{ site.category }}
             </span>
 
-            <span class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-black/60 text-white shadow-xs backdrop-blur-md tabular-nums pointer-events-auto">
+            <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-black/60 text-white shadow-xs backdrop-blur-md tabular-nums pointer-events-auto">
               {{ site.code }}
             </span>
           </div>
@@ -163,7 +163,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
           <button
             v-if="currentMainPhoto"
             type="button"
-            class="absolute bottom-3 right-3 size-9 rounded-lg bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-md transition-all cursor-pointer shadow-xs active:scale-95"
+            class="absolute bottom-3 right-3 size-9 after:absolute after:-inset-1 after:content-[''] rounded-lg bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-md transition-all cursor-pointer shadow-xs active:scale-95"
             aria-label="Perbesar foto geosite"
             title="Klik untuk melihat foto ukuran penuh"
             @click="openPreview(currentMainPhoto)"
@@ -177,7 +177,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
           v-if="allPhotos.length > 1"
           class="space-y-1.5"
         >
-          <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-0.5">
+          <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-0.5">
             <span class="font-semibold text-slate-700 dark:text-slate-200">
               Galeri Foto Situs
             </span>
@@ -213,13 +213,17 @@ function getGeoparkCode(site?: GeoparkSite): string {
       <div class="p-4 rounded-2xl bg-slate-50/80 dark:bg-white/[0.03] border border-slate-200/80 dark:border-white/10 space-y-2">
         <div class="flex items-center gap-2 flex-wrap">
           <span
-            v-if="site.tag"
-            class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300"
+            class="px-2 py-0.5 rounded-md text-xs font-semibold"
+            :class="site.categorySlug === 'geo-diversity'
+              ? 'bg-blue-100/80 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300'
+              : site.categorySlug === 'bio-diversity'
+                ? 'bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                : 'bg-amber-100/80 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'"
           >
-            #{{ site.tag }}
+            {{ site.category }}
           </span>
           <span
-            class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300 tabular-nums"
+            class="px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300 tabular-nums"
           >
             No. Urut {{ site.ordering }}
           </span>
@@ -250,7 +254,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
 
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white dark:bg-white/10 border border-emerald-200/80 dark:border-white/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 transition-colors cursor-pointer min-h-[36px]"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-white/10 border border-emerald-200/80 dark:border-white/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 transition-colors cursor-pointer min-h-[44px]"
             :aria-label="copied ? 'Koordinat berhasil disalin' : 'Salin koordinat geografis'"
             @click="copyCoordinates"
           >
@@ -264,7 +268,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
 
         <div class="grid grid-cols-2 gap-2 text-xs select-text">
           <div class="p-2.5 rounded-xl bg-white dark:bg-[#0c1424] border border-emerald-200/60 dark:border-white/10">
-            <span class="block text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 mb-0.5">
+            <span class="block text-xs uppercase font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
               Lintang (Latitude)
             </span>
             <span class="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
@@ -273,7 +277,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
           </div>
 
           <div class="p-2.5 rounded-xl bg-white dark:bg-[#0c1424] border border-emerald-200/60 dark:border-white/10">
-            <span class="block text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 mb-0.5">
+            <span class="block text-xs uppercase font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
               Bujur (Longitude)
             </span>
             <span class="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
@@ -302,7 +306,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
           <UIcon name="i-lucide-sparkles" class="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
           <span>Warisan Budaya Takbenda</span>
         </div>
-        <p class="text-[11.5px] leading-relaxed text-amber-700 dark:text-amber-300 font-normal">
+        <p class="text-xs leading-relaxed text-amber-700 dark:text-amber-300 font-normal">
           Situs ini merupakan entitas seni pertunjukan dan warisan tradisi luhur Kabupaten Bojonegoro yang hidup di tengah masyarakat secara dinamis, sehingga tidak terikat pada satu titik koordinat spasial tunggal.
         </p>
       </div>
@@ -328,7 +332,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
       <!-- ═══ 6. TAUTAN RESMI PEMERINTAH ═════════════════════════════════════ -->
       <div class="p-3.5 rounded-2xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200/80 dark:border-white/10 flex items-center justify-between gap-3 text-xs">
         <div class="min-w-0">
-          <span class="block text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500">
+          <span class="block text-xs uppercase font-semibold text-slate-500 dark:text-slate-400">
             Portal Informasi Resmi
           </span>
           <span class="font-medium text-slate-700 dark:text-slate-300 truncate block">

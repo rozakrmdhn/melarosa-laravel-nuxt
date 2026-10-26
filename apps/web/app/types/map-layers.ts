@@ -1,5 +1,7 @@
 export type BasemapKey = "esri" | "rbi" | "osm" | "satellite" | "aerial" | "none" | "dark" | "positron" | "topo";
 
+export type MainTab = "layers" | "dataset" | "geopark";
+
 export type ActiveLayerTool = "none" | "opacity" | "filter" | "info";
 
 export interface ActiveLayerItem {
@@ -24,6 +26,7 @@ export interface ActiveLayerItem {
   opacity: number;
   expanded: boolean;
   activeTool: ActiveLayerTool;
+  disableIdentify?: boolean;
 
   // WMS / OGC geospatial service parameters
   wmsUrl?: string;

@@ -23,6 +23,7 @@ const props = withDefaults(
     mapCenter?: [number, number] | null;
     mapZoom?: number | null;
     getMapSnapshot?: () => Promise<string | null>;
+    getMapThumbnail?: (options?: any) => Promise<string | null>;
   }>(),
   {
     open: false,
@@ -33,6 +34,7 @@ const props = withDefaults(
     mapCenter: null,
     mapZoom: null,
     getMapSnapshot: undefined,
+    getMapThumbnail: undefined,
   }
 );
 
@@ -47,6 +49,17 @@ const isOpen = computed({
 
 // ─── 1. Pilihan Rasio Media Sosial ───────────────────────────────────────────
 const RATIO_OPTIONS: AspectRatioOption[] = [
+  {
+    id: "landscape",
+    label: "16:9",
+    sublabel: "Lansekap",
+    ratio: "16 / 9",
+    aspectWidth: 16,
+    aspectHeight: 9,
+    width: 1280,
+    height: 720,
+    icon: "i-lucide-monitor",
+  },
   {
     id: "square",
     label: "1:1",
@@ -81,17 +94,6 @@ const RATIO_OPTIONS: AspectRatioOption[] = [
     icon: "i-lucide-smartphone",
   },
   {
-    id: "landscape",
-    label: "16:9",
-    sublabel: "Lansekap",
-    ratio: "16 / 9",
-    aspectWidth: 16,
-    aspectHeight: 9,
-    width: 1200,
-    height: 675,
-    icon: "i-lucide-monitor",
-  },
-  {
     id: "banner",
     label: "1.91:1",
     sublabel: "Banner",
@@ -104,7 +106,7 @@ const RATIO_OPTIONS: AspectRatioOption[] = [
   },
 ];
 
-const selectedRatioId = ref("square");
+const selectedRatioId = ref("landscape");
 const selectedRatio = computed(() => {
   return RATIO_OPTIONS.find((r) => r.id === selectedRatioId.value) || RATIO_OPTIONS[0];
 });
@@ -211,10 +213,12 @@ const snapshotDataUrl = ref<string | null>(null);
 const isLoadingSnapshot = ref(false);
 
 async function captureMap() {
-  if (!props.getMapSnapshot) return;
+  if (!props.getMapThumbnail && !props.getMapSnapshot) return;
   isLoadingSnapshot.value = true;
   try {
-    const data = await props.getMapSnapshot();
+    const data = props.getMapThumbnail
+      ? await props.getMapThumbnail({ width: 1280, height: 720, crop16_9: true })
+      : await props.getMapSnapshot!();
     if (data) {
       snapshotDataUrl.value = data;
     }
@@ -240,9 +244,11 @@ watch(
 const isCopiedImage = ref(false);
 const isDownloading = ref(false);
 const isCopiedText = ref(false);
+const isCopiedLink = ref(false);
 
 let copiedTextTimer: any = null;
 let copiedImageTimer: any = null;
+let copiedLinkTimer: any = null;
 
 // ─── Helper Pemecah Teks Multiline Canvas ────────────────────────────────────
 function getWrappedLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -786,6 +792,20 @@ async function handleCopyText() {
   }
 }
 
+// D. Copy Map URL Link (Salin Tautan Peta untuk Berbagi)
+async function handleCopyLink() {
+  try {
+    await navigator.clipboard.writeText(currentMapUrl.value);
+    isCopiedLink.value = true;
+    if (copiedLinkTimer) clearTimeout(copiedLinkTimer);
+    copiedLinkTimer = setTimeout(() => {
+      isCopiedLink.value = false;
+    }, 2000);
+  } catch (err) {
+    console.error("Gagal menyalin tautan peta:", err);
+  }
+}
+
 // ─── 5. Share Button Sosial Media ────────────────────────────────────────────
 function openShare(platform: "whatsapp" | "x" | "facebook" | "telegram" | "linkedin") {
   const url = encodeURIComponent(currentMapUrl.value);
@@ -970,6 +990,44 @@ async function handleNativeShare() {
                 </span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- ═══ TAUTAN PETA UNTUK BERBAGI (SHARE LINK DENGAN PRATINJAU 16:9) ═══ -->
+        <div class="space-y-1.5 p-3 rounded-2xl bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/40 shadow-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+              <UIcon name="i-lucide-link-2" class="size-3.5 text-blue-600 dark:text-blue-400" />
+              Tautan Peta (Share Link)
+            </span>
+            <span class="text-[10px] text-blue-600 dark:text-blue-400 font-semibold px-2 py-0.5 rounded-full bg-blue-100/80 dark:bg-blue-900/60">
+              Pratinjau Thumbnail 16:9
+            </span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1">
+              <input
+                :value="currentMapUrl"
+                readonly
+                aria-label="Tautan Peta yang Dibagikan"
+                class="w-full h-11 pl-3 pr-8 rounded-xl bg-white dark:bg-[#070c18] border border-blue-200 dark:border-blue-800/60 text-xs font-mono text-slate-700 dark:text-slate-200 select-all focus:outline-hidden"
+                @focus="($event.target as HTMLInputElement).select()"
+              />
+              <UIcon name="i-lucide-external-link" class="absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-400 pointer-events-none" />
+            </div>
+
+            <button
+              type="button"
+              class="min-h-[44px] px-4 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 shadow-xs"
+              :class="isCopiedLink
+                ? 'bg-emerald-600 text-white shadow-emerald-500/20'
+                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'"
+              @click="handleCopyLink"
+            >
+              <UIcon :name="isCopiedLink ? 'i-lucide-check' : 'i-lucide-copy'" class="size-4" />
+              <span>{{ isCopiedLink ? 'Tersalin!' : 'Salin Link' }}</span>
+            </button>
           </div>
         </div>
 

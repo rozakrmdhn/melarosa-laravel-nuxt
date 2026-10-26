@@ -66,7 +66,7 @@ const identifySubtitle = computed(() => {
 <template>
   <div class="flex-1 flex flex-col min-h-0 select-none">
     <!-- ═══ HEADER HERO SECTION IDENTIK DENGAN SEARCHITEMABOUTVIEW & LAYERDETAILVIEW ═══ -->
-    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-white dark:bg-[#09111e]">
+    <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3 shrink-0 bg-transparent">
       <div class="flex items-start gap-3 min-w-0 flex-1">
         <!-- Circular Badge Avatar -->
         <div class="size-11 rounded-full bg-blue-600 dark:bg-blue-500 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs tracking-wider">
@@ -103,7 +103,7 @@ const identifySubtitle = computed(() => {
         <!-- Circle X Close Button -->
         <button
           type="button"
-          class="size-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0"
+          class="relative after:absolute after:-inset-1.5 after:content-[''] size-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0"
           aria-label="Tutup identifikasi fitur dan kembali ke daftar layer"
           title="Tutup identifikasi fitur dan kembali ke daftar layer"
           @click="emit('close')"

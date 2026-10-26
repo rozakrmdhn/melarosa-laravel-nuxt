@@ -257,8 +257,8 @@ Route::prefix('api/v1')->group(function () {
         }
 
         try {
-            $response = \Illuminate\Support\Facades\Http::withOptions(['verify' => true])
-                ->timeout(6)
+            $response = \Illuminate\Support\Facades\Http::withoutVerifying()
+                ->timeout(10)
                 ->get($url);
 
             if ($response->successful()) {
@@ -266,7 +266,7 @@ Route::prefix('api/v1')->group(function () {
             }
             return response()->json(['features' => [], 'error' => 'WMS request failed: ' . $response->status()], $response->status());
         } catch (\Throwable $e) {
-            return response()->json(['features' => [], 'error' => 'WMS request failed'], 500);
+            return response()->json(['features' => [], 'error' => 'WMS request failed: ' . $e->getMessage()], 500);
         }
     })->name('wms.feature-info');
 

@@ -3,6 +3,7 @@ export interface GeoparkSite {
   code: string;
   title: string;
   name: string;
+  slug: string;
   category: "Keragaman Geologi" | "Keragaman Hayati" | "Keragaman Budaya" | string;
   categorySlug: "geo-diversity" | "bio-diversity" | "culture-diversity" | string;
   tag: string;
@@ -46,11 +47,16 @@ export function mapRawGeoparkSite(x: any): GeoparkSite {
     }
   }
 
+  const rawSlug = String(x.slug || "").trim();
+  const fallbackSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = rawSlug || fallbackSlug || code.toLowerCase();
+
   return {
     id: String(x.id),
     code,
     title: rawTitle,
     name,
+    slug,
     category: x.diversity_nama_id || "Keragaman Geologi",
     categorySlug: x.diversity_slug || "geo-diversity",
     tag: x.tag_id || "",
@@ -70,75 +76,48 @@ export function mapRawGeoparkSite(x: any): GeoparkSite {
   };
 }
 
+import { GEOPARK_FALLBACK_SITES } from "~/constants/geopark-sites-fallback";
+
 // Global shared state across panel components
-const sites = ref<GeoparkSite[]>([]);
+export type GeoparkCategoryFilter = "ALL" | "geo-diversity" | "bio-diversity" | "culture-diversity";
+// Instan 0ms: inisialisasi langsung dengan 31 situs terverifikasi Geopark Bojonegoro
+const sites = ref<GeoparkSite[]>(GEOPARK_FALLBACK_SITES);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const isInitialized = ref(false);
+const isInitialized = ref(true);
 const selectedSite = ref<GeoparkSite | null>(null);
+const activePillarFilter = ref<GeoparkCategoryFilter>("ALL");
 
 export function useGeoparkSites() {
   async function fetchLiveSites(forceRefresh = false) {
+    if (loading.value) return;
     loading.value = true;
     error.value = null;
 
     try {
-      // 1. Direct hit via Melarosa API proxy (which calls official geopark.bojonegorokab.go.id server-to-server)
+      // Background revalidation via Melarosa API proxy (server-to-server)
       const res = await $http<{ ok: boolean; count: number; data: any[] }>("geopark/sites", {
         query: forceRefresh ? { refresh: 1 } : {},
       });
 
       if (Array.isArray(res?.data) && res.data.length > 0) {
         sites.value = res.data.map(mapRawGeoparkSite);
-        isInitialized.value = true;
-        return;
-      }
-
-      // 2. Direct browser fetch fallback if proxy returns empty
-      if (import.meta.client) {
-        const directRes = await fetch(GEOPARK_DIRECT_ENDPOINT, {
-          headers: { Accept: "application/json" },
-        });
-        if (directRes.ok) {
-          const directJson = await directRes.json();
-          if (Array.isArray(directJson?.data) && directJson.data.length > 0) {
-            sites.value = directJson.data.map(mapRawGeoparkSite);
-            isInitialized.value = true;
-            return;
-          }
-        }
       }
     } catch (err: any) {
-      // 3. Fallback to direct client fetch if proxy has network error
-      if (import.meta.client) {
-        try {
-          const directRes = await fetch(GEOPARK_DIRECT_ENDPOINT, {
-            headers: { Accept: "application/json" },
-          });
-          if (directRes.ok) {
-            const directJson = await directRes.json();
-            if (Array.isArray(directJson?.data) && directJson.data.length > 0) {
-              sites.value = directJson.data.map(mapRawGeoparkSite);
-              isInitialized.value = true;
-              return;
-            }
-          }
-        } catch {
-          // direct fetch also failed
-        }
+      console.warn("[Geopark] Background fetch failed, keeping fallback data:", err?.message);
+      // Jika data lokal sudah ada, jangan tampilkan pesan error yang merusak UI
+      if (sites.value.length === 0) {
+        error.value = err?.message || "Gagal memuat data resmi Geopark Bojonegoro";
       }
-
-      console.warn("Geopark live API fetch error:", err);
-      error.value = err?.message || "Gagal memuat data resmi Geopark Bojonegoro";
     } finally {
       loading.value = false;
       isInitialized.value = true;
     }
   }
 
-  // Auto-fetch on mount if not yet initialized
+  // Jika suatu saat data kosong, lakukan fetch otomatis
   onMounted(() => {
-    if (!isInitialized.value || sites.value.length === 0) {
+    if (sites.value.length === 0) {
       fetchLiveSites();
     }
   });
@@ -173,12 +152,18 @@ export function useGeoparkSites() {
     selectedSite.value = site;
   }
 
+  function setActivePillarFilter(pillar: GeoparkCategoryFilter) {
+    activePillarFilter.value = pillar;
+  }
+
   return {
     sites,
     loading,
     error,
     selectedSite,
     selectSite,
+    activePillarFilter,
+    setActivePillarFilter,
     geologicalSites,
     biologicalSites,
     culturalSites,

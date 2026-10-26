@@ -37,7 +37,7 @@ Daftar modul fungsional dalam Melarosa GIS beserta status dokumentasi resminya:
 | Modul / Fitur | Berkas Dokumentasi | Status | Deskripsi Singkat |
 |---|---|:---:|---|
 | **Audit Trail & Logs** | [audit-logs.md](./features/audit-logs.md) | ✅ Lengkap | Jejak riwayat mutasi data spasial, administratif, dan sistem |
-| **Autentikasi & Sesi** | `docs/features/auth-and-sessions.md` | 📝 Terencana | Login Sanctum, token revoke, proteksi CSRF, dan device disconnect |
+| **Autentikasi & Sesi** | [auth-and-sessions.md](./features/auth-and-sessions.md) | ✅ Lengkap | Login Sanctum, penutupan pendaftaran mandiri, device session, & roadmap aduan spasial |
 | **RBAC (Roles & Permissions)** | `docs/features/roles-and-permissions.md` | 📝 Terencana | Matriks hak akses Spatie (Superadmin, Bappeda, Kecamatan, Desa) |
 | **Manajemen Pengguna** | `docs/features/user-management.md` | 📝 Terencana | Pengelolaan akun operator, aktivasi, dan assignment peran wilayah |
 

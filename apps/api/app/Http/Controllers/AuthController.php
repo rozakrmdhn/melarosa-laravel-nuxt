@@ -27,37 +27,14 @@ class AuthController extends Controller
     public function __construct(protected AuditLogService $auditLog) {}
 
     /**
-     * Register new user
+     * Register new user (Disabled: Closed Provisioning Model)
      */
     public function register(Request $request): JsonResponse
     {
-        $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:' . User::class],
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
-        ]);
-
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-        ]);
-
-        $user->assignRole('user');
-
-        event(new Registered($user));
-
-        $this->auditLog->log(
-            event: 'register',
-            module: 'auth',
-            auditable: $user,
-            description: 'Akun baru didaftarkan: ' . $user->email,
-            actor: $user,
-        );
-
         return response()->json([
-            'ok' => true,
-        ], 201);
+            'ok' => false,
+            'message' => 'Pendaftaran mandiri dinonaktifkan. Akun hanya dapat dibuat oleh Administrator melalui menu Manajemen Pengguna.',
+        ], 403);
     }
 
     /**
@@ -90,37 +67,22 @@ class AuthController extends Controller
             ->where('provider_id', $oAuthUser->id)
             ->first();
 
-        $isNew = false;
-
         if (!$userProvider) {
-            if (User::where('email', $oAuthUser->email)->exists()) {
+            $user = User::where('email', $oAuthUser->email)->first();
+
+            if (!$user) {
                 return view('oauth', [
                     'message' => [
                         'ok' => false,
-                        'message' => __('Unable to authenticate with :provider. User with email :email already exists. To connect a new service to your account, you can go to your account settings and go through the process of linking your account.', [
-                            'provider' => $provider,
-                            'email' => $oAuthUser->email,
-                        ]),
+                        'message' => 'Pendaftaran mandiri dinonaktifkan. Akun dengan email ini belum terdaftar di sistem. Silakan hubungi Administrator.',
                     ],
                 ]);
             }
-
-            $user = new User();
-            $user->avatar = $oAuthUser->picture ?? $oAuthUser->avatar_original ?? $oAuthUser->avatar;
-            $user->name = $oAuthUser->name;
-            $user->email = $oAuthUser->email;
-            $user->password = null;
-            $user->email_verified_at = now();
-            $user->save();
-
-            $user->assignRole('user');
 
             $user->userProviders()->create([
                 'provider_id' => $oAuthUser->id,
                 'name' => $provider,
             ]);
-
-            $isNew = true;
         } else {
             $user = $userProvider->user;
         }
@@ -130,10 +92,10 @@ class AuthController extends Controller
         $request->session()->regenerate();
 
         $this->auditLog->log(
-            event: $isNew ? 'oauth.register' : 'oauth.login',
+            event: 'oauth.login',
             module: 'auth',
             auditable: $user,
-            description: ($isNew ? 'Registrasi' : 'Login') . " via OAuth: {$provider}.",
+            description: "Login via OAuth: {$provider}.",
             meta: ['provider' => $provider],
             actor: $user,
         );

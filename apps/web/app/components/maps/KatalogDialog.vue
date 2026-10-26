@@ -190,18 +190,18 @@ async function copyEndpoint(item: DatasetItem) {
           <div class="relative">
             <UIcon
               name="i-lucide-search"
-              class="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 dark:text-slate-500"
+              class="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-500 dark:text-slate-400"
             />
             <input
               v-model="searchQuery"
               type="text"
               placeholder="Cari dataset, shapefile, nama dinas, atau kata kunci spasial..."
-              class="w-full h-11 pl-10 pr-10 rounded-xl bg-slate-50 dark:bg-[#0b0f19] border border-slate-200 dark:border-white/10 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+              class="w-full h-11 pl-10 pr-10 rounded-xl bg-slate-50 dark:bg-[#0b0f19] border border-slate-200 dark:border-white/10 text-base sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
             />
             <button
               v-if="searchQuery"
               type="button"
-              class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
               aria-label="Bersihkan pencarian"
               @click="searchQuery = ''"
             >
@@ -224,7 +224,7 @@ async function copyEndpoint(item: DatasetItem) {
               <span>{{ proto }}</span>
               <span
                 v-if="proto === 'Semua'"
-                class="px-1.5 py-0.2 rounded-md text-[10px]"
+                class="px-1.5 py-0.2 rounded-md text-xs"
                 :class="selectedProtocol === proto ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-400'"
               >
                 {{ allDatasets.length }}
@@ -236,13 +236,13 @@ async function copyEndpoint(item: DatasetItem) {
         <!-- Dataset Grid List -->
         <div class="p-4 sm:p-5 flex-1 overflow-y-auto space-y-3 max-h-[55vh]">
           <div v-if="filteredDatasets.length === 0" class="py-12 text-center space-y-2">
-            <div class="size-12 rounded-2xl bg-slate-100 dark:bg-white/5 text-slate-400 mx-auto flex items-center justify-center">
+            <div class="size-12 rounded-2xl bg-slate-100 dark:bg-white/5 text-slate-500 mx-auto flex items-center justify-center">
               <UIcon name="i-lucide-file-question" class="size-6" />
             </div>
             <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">
               Tidak ada dataset yang cocok
             </p>
-            <p class="text-xs text-slate-400">
+            <p class="text-xs text-slate-500">
               Coba gunakan kata kunci pencarian lain atau pilih filter Semua.
             </p>
           </div>
@@ -271,7 +271,7 @@ async function copyEndpoint(item: DatasetItem) {
                     size="xs"
                     color="primary"
                     variant="subtle"
-                    class="text-[10px] px-2 py-0.5 rounded-lg font-mono uppercase"
+                    class="text-xs px-2 py-0.5 rounded-lg font-mono uppercase"
                   />
                   <UBadge
                     v-if="item.source_type === 'geoportal'"
@@ -279,7 +279,7 @@ async function copyEndpoint(item: DatasetItem) {
                     size="xs"
                     color="info"
                     variant="subtle"
-                    class="text-[10px] px-2 py-0.5 rounded-lg font-bold flex items-center gap-1"
+                    class="text-xs px-2 py-0.5 rounded-lg font-bold flex items-center gap-1"
                   >
                     <UIcon name="i-lucide-globe-2" class="size-3" />
                     <span>Geoportal Bojonegoro</span>
@@ -290,7 +290,7 @@ async function copyEndpoint(item: DatasetItem) {
                     size="xs"
                     color="neutral"
                     variant="subtle"
-                    class="text-[10px] px-2 py-0.5 rounded-lg capitalize"
+                    class="text-xs px-2 py-0.5 rounded-lg capitalize"
                   />
                   <UBadge
                     v-if="item.category"
@@ -298,7 +298,7 @@ async function copyEndpoint(item: DatasetItem) {
                     size="xs"
                     color="neutral"
                     variant="outline"
-                    class="text-[10px] px-2 py-0.5 rounded-lg"
+                    class="text-xs px-2 py-0.5 rounded-lg"
                   />
                 </div>
 
@@ -307,28 +307,28 @@ async function copyEndpoint(item: DatasetItem) {
                 </p>
 
                 <!-- Metadata Row Berdasarkan Layer Item Asli -->
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400 pt-0.5">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500 dark:text-slate-400 pt-0.5">
                   <!-- Nama Teknis Layer -->
                   <span v-if="item.layer_name" class="flex items-center gap-1 font-mono text-slate-700 dark:text-slate-300">
-                    <UIcon name="i-lucide-tag" class="size-3.5 text-slate-400 shrink-0" />
+                    <UIcon name="i-lucide-tag" class="size-3.5 text-slate-500 shrink-0" />
                     <span class="truncate max-w-[220px]" :title="item.layer_name">{{ item.layer_name }}</span>
                   </span>
 
                   <!-- Atribusi / Instansi Sumber -->
                   <span v-if="item.instansi || item.attribution || item.agency" class="flex items-center gap-1">
-                    <UIcon name="i-lucide-building-2" class="size-3.5 text-slate-400 shrink-0" />
+                    <UIcon name="i-lucide-building-2" class="size-3.5 text-slate-500 shrink-0" />
                     <span class="truncate max-w-[200px]" :title="item.instansi || item.attribution || item.agency">{{ item.instansi || item.attribution || item.agency }}</span>
                   </span>
 
                   <!-- URL Layanan / Endpoint -->
                   <span v-if="item.url" class="flex items-center gap-1 font-mono text-slate-500">
-                    <UIcon name="i-lucide-link-2" class="size-3.5 text-slate-400 shrink-0" />
+                    <UIcon name="i-lucide-link-2" class="size-3.5 text-slate-500 shrink-0" />
                     <span class="truncate max-w-[220px]" :title="item.url">{{ item.url }}</span>
                   </span>
 
                   <!-- Tanggal Pembaruan -->
-                  <span v-if="item.updated_at" class="flex items-center gap-1 font-mono text-slate-400">
-                    <UIcon name="i-lucide-clock" class="size-3.5 text-slate-400 shrink-0" />
+                  <span v-if="item.updated_at" class="flex items-center gap-1 font-mono text-slate-500">
+                    <UIcon name="i-lucide-clock" class="size-3.5 text-slate-500 shrink-0" />
                     <span>{{ new Date(item.updated_at).toLocaleDateString("id-ID") }}</span>
                   </span>
                 </div>
@@ -364,7 +364,7 @@ async function copyEndpoint(item: DatasetItem) {
 
     <template #footer>
       <div class="flex items-center justify-between w-full">
-        <div class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+        <div class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
           <UIcon name="i-lucide-database" class="size-3.5 text-blue-500" />
           <span>Katalog Satu Data Spasial Pemerintah Kabupaten Bojonegoro</span>
         </div>

@@ -20,20 +20,12 @@ export default defineNuxtConfig({
         ".saggaserv.my.id",
         ".my.id",
       ],
-      proxy: {
-        '/api/geopark/sites': {
-          target: 'https://geopark.bojonegorokab.go.id',
-          changeOrigin: true,
-          secure: false,
-          rewrite: () => '/api/diversity/list-diversity-site-list',
-        },
-      },
     },
     optimizeDeps: {
       include: ['maplibre-gl', 'ol'],
     },
     ssr: {
-      // Externalize maplibre-gl and ol from SSR — they require browser APIs (WebGL, Canvas, DOM)
+      // Externalize maplibre-gl and ol from SSR - they require browser APIs (WebGL, Canvas, DOM)
       external: ['maplibre-gl', 'ol'],
     },
   },
@@ -63,7 +55,10 @@ export default defineNuxtConfig({
       titleTemplate: '%s · Melarosa GIS Bojonegoro',
       meta: [
         { charset: 'utf-8' },
-        { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+        { name: 'viewport', content: 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        { name: 'mobile-web-app-capable', content: 'yes' },
       ],
       link: [
         { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
@@ -213,3 +208,4 @@ export default defineNuxtConfig({
     },
   },
 })
+

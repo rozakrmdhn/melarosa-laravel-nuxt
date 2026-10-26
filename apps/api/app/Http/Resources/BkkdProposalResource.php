@@ -26,6 +26,7 @@ class BkkdProposalResource extends JsonResource
                 'nama' => $this->bidang->nama,
                 'id_opd_default' => $this->bidang->id_opd_default,
             ] : null,
+            'nomor_surat' => $this->nomor_surat_desa,
             'nomor_surat_desa' => $this->nomor_surat_desa,
             'tanggal_surat_desa' => $this->tanggal_surat_desa?->format('Y-m-d'),
             'tanggal_diterima' => $this->tanggal_diterima?->format('Y-m-d'),
@@ -56,6 +57,19 @@ class BkkdProposalResource extends JsonResource
             'creator_name' => $this->creator?->name,
             'updater_name' => $this->updater?->name,
             'penetap_name' => $this->penetap?->name,
+            'total_lampiran' => (int) ($this->total_lampiran ?? ($this->relationLoaded('lampiran') ? $this->lampiran->count() : 0)),
+            'total_lampiran_file' => (int) ($this->total_lampiran_file ?? ($this->relationLoaded('lampiran') ? $this->lampiran->where('tipe_sumber', 'file')->whereNull('url_link')->count() : 0)),
+            'total_lampiran_link' => (int) ($this->total_lampiran_link ?? ($this->relationLoaded('lampiran') ? $this->lampiran->filter(fn ($l) => $l->tipe_sumber === 'link' || !empty($l->url_link))->count() : 0)),
+            'has_lampiran' => $this->relationLoaded('lampiran')
+                ? $this->lampiran->isNotEmpty()
+                : (isset($this->total_lampiran) ? (int) $this->total_lampiran > 0 : false),
+            'cloud_links' => $this->relationLoaded('lampiran')
+                ? $this->lampiran->filter(fn ($l) => $l->tipe_sumber === 'link' || !empty($l->url_link))->map(fn ($l) => [
+                    'id' => $l->id,
+                    'nama' => $l->nama_asli,
+                    'url' => $l->url_link,
+                ])->values()
+                : [],
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
             'deleted_at' => $this->deleted_at?->toIso8601String(),

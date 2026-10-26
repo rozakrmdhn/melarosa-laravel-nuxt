@@ -35,6 +35,7 @@ const props = withDefaults(
     mapCenter?: [number, number] | null;
     mapZoom?: number | null;
     getMapSnapshot?: () => Promise<string | null>;
+    getMapThumbnail?: (options?: any) => Promise<string | null>;
   }>(),
   {
     open: false,
@@ -45,6 +46,7 @@ const props = withDefaults(
     mapCenter: null,
     mapZoom: null,
     getMapSnapshot: undefined,
+    getMapThumbnail: undefined,
   }
 );
 
@@ -291,6 +293,17 @@ function close() {
 // ─── Share State & Options ───────────────────────────────────────────────────
 const RATIO_OPTIONS: AspectRatioOption[] = [
   {
+    id: "landscape",
+    label: "16:9",
+    sublabel: "Lansekap",
+    ratio: "16 / 9",
+    aspectWidth: 16,
+    aspectHeight: 9,
+    width: 1280,
+    height: 720,
+    icon: "i-lucide-monitor",
+  },
+  {
     id: "square",
     label: "1:1",
     sublabel: "Instagram Feed",
@@ -324,17 +337,6 @@ const RATIO_OPTIONS: AspectRatioOption[] = [
     icon: "i-lucide-smartphone",
   },
   {
-    id: "landscape",
-    label: "16:9",
-    sublabel: "Lansekap",
-    ratio: "16 / 9",
-    aspectWidth: 16,
-    aspectHeight: 9,
-    width: 1200,
-    height: 675,
-    icon: "i-lucide-monitor",
-  },
-  {
     id: "banner",
     label: "1.91:1",
     sublabel: "X / FB Post",
@@ -347,7 +349,7 @@ const RATIO_OPTIONS: AspectRatioOption[] = [
   },
 ];
 
-const selectedRatioId = ref("square");
+const selectedRatioId = ref("landscape");
 const selectedRatio = computed(() => {
   return RATIO_OPTIONS.find((r) => r.id === selectedRatioId.value) || RATIO_OPTIONS[0];
 });
@@ -454,10 +456,12 @@ const snapshotDataUrl = ref<string | null>(null);
 const isLoadingSnapshot = ref(false);
 
 async function captureMap() {
-  if (!props.getMapSnapshot) return;
+  if (!props.getMapThumbnail && !props.getMapSnapshot) return;
   isLoadingSnapshot.value = true;
   try {
-    const data = await props.getMapSnapshot();
+    const data = props.getMapThumbnail
+      ? await props.getMapThumbnail({ width: 1280, height: 720, crop16_9: true })
+      : await props.getMapSnapshot!();
     if (data) {
       snapshotDataUrl.value = data;
     }
@@ -1116,7 +1120,7 @@ onUnmounted(() => {
       >
       <!-- Sheet Container -->
       <div
-        class="flex flex-col h-full bg-white dark:bg-[#0b0f19] rounded-t-[24px] border-t border-l border-r border-slate-200/90 dark:border-white/10 shadow-[0_-12px_44px_rgba(15,23,42,0.22)] dark:shadow-[0_-14px_50px_rgba(0,0,0,0.6)] overflow-hidden"
+        class="flex flex-col h-full bg-white/92 dark:bg-[#0b0f19]/92 backdrop-blur-2xl rounded-t-[24px] border-t border-l border-r border-slate-200/90 dark:border-white/10 shadow-[0_-12px_44px_rgba(15,23,42,0.22)] dark:shadow-[0_-14px_50px_rgba(0,0,0,0.6)] overflow-hidden"
       >
         <!-- ── Top Drag Header Area ── -->
         <div
@@ -1372,6 +1376,41 @@ onUnmounted(() => {
                   </span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- ═══ TAUTAN PETA UNTUK BERBAGI (SHARE LINK BAR) ═══ -->
+          <div class="space-y-1 p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/40 shrink-0">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1">
+                <UIcon name="i-lucide-link-2" class="size-3 text-blue-600 dark:text-blue-400" />
+                Tautan Peta (Share Link)
+              </span>
+              <span class="text-[9.5px] text-blue-600 dark:text-blue-400 font-semibold px-1.5 py-0.5 rounded bg-blue-100/80 dark:bg-blue-900/60">
+                Thumbnail 16:9
+              </span>
+            </div>
+
+            <div class="flex items-center gap-1.5">
+              <input
+                :value="currentMapUrl"
+                readonly
+                aria-label="Tautan Peta yang Dibagikan"
+                class="flex-1 h-10 px-2.5 rounded-lg bg-white dark:bg-[#070c18] border border-blue-200 dark:border-blue-800/60 text-[11px] font-mono text-slate-700 dark:text-slate-200 select-all focus:outline-hidden truncate"
+                @focus="($event.target as HTMLInputElement).select()"
+              />
+
+              <button
+                type="button"
+                class="min-h-[44px] px-3.5 rounded-lg font-bold text-xs flex items-center gap-1 transition-all active:scale-95 cursor-pointer shrink-0 shadow-xs"
+                :class="isCopiedLink
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'"
+                @click="handleCopyLink"
+              >
+                <UIcon :name="isCopiedLink ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" />
+                <span>{{ isCopiedLink ? 'Tersalin' : 'Salin' }}</span>
+              </button>
             </div>
           </div>
 

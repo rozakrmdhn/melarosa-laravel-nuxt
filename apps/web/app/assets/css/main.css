@@ -67,19 +67,53 @@
   body {
     overflow-x: hidden;
     height: 100%;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    background-color: #f8fafc;
+  }
+
+  html.dark,
+  body.dark,
+  .dark html,
+  .dark body {
+    background-color: #070b14;
   }
 
   html:has(.fixed.inset-0),
   body:has(.fixed.inset-0) {
     overflow: hidden !important;
+    overscroll-behavior: none !important;
   }
 
   #__nuxt {
     @apply min-h-screen flex flex-col;
+    touch-action: manipulation;
   }
 
-  button, a, [role="button"] {
+  button, a, [role="button"], [role="tab"] {
     @apply transition-colors;
+    touch-action: manipulation;
+  }
+
+  input, select, textarea {
+    touch-action: manipulation;
+  }
+
+  /* Mencegah iOS Safari otomatis zoom in saat fokus pada form input dengan font-size < 16px */
+  @media screen and (max-width: 768px) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Viewport canvas peta: cegah gesture native browser pada canvas OpenLayers */
+  .ol-viewport {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   input[type="checkbox"], input[type="radio"] {

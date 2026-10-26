@@ -170,11 +170,11 @@ function viewMetadata(layer: GeoportalLayerItem) {
           size="xs"
           color="info"
           variant="subtle"
-          class="font-mono text-[10px]"
+          class="font-mono text-xs"
         />
         <button
           type="button"
-          class="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+          class="p-1 rounded-md text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
           title="Muat Ulang Katalog & Status Koneksi"
           @click="handleFullRefresh"
         >
@@ -216,7 +216,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
 
               <!-- Status Pill Lamp -->
               <span
-                class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[9px] font-semibold"
+                class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-xs font-semibold"
                 :class="[
                   connectionStatus?.status === 'online'
                     ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
@@ -254,7 +254,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
                 </span>
               </span>
             </div>
-            <p class="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+            <p class="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
               Pemerintah Kabupaten Bojonegoro
             </p>
           </div>
@@ -263,7 +263,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
         <div class="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white/80 dark:hover:bg-white/10 transition-colors cursor-pointer"
+            class="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white/80 dark:hover:bg-white/10 transition-colors cursor-pointer"
             title="Cek status koneksi"
             :disabled="checkingStatus"
             @click="() => checkConnection(true)"
@@ -274,7 +274,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
             href="https://geoportal.bojonegorokab.go.id"
             target="_blank"
             rel="noopener noreferrer"
-            class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white/80 dark:hover:bg-white/10 transition-colors"
+            class="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white/80 dark:hover:bg-white/10 transition-colors"
             title="Kunjungi Portal Resmi geoportal.bojonegorokab.go.id"
             aria-label="Kunjungi Portal Resmi geoportal.bojonegorokab.go.id"
           >
@@ -284,7 +284,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
       </div>
 
       <!-- Detail chips & actions -->
-      <div class="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-white/5 text-[10px] text-slate-500 dark:text-slate-400 flex-wrap">
+      <div class="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-white/5 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
         <span class="px-1.5 py-0.5 rounded bg-white/80 dark:bg-white/5 font-mono font-medium border border-slate-200/60 dark:border-white/5">CSW 2.0.2</span>
         <span class="px-1.5 py-0.5 rounded bg-white/80 dark:bg-white/5 font-mono font-medium border border-slate-200/60 dark:border-white/5">WMS 1.1.1</span>
         <span
@@ -293,7 +293,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
         >
           {{ connectionStatus.response_time_ms }}ms
         </span>
-        <span class="truncate ml-auto text-[9px] text-slate-400">
+        <span class="truncate ml-auto text-xs text-slate-500">
           Sinkron: {{ formatLastSync(connectionStatus?.last_synced_at) }}
         </span>
 
@@ -301,7 +301,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
         <button
           v-if="canSyncGeoportal"
           type="button"
-          class="w-full mt-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-blue-600 hover:bg-blue-700 active:scale-98 text-white flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs"
+          class="w-full mt-1 px-2 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 active:scale-98 text-white flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs"
           :disabled="syncing"
           title="Sinkronisasi ulang daftar data dari Geoportal secara manual (Khusus Admin)"
           @click="handleQuickSync"
@@ -320,10 +320,10 @@ function viewMetadata(layer: GeoportalLayerItem) {
       <div class="flex items-start gap-2">
         <UIcon name="i-lucide-alert-triangle" class="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
         <div class="min-w-0">
-          <p class="font-bold text-[11px] leading-tight">
+          <p class="font-bold text-xs leading-tight">
             Pemberitahuan: Menggunakan Data Cadangan
           </p>
-          <p class="text-[10px] text-amber-800/90 dark:text-amber-300/90 mt-0.5 leading-relaxed">
+          <p class="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5 leading-relaxed">
             Layanan live Geoportal Bojonegoro sedang mengalami gangguan atau lambat. Melarosa menyajikan data katalog cadangan lokal ({{ connectionStatus?.total_local_layers ?? totalFilteredCount }} layer) agar peta tetap berjalan normal.
           </p>
         </div>
@@ -338,10 +338,10 @@ function viewMetadata(layer: GeoportalLayerItem) {
       <div class="flex items-start gap-2">
         <UIcon name="i-lucide-wifi-off" class="size-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
         <div class="min-w-0">
-          <p class="font-bold text-[11px] leading-tight">
+          <p class="font-bold text-xs leading-tight">
             Koneksi Simpul Jaringan Terputus
           </p>
-          <p class="text-[10px] text-red-800/90 dark:text-red-300/90 mt-0.5 leading-relaxed">
+          <p class="text-xs text-red-800/90 dark:text-red-300/90 mt-0.5 leading-relaxed">
             Tidak dapat menghubungi server Geoportal Bojonegoro. Silakan periksa koneksi internet Anda atau coba periksa kembali status koneksi.
           </p>
         </div>
@@ -352,18 +352,18 @@ function viewMetadata(layer: GeoportalLayerItem) {
     <div class="relative">
       <UIcon
         name="i-heroicons-magnifying-glass"
-        class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-400"
+        class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-500"
       />
       <input
         v-model="searchQuery"
         type="text"
         placeholder="Cari layer Geoportal (batas, jalan, irigasi)..."
-        class="w-full h-8 pl-8 pr-7 rounded-lg bg-slate-50 dark:bg-white/[0.03] border border-slate-200/80 dark:border-white/10 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+        class="w-full h-8 pl-8 pr-7 rounded-lg bg-slate-50 dark:bg-white/[0.03] border border-slate-200/80 dark:border-white/10 text-base sm:text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
       />
       <button
         v-if="searchQuery"
         type="button"
-        class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+        class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
         @click="searchQuery = ''"
       >
         <UIcon name="i-lucide-x" class="size-3" />
@@ -374,7 +374,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
     <div v-if="categories.length > 1" class="flex items-center gap-1 overflow-x-auto pb-1 text-xs no-scrollbar">
       <button
         type="button"
-        class="shrink-0 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer"
+        class="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer"
         :class="selectedCategory === 'ALL'
           ? 'bg-blue-600 text-white font-semibold'
           : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10'"
@@ -386,14 +386,14 @@ function viewMetadata(layer: GeoportalLayerItem) {
         v-for="cat in categories"
         :key="cat.name"
         type="button"
-        class="shrink-0 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+        class="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1"
         :class="selectedCategory === cat.name
           ? 'bg-blue-600 text-white font-semibold'
           : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10'"
         @click="selectedCategory = cat.name"
       >
         <span>{{ cat.name }}</span>
-        <span class="text-[9px] opacity-75 font-semibold tabular-nums">({{ cat.count }})</span>
+        <span class="text-xs opacity-75 font-semibold tabular-nums">({{ cat.count }})</span>
       </button>
     </div>
 
@@ -407,9 +407,9 @@ function viewMetadata(layer: GeoportalLayerItem) {
       v-else-if="Object.keys(filteredGrouped).length === 0"
       class="p-4 rounded-xl border border-dashed border-slate-200 dark:border-white/10 text-center space-y-1.5"
     >
-      <UIcon name="i-lucide-search-x" class="size-5 text-slate-400 mx-auto" />
+      <UIcon name="i-lucide-search-x" class="size-5 text-slate-500 mx-auto" />
       <p class="text-xs font-semibold text-slate-700 dark:text-slate-300">Layer tidak ditemukan</p>
-      <p class="text-[11px] text-slate-400">Coba ubah kata kunci pencarian Anda.</p>
+      <p class="text-xs text-slate-500">Coba ubah kata kunci pencarian Anda.</p>
     </div>
 
     <!-- Accordion Category Groups -->
@@ -428,13 +428,13 @@ function viewMetadata(layer: GeoportalLayerItem) {
           <div class="flex items-center gap-2 min-w-0">
             <UIcon
               :name="expandedCategories[catName] !== false ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-              class="size-3.5 text-slate-400 shrink-0 transition-transform"
+              class="size-3.5 text-slate-500 shrink-0 transition-transform"
             />
             <span class="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
               {{ catName }}
             </span>
           </div>
-          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums bg-slate-200/80 dark:bg-white/10 text-slate-600 dark:text-slate-400 shrink-0">
+          <span class="px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums bg-slate-200/80 dark:bg-white/10 text-slate-600 dark:text-slate-400 shrink-0">
             {{ layers.length }}
           </span>
         </button>
@@ -472,7 +472,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
                   >
                     {{ layer.name }}
                   </p>
-                  <p v-if="layer.opd_name || layer.attribution" class="text-[10px] text-slate-400 truncate mt-0.5">
+                  <p v-if="layer.opd_name || layer.attribution" class="text-xs text-slate-500 truncate mt-0.5">
                     {{ layer.opd_name || layer.attribution }}
                   </p>
                 </div>
@@ -481,7 +481,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
               <!-- Metadata Info Button -->
               <button
                 type="button"
-                class="p-1 rounded-md text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer shrink-0"
+                class="p-1 rounded-md text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer shrink-0"
                 title="Lihat Metadata Resmi"
                 @click="viewMetadata(layer)"
               >
@@ -496,7 +496,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
             >
               <!-- Opacity Slider -->
               <div class="space-y-1">
-                <div class="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                <div class="flex items-center justify-between text-xs font-mono text-slate-500">
                   <span class="flex items-center gap-1">
                     <UIcon name="i-lucide-sliders" class="size-3" />
                     <span>Transparansi</span>
@@ -518,7 +518,7 @@ function viewMetadata(layer: GeoportalLayerItem) {
 
               <!-- Official Legend Graphic -->
               <div v-if="layer.legend_url" class="space-y-1">
-                <span class="text-[10px] font-semibold text-slate-400 flex items-center gap-1">
+                <span class="text-xs font-semibold text-slate-500 flex items-center gap-1">
                   <UIcon name="i-lucide-list" class="size-3" />
                   <span>Simbol Legenda:</span>
                 </span>

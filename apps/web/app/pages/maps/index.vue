@@ -1,22 +1,21 @@
 <script setup lang="ts">
 import MapCanvas, { type BasemapKey } from "~/components/maps/MapCanvas.vue";
 import LeftPanel from "~/components/maps/LeftPanel.vue";
+import { KECAMATAN_ENTRIES, type KecamatanEntry } from "~/constants/kecamatan";
 import BasemapPanel from "~/components/maps/BasemapPanel.vue";
 import MapBasemapBottomSheet from "~/components/maps/MapBasemapBottomSheet.vue";
 import BottomLocationBar from "~/components/maps/BottomLocationBar.vue";
 import MapMobileBottomSheet, { type SnapLevel } from "~/components/maps/MapMobileBottomSheet.vue";
 import MapShareModal from "~/components/maps/MapShareModal.vue";
 import MapShareBottomSheet from "~/components/maps/MapShareBottomSheet.vue";
-import type { ActiveLayerItem } from "~/types/map-layers";
+import type { ActiveLayerItem, MainTab } from "~/types/map-layers";
+import { useGeoparkSites, type GeoparkSite } from "~/composables/useGeoparkSites";
+import type { MapThumbnailOptions } from "~/composables/useMapThumbnail";
+import { parseCoordinateString } from "~/utils/gis-helpers";
 
 definePageMeta({
   layout: false,
   fullBleed: true,
-});
-
-useSeoMeta({
-  title: "Peta Interaktif",
-  description: "Peta spasial interaktif Kabupaten Bojonegoro dengan pencarian lokasi, eksplorasi basemap, dan katalog layer tematik.",
 });
 
 useHead({
@@ -26,6 +25,12 @@ useHead({
   bodyAttrs: {
     class: "overflow-hidden h-full",
   },
+  meta: [
+    {
+      name: "viewport",
+      content: "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover",
+    },
+  ],
 });
 
 const route = useRoute();
@@ -102,7 +107,7 @@ const MARTIN_SPATIAL_BBOX: [number, number, number, number] = [
 const pathView = parseGoogleMapsPath(route.fullPath || route.path);
 const initialCenter = pathView ? pathView.center : null;
 const initialZoom = pathView ? pathView.zoom : parseZoomQuery(route.query.zoom || route.query.z);
-const initialBbox = pathView ? null : (parseBboxQuery(route.query.bbox) || MARTIN_SPATIAL_BBOX);
+const initialBbox = pathView ? null : parseBboxQuery(route.query.bbox);
 
 // Label lokasi pencarian dari parameter URL ?search=... atau ?name=...
 function extractSearchQuery(queryObj: any): string | null {
@@ -169,6 +174,55 @@ const selectedKecamatanFilter = ref<string | null>(null);
 const isShareModalOpen = ref(false);
 const isBasemapBottomSheetOpen = ref(false);
 
+// ─── OpenGraph & Social Share Dynamic Metadata (16:9 Thumbnail Banner) ─────────
+const ogImageUrl = computed(() => {
+  const host = typeof window !== "undefined" ? window.location.origin : "https://melarosa.bojonegorokab.go.id";
+  const center = clickedCoordinate.value || initialCenter || [111.8817, -7.1502];
+  const z = initialZoom || 13.5;
+  const wilayah = selectedKecamatanFilter.value || "";
+  const basemap = currentBasemap.value || "esri";
+  const search = searchedLocationLabel.value || "";
+
+  const params = new URLSearchParams();
+  params.set("lat", center[1].toFixed(5));
+  params.set("lng", center[0].toFixed(5));
+  params.set("z", String(z));
+  if (wilayah) params.set("wilayah", wilayah);
+  if (basemap) params.set("basemap", basemap);
+  if (search) params.set("label", search);
+
+  return `${host}/api/og/map?${params.toString()}`;
+});
+
+const ogPageTitle = computed(() => {
+  if (searchedLocationLabel.value) return `Peta ${searchedLocationLabel.value} · WebGIS Bojonegoro`;
+  if (selectedKecamatanFilter.value) return `Peta Kecamatan ${selectedKecamatanFilter.value} · WebGIS Bojonegoro`;
+  return "Peta Spasial Interaktif Bojonegoro · Melarosa GIS";
+});
+
+const ogPageDescription = computed(() => {
+  if (selectedKecamatanFilter.value) {
+    return `Informasi geospasial resmi Kecamatan ${selectedKecamatanFilter.value}, Kabupaten Bojonegoro: batas wilayah, tata ruang, infrastruktur dan katalog layer tematik.`;
+  }
+  return "Peta spasial interaktif Kabupaten Bojonegoro dengan pencarian lokasi, batas wilayah, eksplorasi basemap, dan katalog layer tematik.";
+});
+
+useSeoMeta({
+  title: () => ogPageTitle.value,
+  description: () => ogPageDescription.value,
+  ogTitle: () => ogPageTitle.value,
+  ogDescription: () => ogPageDescription.value,
+  ogImage: () => ogImageUrl.value,
+  ogImageType: "image/svg+xml",
+  ogImageWidth: 1200,
+  ogImageHeight: 675,
+  ogType: "website",
+  twitterCard: "summary_large_image",
+  twitterTitle: () => ogPageTitle.value,
+  twitterDescription: () => ogPageDescription.value,
+  twitterImage: () => ogImageUrl.value,
+});
+
 // Shared state: lebar sidebar dikirim ke app.vue agar navbar bisa geser
 const mapsSidebarWidth = useState<number>("maps_sidebar_width", () => 0);
 const SIDEBAR_WIDTH = 400;
@@ -208,6 +262,9 @@ function handleMapLoaded() {
   loadingStageText.value = "Peta spasial siap digunakan";
   setTimeout(() => {
     isMapCanvasLoaded.value = true;
+    setTimeout(() => {
+      requestThumbnailUpdate(true);
+    }, 450);
   }, 220);
 }
 
@@ -217,6 +274,7 @@ const mobileDrawerOpen = ref(false);
 const mobileDrawerTab = ref<MobileDrawerTab>("layer");
 const mobileSheetSnap = ref<SnapLevel>("min");
 const isMobileScreen = ref(false);
+const previousTabBeforeIdentify = ref<MainTab | null>(null);
 
 function updateIsMobile() {
   if (typeof window !== "undefined") {
@@ -288,9 +346,37 @@ function handleToggleLeftPanelOrMobileDrawer() {
   toggleLeftPanel();
 }
 
-async function getMapSnapshot(): Promise<string | null> {
+async function getMapSnapshot(options?: { crop16_9?: boolean; width?: number; height?: number }): Promise<string | null> {
   if (!mapCanvasRef.value) return null;
-  return mapCanvasRef.value.getMapSnapshot();
+  return mapCanvasRef.value.getMapSnapshot(options);
+}
+
+async function getMapThumbnail(options?: MapThumbnailOptions): Promise<string | null> {
+  if (!mapCanvasRef.value) return null;
+  return mapCanvasRef.value.getMapThumbnail(options);
+}
+
+const isCartoGridActive = ref(false);
+
+function handleToggleCartoGrid() {
+  if (mapCanvasRef.value?.toggleCartoGrid) {
+    isCartoGridActive.value = Boolean(mapCanvasRef.value.toggleCartoGrid());
+  } else {
+    isCartoGridActive.value = !isCartoGridActive.value;
+  }
+}
+
+function handleFitKabupaten() {
+  handleFilterWilayah(null);
+  if (isMobileScreen.value && mobileSheetSnap.value !== "min") {
+    mobileSheetSnap.value = "min";
+  }
+  mapCanvasRef.value?.fitBbox(
+    MARTIN_SPATIAL_BBOX,
+    15,
+    550,
+    isMobileScreen.value ? "min" : undefined
+  );
 }
 
 function handleOpenShare() {
@@ -367,6 +453,7 @@ function mapLayerItemToActive(item: any): ActiveLayerItem {
     martinSource: isMvt ? (detectedMartinSource || (isKabupaten ? "bataswilayah_kabupaten" : isSegmen ? "infrastruktur_segmen" : "jalan_porosdesa")) : undefined,
     expanded: false,
     activeTool: "none",
+    disableIdentify: isKabupaten || Boolean(item.disableIdentify),
     geoportal_id: item.geoportal_id,
     category: item.category,
     opd_name: item.opd_name,
@@ -434,6 +521,7 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
     opacity: 1,
     expanded: false,
     activeTool: "none",
+    disableIdentify: true,
     order: 13,
   },
 ];
@@ -595,21 +683,38 @@ watch(
     if (!import.meta.client) return;
     const pv = parseGoogleMapsPath(newFullPath);
     const searchLabel = extractSearchQuery(route.query);
-    if (pv && (searchLabel || route.query.pin)) {
+    // Filter layer MVT jika terdapat parameter kecamatan atau nama pencarian kecamatan
+    const targetKecParam = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
+      ? route.query.kecamatan.trim()
+      : (searchLabel
+          ? (/^kecamatan\s+/i.test(searchLabel)
+              ? searchLabel.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
+              : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchLabel.toLowerCase())?.name || null))
+          : null);
+
+    const parsedCoords = searchLabel ? parseCoordinateString(searchLabel) : null;
+
+    if (targetKecParam) {
+      handleFilterWilayah(targetKecParam);
+      const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === targetKecParam.toLowerCase());
+      if (matched && matched.bbox) {
+        mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
+        clickedCoordinate.value = null;
+        mapCanvasRef.value?.dismissPulse?.();
+        searchedLocationLabel.value = `Kecamatan ${matched.name}`;
+      }
+    } else if (pv && (searchLabel || route.query.pin)) {
       clickedCoordinate.value = pv.center;
       searchedLocationLabel.value = searchLabel;
       mapCanvasRef.value?.flyTo(pv.center, pv.zoom || 14);
       locationBarOpen.value = true;
       mobileDrawerOpen.value = false;
-    }
-
-    // Filter layer MVT jika terdapat parameter kecamatan atau nama pencarian kecamatan
-    const targetKecParam = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
-      ? route.query.kecamatan.trim()
-      : (searchLabel && /^kecamatan\s+/i.test(searchLabel) ? searchLabel.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim() : null);
-
-    if (targetKecParam) {
-      handleFilterWilayah(targetKecParam);
+    } else if (parsedCoords) {
+      clickedCoordinate.value = [parsedCoords.lng, parsedCoords.lat];
+      searchedLocationLabel.value = `Koordinat: ${parsedCoords.formatted}`;
+      mapCanvasRef.value?.flyTo([parsedCoords.lng, parsedCoords.lat], 16);
+      locationBarOpen.value = true;
+      mobileDrawerOpen.value = false;
     }
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -657,14 +762,31 @@ onMounted(async () => {
   // Filter layer MVT pada inisialisasi jika query kecamatan tersedia
   const initialKec = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
     ? route.query.kecamatan.trim()
-    : (searchedLocationLabel.value && /^kecamatan\s+/i.test(searchedLocationLabel.value)
-        ? searchedLocationLabel.value.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
+    : (searchedLocationLabel.value
+        ? (/^kecamatan\s+/i.test(searchedLocationLabel.value)
+            ? searchedLocationLabel.value.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
+            : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchedLocationLabel.value!.toLowerCase())?.name || null))
         : null);
+  const initialCoord = searchedLocationLabel.value ? parseCoordinateString(searchedLocationLabel.value) : null;
   if (initialKec) {
     handleFilterWilayah(initialKec);
+    const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === initialKec.toLowerCase());
+    if (matched && matched.bbox && !route.query.bbox) {
+      setTimeout(() => {
+        mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
+        clickedCoordinate.value = null;
+        mapCanvasRef.value?.dismissPulse?.();
+      }, 350);
+    }
+  } else if (initialCoord && !pathView) {
+    setTimeout(() => {
+      clickedCoordinate.value = [initialCoord.lng, initialCoord.lat];
+      mapCanvasRef.value?.flyTo([initialCoord.lng, initialCoord.lat], 16);
+      locationBarOpen.value = true;
+    }, 350);
   }
 
-  // Pastikan fitbound by data spasial Martin saat pertama kali dibuka (tanpa url search/pin/coord)
+  // Fitbound awal hanya jika data spasial Martin mengembalikan bounds; tanpa objek, kamera tidak digeser
   if (!pathView && !route.query.bbox && !hasExplicitSearchOrPin) {
     try {
       const [segmenRes, jalanRes] = await Promise.allSettled([
@@ -673,7 +795,7 @@ onMounted(async () => {
       ]);
       const b1 = segmenRes.status === "fulfilled" ? segmenRes.value?.bounds : null;
       const b2 = jalanRes.status === "fulfilled" ? jalanRes.value?.bounds : null;
-      let targetBbox = MARTIN_SPATIAL_BBOX;
+      let targetBbox: [number, number, number, number] | null = null;
       if (Array.isArray(b1) && Array.isArray(b2) && b1.length === 4 && b2.length === 4) {
         targetBbox = [
           Math.min(b1[0], b2[0]),
@@ -686,14 +808,13 @@ onMounted(async () => {
       } else if (Array.isArray(b2) && b2.length === 4) {
         targetBbox = b2 as [number, number, number, number];
       }
-      nextTick(() => {
-        mapCanvasRef.value?.fitBbox(targetBbox, 15, 600);
-      });
-    } catch {
-      nextTick(() => {
-        mapCanvasRef.value?.fitBbox(MARTIN_SPATIAL_BBOX, 15, 600);
-      });
-    }
+      if (targetBbox) {
+        const bbox = targetBbox;
+        nextTick(() => {
+          mapCanvasRef.value?.fitBbox(bbox, 15, 600);
+        });
+      }
+    } catch {}
   }
 });
 
@@ -709,6 +830,16 @@ function handleMapClick(coordinate: [number, number]) {
   searchedLocationLabel.value = null;
   identifiedFeatures.value = [];
   locationBarOpen.value = true;
+
+  // Bersihkan highlight trayek lama seketika saat titik baru diklik
+  mapCanvasRef.value?.renderSelectedFeature?.(null);
+
+  // Simpan tab sebelumnya jika pengguna sedang membuka tab selain 'layers' (Peta)
+  if (currentMainTab.value !== "layers") {
+    previousTabBeforeIdentify.value = currentMainTab.value;
+  }
+  handleTabChange("layers");
+
   if (typeof window !== "undefined" && window.innerWidth < 768) {
     // Mobile: buka bottom sheet di tab layer ke posisi peek (50% vh) agar hasil identifikasi fitur langsung tampak
     mobileDrawerTab.value = "layer";
@@ -718,20 +849,31 @@ function handleMapClick(coordinate: [number, number]) {
     // Desktop: pastikan panel kiri terbuka
     leftPanelOpen.value = true;
   }
+  // Fitbound dihandle tunggal secara definitif di handleIdentifyFeatures setelah data siap
+}
+
+function handleCanvasTapDismiss() {
+  if (typeof window !== "undefined" && window.innerWidth < 768) {
+    mobileSheetSnap.value = "min";
+    if (locationBarOpen.value) {
+      handleCloseInspector();
+    }
+  }
 }
 
 function handleSelectLocation(payload: { name: string; coordinate: [number, number]; zoom?: number }) {
   clickedCoordinate.value = payload.coordinate;
   searchedLocationLabel.value = payload.name;
-  mapCanvasRef.value?.flyTo(payload.coordinate, payload.zoom ?? 14);
   locationBarOpen.value = true;
   if (typeof window !== "undefined" && window.innerWidth < 768) {
     mobileDrawerTab.value = "layer";
     mobileSheetSnap.value = "peek";
     mobileDrawerOpen.value = true;
+    mapCanvasRef.value?.fitCoordinateWithPadding(payload.coordinate, payload.zoom ?? 15, 500, "peek");
   } else {
     leftPanelOpen.value = true;
     mobileDrawerOpen.value = false;
+    mapCanvasRef.value?.fitCoordinateWithPadding(payload.coordinate, payload.zoom ?? 15, 500);
   }
 
   // Sinkronkan query parameter ?search= ke URL browser dan pastikan basemap aktif tetap terjaga
@@ -745,11 +887,43 @@ function handleSelectLocation(payload: { name: string; coordinate: [number, numb
   }
 }
 
-function handleSelectKecamatan(payload: { name: string; coordinate: [number, number]; zoom?: number }) {
-  mapCanvasRef.value?.flyTo(payload.coordinate, payload.zoom ?? 13.5);
-  // Simpan koordinat dan label wilayah tanpa membuka paksa inspector agar SearchItemAboutView tetap aktif
-  clickedCoordinate.value = payload.coordinate;
+function handleSelectKecamatan(payload: {
+  name: string;
+  coordinate: [number, number];
+  zoom?: number;
+  bbox?: [number, number, number, number];
+  isKecamatan?: boolean;
+}) {
+  const cleanKecName = payload.name.replace(/^Kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim().toLowerCase();
+  const matchedKec = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === cleanKecName);
+  const targetBbox = payload.bbox || matchedKec?.bbox;
+  const isKec = payload.isKecamatan || !!matchedKec || !!payload.bbox;
+
+  if (isKec && targetBbox) {
+    mapCanvasRef.value?.fitBbox(
+      targetBbox,
+      payload.zoom ?? 14,
+      500,
+      isMobileScreen.value ? "peek" : undefined
+    );
+    // Peniadaan marker pin: pencarian wilayah kecamatan adalah inspeksi area, bukan titik penanda
+    clickedCoordinate.value = null;
+    mapCanvasRef.value?.dismissPulse?.();
+  } else {
+    mapCanvasRef.value?.fitCoordinateWithPadding(
+      payload.coordinate,
+      payload.zoom ?? 13.5,
+      500,
+      isMobileScreen.value ? "peek" : undefined
+    );
+    clickedCoordinate.value = payload.coordinate;
+  }
+
   searchedLocationLabel.value = payload.name;
+  if (isMobileScreen.value) {
+    mobileSheetSnap.value = "peek";
+    mobileDrawerOpen.value = true;
+  }
 }
 
 function extractNamobj(props: Record<string, any> | undefined): string | null {
@@ -782,17 +956,59 @@ function extractNamobj(props: Record<string, any> | undefined): string | null {
   return null;
 }
 
+function isIgnoredIdentifyFeature(f: IdentifiedFeature): boolean {
+  if (!f) return true;
+  const layerId = String(f.layerId || "").toLowerCase();
+  const layerTitle = String(f.layerTitle || "").toLowerCase();
+  return (
+    layerId.includes("bataswilayah_kabupaten") ||
+    layerTitle.includes("bataswilayah_kabupaten") ||
+    layerTitle.includes("batas wilayah kabupaten")
+  );
+}
+
 function handleIdentifyFeatures(features: IdentifiedFeature[]) {
-  identifiedFeatures.value = features;
-  if (features && features.length > 0) {
-    if (features[0].coordinate) {
-      clickedCoordinate.value = features[0].coordinate;
+  const filtered = (features || []).filter((f) => !isIgnoredIdentifyFeature(f));
+  identifiedFeatures.value = filtered;
+  if (filtered.length > 0) {
+    const topFeature = filtered[0];
+    if (topFeature.coordinate) {
+      clickedCoordinate.value = topFeature.coordinate;
     }
-    const namobj = extractNamobj(features[0].properties);
+    const namobj = extractNamobj(topFeature.properties);
     if (namobj) {
       searchedLocationLabel.value = namobj;
     }
     locationBarOpen.value = true;
+    if (isMobileScreen.value) {
+      mobileDrawerTab.value = "layer";
+      mobileSheetSnap.value = "peek";
+      mobileDrawerOpen.value = true;
+    }
+
+    // Pasang highlight style trayek UI modern untuk fitur teratas
+    mapCanvasRef.value?.renderSelectedFeature?.(topFeature);
+
+    // SATU KALI FITBOUND TUNGGAL:
+    // Prioritaskan extent geometri fitur teratas layer aktif agar tidak terjadi pergeseran kamera ganda
+    if (topFeature.extent) {
+      mapCanvasRef.value?.fitFeatureExtent(
+        topFeature.extent,
+        undefined,
+        550,
+        isMobileScreen.value ? "peek" : undefined
+      );
+    } else if (clickedCoordinate.value) {
+      mapCanvasRef.value?.fitCoordinateWithPadding(
+        clickedCoordinate.value,
+        undefined,
+        500,
+        isMobileScreen.value ? "peek" : undefined
+      );
+    }
+  } else {
+    // Klik area kosong: tidak ada objek fitur, kamera tidak digeser
+    mapCanvasRef.value?.renderSelectedFeature?.(null);
   }
 }
 
@@ -800,6 +1016,31 @@ function handleSelectFeature(feature: IdentifiedFeature) {
   const namobj = extractNamobj(feature?.properties);
   if (namobj) {
     searchedLocationLabel.value = namobj;
+  }
+
+  // Update highlight style trayek UI modern sesuai fitur yang dipilih dari daftar
+  mapCanvasRef.value?.renderSelectedFeature?.(feature);
+
+  if (isMobileScreen.value) {
+    mobileDrawerTab.value = "layer";
+    mobileSheetSnap.value = "peek";
+    mobileDrawerOpen.value = true;
+  }
+
+  if (feature?.extent) {
+    mapCanvasRef.value?.fitFeatureExtent(
+      feature.extent,
+      undefined,
+      500,
+      isMobileScreen.value ? "peek" : undefined
+    );
+  } else if (feature?.coordinate) {
+    mapCanvasRef.value?.fitCoordinateWithPadding(
+      feature.coordinate,
+      undefined,
+      450,
+      isMobileScreen.value ? "peek" : undefined
+    );
   }
 }
 
@@ -810,6 +1051,7 @@ function handleClearPin() {
   searchedLocationLabel.value = null;
   identifiedFeatures.value = [];
   locationBarOpen.value = false;
+  mapCanvasRef.value?.renderSelectedFeature?.(null);
   if (import.meta.client) {
     const url = new URL(window.location.href);
     url.searchParams.delete("search");
@@ -828,6 +1070,18 @@ function handleCloseInspector() {
     searchedLocationLabel.value = null;
     identifiedFeatures.value = [];
     mapCanvasRef.value?.dismissPulse?.();
+    mapCanvasRef.value?.renderSelectedFeature?.(null);
+
+    // Otomatis kembalikan ke tab sebelumnya (Dataset atau Geopark) saat inspector ditutup
+    if (previousTabBeforeIdentify.value) {
+      const prev = previousTabBeforeIdentify.value;
+      previousTabBeforeIdentify.value = null;
+      handleTabChange(prev);
+      if (isMobileScreen.value) {
+        mobileDrawerTab.value = prev === "geopark" ? "geopark" : prev === "dataset" ? "dataset" : "layer";
+      }
+    }
+
     if (import.meta.client) {
       const url = new URL(window.location.href);
       url.searchParams.delete("search");
@@ -853,23 +1107,268 @@ function handleInspectorAfterLeave() {
   }
 }
 
+const mobileLeftPanelRef = ref<any>(null);
+const desktopLeftPanelRef = ref<any>(null);
+
+const { sites: geoparkSites } = useGeoparkSites();
+
+function getGeoparkSiteSlug(site: GeoparkSite): string {
+  if (!site) return "";
+  const name = site.name || site.title || "";
+  const clean = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return clean || site.code.toLowerCase() || site.id;
+}
+
+function findGeoparkSiteBySlugOrId(querySite: string, list: GeoparkSite[]): GeoparkSite | null {
+  if (!querySite || !list.length) return null;
+  const q = String(querySite).trim().toLowerCase();
+  return list.find((s) => {
+    if (s.id.toLowerCase() === q) return true;
+    if (s.code.toLowerCase() === q) return true;
+    const slug = s.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (slug === q) return true;
+    if (s.name.toLowerCase() === q) return true;
+    if (s.title.toLowerCase() === q) return true;
+    return false;
+  }) || null;
+}
+
+function updateMapQuery(newParams: Record<string, string | null | undefined>, replace = false) {
+  const current = { ...route.query };
+  let changed = false;
+
+  for (const [k, v] of Object.entries(newParams)) {
+    if (v === null || v === undefined || v === "") {
+      if (k in current) {
+        delete current[k];
+        changed = true;
+      }
+    } else if (current[k] !== String(v)) {
+      current[k] = String(v);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    if (replace) {
+      router.replace({ query: current });
+    } else {
+      router.push({ query: current });
+    }
+  }
+}
+
+// Active Tab derived directly from route.query.tab (Single source of truth)
+const currentMainTab = computed<MainTab>(() => {
+  const raw = String(route.query.tab || "").toLowerCase();
+  if (raw === "geopark") return "geopark";
+  if (raw === "dataset" || raw === "geoportal") return "dataset";
+  return "layers";
+});
+
+const selectedGeoparkSite = computed<GeoparkSite | null>(() => {
+  if (currentMainTab.value !== "geopark" || !route.query.site) return null;
+  return findGeoparkSiteBySlugOrId(String(route.query.site), geoparkSites.value);
+});
+
+function handleTabChange(tab: MainTab) {
+  if (tab !== "layers") {
+    previousTabBeforeIdentify.value = null;
+  }
+  const queryTab = tab === "layers" ? undefined : tab;
+  updateMapQuery({
+    tab: queryTab,
+    site: undefined,
+    layer: undefined,
+  });
+}
+
+function handleMobileTabClick(tab: MobileDrawerTab) {
+  if (locationBarOpen.value) {
+    locationBarOpen.value = false;
+    clickedCoordinate.value = null;
+    searchedLocationLabel.value = null;
+    identifiedFeatures.value = [];
+    mapCanvasRef.value?.dismissPulse?.();
+  }
+  previousTabBeforeIdentify.value = null;
+  mobileDrawerTab.value = tab;
+  if (mobileSheetSnap.value === "min") {
+    mobileSheetSnap.value = "peek";
+  }
+  const mainTab: MainTab =
+    tab === "geopark"
+      ? "geopark"
+      : tab === "dataset" || tab === "geoportal"
+        ? "dataset"
+        : "layers";
+  handleTabChange(mainTab);
+  mobileLeftPanelRef.value?.resetSubViews(mainTab);
+  desktopLeftPanelRef.value?.resetSubViews(mainTab);
+}
+
 function openMobileTab(tab: MobileDrawerTab) {
   mobileDrawerTab.value = tab;
   mobileSheetSnap.value = "peek";
   mobileDrawerOpen.value = true;
+  const mainTab: MainTab =
+    tab === "geopark"
+      ? "geopark"
+      : tab === "dataset" || tab === "geoportal"
+        ? "dataset"
+        : "layers";
+  handleTabChange(mainTab);
+  mobileLeftPanelRef.value?.resetSubViews(mainTab);
+  desktopLeftPanelRef.value?.resetSubViews(mainTab);
+}
+
+function handleOpenLayerDetail(layerId: string) {
+  updateMapQuery({
+    tab: undefined,
+    layer: layerId,
+  });
+  if (isMobileScreen.value) {
+    mobileDrawerTab.value = "layer";
+    mobileDrawerOpen.value = true;
+    if (mobileSheetSnap.value === "min") {
+      mobileSheetSnap.value = "peek";
+    }
+  }
+}
+
+function handleCloseLayerDetail() {
+  updateMapQuery({ layer: undefined });
+}
+
+function handleOpenGeoparkDetail(site: GeoparkSite) {
+  const slug = getGeoparkSiteSlug(site);
+  updateMapQuery({
+    tab: "geopark",
+    site: slug,
+  });
+  if (isMobileScreen.value) {
+    mobileDrawerTab.value = "geopark";
+    mobileSheetSnap.value = "peek";
+    mobileDrawerOpen.value = true;
+  }
+}
+
+function handleCloseGeoparkDetail() {
+  updateMapQuery({ site: undefined });
 }
 
 function handleMobileSearchFocus() {
-  if (mobileDrawerOpen.value && mobileSheetSnap.value === "min") {
-    mobileSheetSnap.value = "peek";
+  if (isMobileScreen.value) {
+    mobileDrawerOpen.value = true;
+    mobileSheetSnap.value = "full";
+  } else if (mobileDrawerOpen.value) {
+    mobileSheetSnap.value = "full";
+  }
+  if (typeof window !== "undefined") {
+    window.scrollTo(0, 0);
   }
 }
 
 function handleMobileSearchClose() {
-  if (mobileDrawerOpen.value && !locationBarOpen.value && mobileSheetSnap.value === "peek") {
-    mobileSheetSnap.value = "min";
+  if (typeof window !== "undefined") {
+    window.scrollTo(0, 0);
   }
 }
+
+function applyRouteQueryToViews() {
+  const q = route.query;
+  const rawTab = String(q.tab || "").toLowerCase();
+  const mainTab: MainTab =
+    rawTab === "geopark"
+      ? "geopark"
+      : rawTab === "dataset" || rawTab === "geoportal"
+        ? "dataset"
+        : "layers";
+
+  mobileDrawerTab.value =
+    mainTab === "geopark"
+      ? "geopark"
+      : mainTab === "dataset"
+        ? "dataset"
+        : "layer";
+
+  // Check sub-views
+  if (mainTab === "geopark" && q.site) {
+    const matched = findGeoparkSiteBySlugOrId(String(q.site), geoparkSites.value);
+    if (matched) {
+      desktopLeftPanelRef.value?.openGeoparkDetail(matched);
+      mobileLeftPanelRef.value?.openGeoparkDetail(matched);
+      if (isMobileScreen.value) {
+        mobileDrawerTab.value = "geopark";
+        mobileSheetSnap.value = "peek";
+        mobileDrawerOpen.value = true;
+      }
+    }
+  } else if (!q.site) {
+    desktopLeftPanelRef.value?.closeGeoparkDetail();
+    mobileLeftPanelRef.value?.closeGeoparkDetail();
+  }
+
+  if (mainTab === "layers" && q.layer) {
+    desktopLeftPanelRef.value?.openLayerDetail(String(q.layer));
+    mobileLeftPanelRef.value?.openLayerDetail(String(q.layer));
+    if (isMobileScreen.value) {
+      mobileDrawerTab.value = "layer";
+      mobileDrawerOpen.value = true;
+      if (mobileSheetSnap.value === "min") {
+        mobileSheetSnap.value = "peek";
+      }
+    }
+  } else if (!q.layer) {
+    desktopLeftPanelRef.value?.closeLayerDetail();
+    mobileLeftPanelRef.value?.closeLayerDetail();
+  }
+
+  if (q.wilayah) {
+    const matchedKec = KECAMATAN_ENTRIES.find(
+      (k) => k.name.toLowerCase() === String(q.wilayah).toLowerCase()
+    );
+    if (matchedKec && selectedKecamatanFilter.value !== matchedKec.name) {
+      selectedKecamatanFilter.value = matchedKec.name;
+      if (isMobileScreen.value) {
+        mobileSheetSnap.value = "peek";
+        mobileDrawerOpen.value = true;
+      }
+    }
+  } else if (!q.wilayah && selectedKecamatanFilter.value) {
+    selectedKecamatanFilter.value = null;
+  }
+}
+
+watch(
+  () => route.query,
+  () => {
+    applyRouteQueryToViews();
+  },
+  { deep: true }
+);
+
+watch(
+  () => geoparkSites.value,
+  (list) => {
+    if (list.length && route.query.site && route.query.tab === "geopark") {
+      const matched = findGeoparkSiteBySlugOrId(String(route.query.site), list);
+      if (matched) {
+        desktopLeftPanelRef.value?.openGeoparkDetail(matched);
+        mobileLeftPanelRef.value?.openGeoparkDetail(matched);
+      }
+    }
+  }
+);
+
+onMounted(() => {
+  setTimeout(() => {
+    applyRouteQueryToViews();
+  }, 120);
+});
 
 function toggleLeftPanel() {
   leftPanelOpen.value = !leftPanelOpen.value;
@@ -879,7 +1378,13 @@ function handleZoomToLayer(layer: ActiveLayerItem) {
   if (layer.coordinates) {
     clickedCoordinate.value = layer.coordinates;
     searchedLocationLabel.value = layer.title;
-    mapCanvasRef.value?.flyTo(layer.coordinates, layer.zoom || 12);
+    if (isMobileScreen.value) {
+      mapCanvasRef.value?.fitCoordinateWithPadding(layer.coordinates, layer.zoom || 12, 500, "peek");
+      mobileSheetSnap.value = "peek";
+      mobileDrawerOpen.value = true;
+    } else {
+      mapCanvasRef.value?.flyTo(layer.coordinates, layer.zoom || 12);
+    }
     locationBarOpen.value = true;
     if (!isMobileScreen.value) {
       leftPanelOpen.value = true;
@@ -916,6 +1421,15 @@ function handleUpdateLayerFilter(payload: { layerId: string; kecamatan: string |
 
 function handleFilterWilayah(kecamatanName: string | null) {
   selectedKecamatanFilter.value = kecamatanName;
+  updateMapQuery({ wilayah: kecamatanName || undefined });
+  if (isMobileScreen.value && kecamatanName) {
+    mobileSheetSnap.value = "peek";
+    mobileDrawerOpen.value = true;
+  }
+  if (kecamatanName) {
+    clickedCoordinate.value = null;
+    mapCanvasRef.value?.dismissPulse?.();
+  }
   activeLayers.value = activeLayers.value.map((layer) => {
     const isMvt =
       (layer.protocol || "").toUpperCase() === "MVT" ||
@@ -965,6 +1479,8 @@ function handleSelectDataset(dataset: any) {
       aria-label="Panel Navigasi Spasial Kiri"
     >
       <LeftPanel
+        ref="desktopLeftPanelRef"
+        :active-tab="currentMainTab"
         :active-layers="activeLayers"
         :selected-kecamatan-filter="selectedKecamatanFilter"
         :clicked-coordinate="clickedCoordinate"
@@ -972,6 +1488,11 @@ function handleSelectDataset(dataset: any) {
         :identified-features="identifiedFeatures"
         :is-identifying="isIdentifyingFeatures"
         :inspector-open="locationBarOpen"
+        @tab-change="handleTabChange"
+        @open-layer-detail="handleOpenLayerDetail"
+        @close-layer-detail="handleCloseLayerDetail"
+        @open-geopark-detail="handleOpenGeoparkDetail"
+        @close-geopark-detail="handleCloseGeoparkDetail"
         @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView()"
         @select-kecamatan="handleSelectKecamatan"
         @filter-wilayah="handleFilterWilayah"
@@ -1006,7 +1527,12 @@ function handleSelectDataset(dataset: any) {
           :active-layers="activeLayers"
           :mobile-drawer-open="mobileDrawerOpen"
           :mobile-sheet-snap="mobileSheetSnap"
+          :active-tab="currentMainTab"
+          :selected-geopark-site="selectedGeoparkSite"
+          :geopark-sites="currentMainTab === 'geopark' ? geoparkSites : []"
+          @select-geopark="handleOpenGeoparkDetail"
           @map-click="handleMapClick"
+          @canvas-tap-dismiss="handleCanvasTapDismiss"
           @identify-features="handleIdentifyFeatures"
           @identifying-features="isIdentifyingFeatures = $event"
           @update:viewport="handleViewportUpdate"
@@ -1101,19 +1627,55 @@ function handleSelectDataset(dataset: any) {
         </div>
       </Transition>
 
-      <!-- Floating Basemap Panel (Kiri Bawah di dalam Kanvas Peta) -->
+      <!-- Floating Display & Layer Group (Kiri Bawah di dalam Kanvas Peta) -->
       <div
-        class="absolute z-20 pointer-events-auto select-none flex flex-col items-start gap-2 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-3 sm:left-4"
+        class="absolute z-20 pointer-events-auto select-none flex flex-col items-start gap-1.5 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-3 sm:left-4"
         :class="[
           mobileDrawerOpen && mobileSheetSnap === 'full'
             ? 'opacity-0 pointer-events-none translate-y-4 md:opacity-100 md:pointer-events-auto md:translate-y-0 md:bottom-4'
             : mobileDrawerOpen && mobileSheetSnap === 'peek'
               ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4'
               : mobileDrawerOpen && mobileSheetSnap === 'min'
-                ? 'bottom-[calc(200px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
+                ? 'bottom-[calc(150px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
                 : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
         ]"
       >
+        <!-- Stack Tombol Utilitas (Fitbound Batas Kabupaten & Grid Kartografi) diletakkan di atas Basemap -->
+        <div
+          class="flex flex-col w-11 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-gray-200/90 dark:border-gray-800 rounded-lg sm:rounded-xl shadow-md hover:shadow-lg transition-all duration-200 overflow-hidden"
+        >
+          <!-- Tombol Fitbound ke Default Batas Wilayah Kabupaten Bojonegoro -->
+          <UTooltip text="Pusatkan ke Batas Wilayah Kabupaten Bojonegoro">
+            <button
+              type="button"
+              class="w-full h-11 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100/80 dark:hover:bg-slate-800/80 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 active:scale-90"
+              aria-label="Pusatkan ke Batas Wilayah Kabupaten Bojonegoro"
+              @click="handleFitKabupaten"
+            >
+              <UIcon name="i-lucide-maximize" class="size-4 stroke-[2.25]" />
+            </button>
+          </UTooltip>
+
+          <div class="w-full h-px bg-gray-200/80 dark:bg-slate-800" aria-hidden="true" />
+
+          <!-- Tombol Toggle Grid Kartografi & Koordinat Tepi (di atas toggle basemap) -->
+          <UTooltip :text="isCartoGridActive ? 'Sembunyikan Grid Kartografi & Koordinat' : 'Tampilkan Grid Kartografi & Koordinat Tepi'">
+            <button
+              type="button"
+              class="w-full h-11 min-h-[44px] min-w-[44px] flex items-center justify-center transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 active:scale-90"
+              :class="isCartoGridActive
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/70 dark:bg-blue-950/50 hover:bg-blue-100/70 dark:hover:bg-blue-900/50'
+                : 'text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100/80 dark:hover:bg-slate-800/80'"
+              :aria-pressed="isCartoGridActive"
+              aria-label="Toggle Grid Kartografi & Koordinat Tepi"
+              @click="handleToggleCartoGrid"
+            >
+              <UIcon name="i-lucide-grid-3x3" class="size-4 stroke-[2.25]" />
+            </button>
+          </UTooltip>
+        </div>
+
+        <!-- Basemap Panel (di bawah Grid Kartografi) -->
         <BasemapPanel
           v-model:current-basemap="currentBasemap"
           :is-mobile="isMobileScreen"
@@ -1129,48 +1691,49 @@ function handleSelectDataset(dataset: any) {
     <MapMobileBottomSheet
       v-model:open="mobileDrawerOpen"
       v-model:snap="mobileSheetSnap"
+      @backdrop-click="handleCanvasTapDismiss"
       :title="
-        mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
-          ? 'Katalog Dataset'
-          : mobileDrawerTab === 'geopark'
-            ? 'Geopark Bojonegoro'
-            : locationBarOpen && clickedCoordinate
-              ? 'Identifikasi Fitur'
+        locationBarOpen && clickedCoordinate
+          ? 'Identifikasi Fitur'
+          : mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+            ? 'Katalog Dataset'
+            : mobileDrawerTab === 'geopark'
+              ? 'Geopark Bojonegoro'
               : 'Panel Lapisan Peta'
       "
       :subtitle="
-        mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
-          ? 'Katalog Layer Resmi JIGN Bojonegoro'
-          : mobileDrawerTab === 'geopark'
-            ? 'Warisan Geologi, Hayati & Cagar Alam'
-            : locationBarOpen && clickedCoordinate
-              ? (searchedLocationLabel || `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`)
+        locationBarOpen && clickedCoordinate
+          ? (searchedLocationLabel || `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`)
+          : mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+            ? 'Katalog Layer Resmi JIGN Bojonegoro'
+            : mobileDrawerTab === 'geopark'
+              ? 'Warisan Geologi, Hayati & Cagar Alam'
               : `${activeLayers.length} Layer Aktif · Bojonegoro`
       "
       :icon="
-        mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
-          ? 'i-lucide-database'
-          : mobileDrawerTab === 'geopark'
-            ? 'i-lucide-mountain-snow'
-            : locationBarOpen
-              ? 'i-lucide-crosshair'
+        locationBarOpen && clickedCoordinate
+          ? 'i-lucide-crosshair'
+          : mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+            ? 'i-lucide-database'
+            : mobileDrawerTab === 'geopark'
+              ? 'i-lucide-mountain-snow'
               : 'i-lucide-layers'
       "
     >
-      <!-- Tab Switcher: 3 tab teks murni radius 100% tanpa garis atas/bawah -->
+      <!-- Tab Switcher: 3 tab teks murni radius 100% tanpa garis atas/bawah & tombol quick share -->
       <template #tabs>
-        <div class="px-2.5 sm:px-3 pt-2 pb-1.5 bg-slate-50/70 dark:bg-[#070b14]/50">
-          <div class="grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10" role="tablist" aria-label="Navigasi Panel Mobile">
+        <div class="px-2.5 sm:px-3 pt-1 pb-1.5 bg-transparent flex items-center gap-1.5">
+          <div class="flex-1 grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10" role="tablist" aria-label="Navigasi Panel Mobile">
             <!-- Tab 1: Peta -->
             <button
               type="button"
               role="tab"
-              :aria-selected="mobileDrawerTab === 'layer'"
-              class="py-2 px-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
-              :class="mobileDrawerTab === 'layer'
+              :aria-selected="currentMainTab === 'layers'"
+              class="py-2 px-2 rounded-full text-sm sm:text-base font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              :class="currentMainTab === 'layers'
                 ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'layer'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+              @click="handleMobileTabClick('layer')"
             >
               Peta
             </button>
@@ -1179,12 +1742,12 @@ function handleSelectDataset(dataset: any) {
             <button
               type="button"
               role="tab"
-              :aria-selected="mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'"
-              class="py-2 px-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
-              :class="mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
+              :aria-selected="currentMainTab === 'dataset'"
+              class="py-2 px-2 rounded-full text-sm sm:text-base font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              :class="currentMainTab === 'dataset'
                 ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'dataset'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+              @click="handleMobileTabClick('dataset')"
             >
               Dataset
             </button>
@@ -1193,31 +1756,48 @@ function handleSelectDataset(dataset: any) {
             <button
               type="button"
               role="tab"
-              :aria-selected="mobileDrawerTab === 'geopark'"
-              class="py-2 px-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
-              :class="mobileDrawerTab === 'geopark'
+              :aria-selected="currentMainTab === 'geopark'"
+              class="py-2 px-2 rounded-full text-sm sm:text-base font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              :class="currentMainTab === 'geopark'
                 ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-              @click="mobileDrawerTab = 'geopark'; if (mobileSheetSnap === 'min') mobileSheetSnap = 'peek'"
+              @click="handleMobileTabClick('geopark')"
             >
               Geopark
             </button>
           </div>
+
+          <!-- Tombol Cepat Bagikan Peta Mobile -->
+          <button
+            type="button"
+            class="size-11 rounded-full flex items-center justify-center shrink-0 bg-slate-200/60 dark:bg-white/5 hover:bg-blue-50 dark:hover:bg-blue-950/60 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200/70 dark:border-white/10 transition-all cursor-pointer min-h-[44px] min-w-[44px] active:scale-95 shadow-2xs"
+            title="Bagikan Tautan Peta dengan Pratinjau Thumbnail OG"
+            aria-label="Bagikan peta"
+            @click="handleOpenShare"
+          >
+            <UIcon name="i-lucide-share-2" class="size-4" />
+          </button>
         </div>
       </template>
 
       <!-- Content Body: satu LeftPanel instance persisten dengan v-show -->
-      <div class="min-h-full flex flex-col min-h-0">
+      <div class="h-full flex-1 flex flex-col min-h-0 overflow-hidden">
         <LeftPanel
+          ref="mobileLeftPanelRef"
           :is-mobile-drawer="true"
           :active-layers="activeLayers"
-          :active-tab="mobileDrawerTab === 'geopark' ? 'geopark' : (mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal') ? 'dataset' : 'layers'"
+          :active-tab="currentMainTab"
           :selected-kecamatan-filter="selectedKecamatanFilter"
           :clicked-coordinate="clickedCoordinate"
           :location-label="searchedLocationLabel"
           :identified-features="identifiedFeatures"
           :is-identifying="isIdentifyingFeatures"
           :inspector-open="locationBarOpen"
+          @tab-change="handleTabChange"
+          @open-layer-detail="handleOpenLayerDetail"
+          @close-layer-detail="handleCloseLayerDetail"
+          @open-geopark-detail="handleOpenGeoparkDetail"
+          @close-geopark-detail="handleCloseGeoparkDetail"
           @close="mobileSheetSnap = 'min'"
           @zoom-to-home="handleFilterWilayah(null); mapCanvasRef?.resetView(); mobileSheetSnap = 'min'"
           @select-kecamatan="handleSelectKecamatan"
@@ -1258,6 +1838,7 @@ function handleSelectDataset(dataset: any) {
       :map-center="clickedCoordinate || initialCenter"
       :map-zoom="initialZoom"
       :get-map-snapshot="getMapSnapshot"
+      :get-map-thumbnail="getMapThumbnail"
     />
 
     <!-- Mobile Bottom Sheet Mandiri (Tinggi Separuh Layar ~52vh, Expandable ke Full) -->
@@ -1271,6 +1852,7 @@ function handleSelectDataset(dataset: any) {
       :map-center="clickedCoordinate || initialCenter"
       :map-zoom="initialZoom"
       :get-map-snapshot="getMapSnapshot"
+      :get-map-thumbnail="getMapThumbnail"
       @after-close="handleShareSheetClosed"
     />
   </div>

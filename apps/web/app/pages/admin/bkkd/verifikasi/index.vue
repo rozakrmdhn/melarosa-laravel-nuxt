@@ -4,6 +4,7 @@ import { useBkkdApi } from '~/composables/useBkkdApi';
 import { usePermission } from '~/composables/usePermission';
 import BkkdStatusBadge from '~/components/bkkd/BkkdStatusBadge.vue';
 import BkkdVerifikasiFormModal from '~/components/bkkd/BkkdVerifikasiFormModal.vue';
+import BkkdVerifikasiKolektifModal from '~/components/bkkd/BkkdVerifikasiKolektifModal.vue';
 import BkkdRiwayatTimeline from '~/components/bkkd/BkkdRiwayatTimeline.vue';
 
 definePageMeta({
@@ -37,6 +38,7 @@ const loading = ref(false);
 const opdList = ref<RefOpd[]>([]);
 
 // Modals
+const modalKolektifOpen = ref(false);
 const modalEditOpen = ref(false);
 const activeVerifikasi = ref<BkkdVerifikasi | null>(null);
 
@@ -176,6 +178,17 @@ onMounted(() => {
           Daftar berita acara dan rekomendasi hasil telaah teknis proposal BKKD oleh dinas terkait (DPU Bina Marga, Perkim, DPMD).
         </p>
       </div>
+
+      <div v-if="canManageVerifikasi" class="flex items-center gap-2">
+        <UButton
+          color="primary"
+          variant="solid"
+          icon="i-lucide-layers"
+          label="Verifikasi Kolektif (1 Dokumen Banyak Desa)"
+          size="sm"
+          @click="modalKolektifOpen = true"
+        />
+      </div>
     </div>
 
     <!-- Filter Bar -->
@@ -294,7 +307,19 @@ onMounted(() => {
               }"
             >
               <td class="p-3 font-mono font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                <div>{{ item.nomor_surat_hasil }}</div>
+                <div class="flex items-center gap-1.5">
+                  <span>{{ item.nomor_surat_hasil }}</span>
+                  <UBadge
+                    v-if="item.is_kolektif || item.id_dokumen"
+                    color="neutral"
+                    size="xs"
+                    variant="subtle"
+                    class="text-[10px]"
+                    title="Diverifikasi melalui Berita Acara Kolektif"
+                  >
+                    Kolektif
+                  </UBadge>
+                </div>
                 <div class="flex items-center gap-1.5 text-[10px] text-gray-400 mt-0.5">
                   <span>v{{ item.versi }}</span>
                   <span v-if="!item.is_aktif" class="text-amber-600 dark:text-amber-400 font-semibold">(Tergantikan)</span>
@@ -367,11 +392,23 @@ onMounted(() => {
 
               <td class="p-3 text-center whitespace-nowrap">
                 <a
-                  v-if="item.has_dokumen"
+                  v-if="item.tipe_sumber === 'link' || item.url_link"
+                  :href="item.url_link || api.getVerifikasiDownloadUrl(item.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/40 border border-sky-200 dark:border-sky-800 transition min-h-[28px]"
+                  :title="item.nama_dokumen_asli || 'Buka tautan cloud dokumen'"
+                >
+                  <UIcon name="i-lucide-external-link" class="w-3.5 h-3.5" />
+                  <span>Cloud Link</span>
+                </a>
+                <a
+                  v-else-if="item.has_dokumen"
                   :href="api.getVerifikasiDownloadUrl(item.id)"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950/40 hover:bg-primary-100"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-primary-700 dark:text-primary-300 bg-primary-50 dark:bg-primary-950/40 hover:bg-primary-100 dark:hover:bg-primary-900/40 border border-primary-200 dark:border-primary-800 transition min-h-[28px]"
+                  :title="item.nama_dokumen_asli || 'Unduh berkas fisik'"
                 >
                   <UIcon name="i-lucide-download" class="w-3.5 h-3.5" />
                   <span>Berkas</span>
@@ -446,6 +483,12 @@ onMounted(() => {
       :verifikasi="activeVerifikasi"
       :proposal="activeVerifikasi?.proposal"
       :is-editing="true"
+      @success="loadData"
+    />
+
+    <!-- Modal Verifikasi Kolektif (1 Dokumen Banyak Desa) -->
+    <BkkdVerifikasiKolektifModal
+      v-model:open="modalKolektifOpen"
       @success="loadData"
     />
 

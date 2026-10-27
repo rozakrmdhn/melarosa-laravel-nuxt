@@ -199,6 +199,9 @@ Route::prefix('api/v1')->group(function () {
 
             // BKKD Hasil Verifikasi OPD
             Route::get('bkkd/verifikasi', [BkkdVerifikasiController::class, 'index'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.index');
+            Route::post('bkkd/verifikasi/kolektif', [BkkdVerifikasiController::class, 'storeKolektif'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.kolektif');
+            Route::get('bkkd/verifikasi/dokumen', [BkkdVerifikasiController::class, 'dokumenList'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.dokumen.index');
+            Route::get('bkkd/verifikasi/dokumen/{id}/download', [BkkdVerifikasiController::class, 'downloadDokumen'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.dokumen.download');
             Route::post('bkkd/proposal/{id}/verifikasi', [BkkdVerifikasiController::class, 'store'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.store');
             Route::put('bkkd/verifikasi/{id}', [BkkdVerifikasiController::class, 'update'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.update');
             Route::get('bkkd/verifikasi/{id}/download', [BkkdVerifikasiController::class, 'download'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.download');

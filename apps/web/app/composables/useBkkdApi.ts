@@ -180,6 +180,25 @@ export function useBkkdApi() {
     });
   }
 
+  async function submitVerifikasiKolektif(payload: Record<string, any>) {
+    return $http<ApiResponse<{ dokumen: BkkdVerifikasiDokumen; total_desa: number }>>('admin/bkkd/verifikasi/kolektif', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async function fetchDokumenVerifikasiList(params?: Record<string, any>) {
+    return $http<ApiResponse<BkkdVerifikasiDokumen[]>>('admin/bkkd/verifikasi/dokumen', {
+      method: 'GET',
+      query: params,
+    });
+  }
+
+  function getDokumenVerifikasiDownloadUrl(dokumenId: string): string {
+    const apiBase = config.public.apiBaseUrl || '/api/v1';
+    return `${apiBase}/admin/bkkd/verifikasi/dokumen/${dokumenId}/download`;
+  }
+
   async function updateVerifikasi(id: string, payload: Record<string, any>) {
     return $http<ApiResponse<BkkdVerifikasi>>(`admin/bkkd/verifikasi/${id}`, {
       method: 'PUT',
@@ -287,6 +306,9 @@ export function useBkkdApi() {
     getProposalRiwayat,
     fetchVerifikasiList,
     submitVerifikasi,
+    submitVerifikasiKolektif,
+    fetchDokumenVerifikasiList,
+    getDokumenVerifikasiDownloadUrl,
     updateVerifikasi,
     getVerifikasiDownloadUrl,
     getVerifikasiRiwayat,

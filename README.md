@@ -1,12 +1,12 @@
 # Melarosa GIS
 
-Portal WebGIS dan Sistem Pemantauan Pembangunan Daerah Kabupaten Bojonegoro.
+Portal WebGIS Monitoring Evaluasi Data Spasial Desa di Kabupaten Bojonegoro.
 
 ---
 
 ## 1. Overview
 
-Melarosa GIS adalah platform geospasial terpadu yang digunakan untuk tata kelola aset infrastruktur dan pemantauan realisasi program pembangunan di Kabupaten Bojonegoro. Sistem ini mencakup 28 kecamatan dan 430 desa/kelurahan, menghubungkan perencanaan spasial dengan alokasi anggaran daerah.
+Melarosa GIS Monitoring Evaluasi Data Spasial Desa adalah platform geospasial terpadu yang digunakan untuk tata kelola aset infrastruktur dan pemantauan realisasi program pembangunan di Kabupaten Bojonegoro. Sistem ini mencakup 28 kecamatan dan 430 desa/kelurahan, menghubungkan perencanaan spasial dengan alokasi anggaran daerah.
 
 Fokus operasional Melarosa GIS terbagi dalam tiga pilar:
 

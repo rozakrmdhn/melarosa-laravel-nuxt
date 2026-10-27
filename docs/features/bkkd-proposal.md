@@ -129,6 +129,7 @@ graph TD
 - **Pemisahan dari Modul Plotting Anggaran**: Modul BKKD berdiri mandiri dan tidak melakukan integrasi atau modifikasi data pada tabel `plotting_anggaran`.
 - **Integritas Spasial**: Nama kolom geometri menggunakan standar PostGIS `geom` dengan proyeksi EPSG:4326, menjamin interoperabilitas dengan tool WebGIS dan Martin Tile Server.
 - **Pencegahan Akses Ilegal Berkas**: Berkas lampiran desa tidak disimpan pada direktori publik (`public/storage`), melainkan di-stream melalui kontroler terotentikasi yang memeriksa kebijakan akses (`BkkdProposalPolicy`).
+- **Sinkronisasi Status Otomatis**: Usulan yang berstatus `diajukan_opd` dapat mengalami transisi status hasil telaah secara individual maupun massal via Berita Acara Kolektif OPD (Master-Detail). Transisi status dicatat ke dalam audit trail riwayat usulan.
 
 ---
 
@@ -151,5 +152,5 @@ graph TD
 ### Frontend (`apps/web`)
 - Types: `app/types/bkkd.ts`
 - Composable: `app/composables/useBkkdApi.ts`
-- Components: `app/components/bkkd/BkkdProposalFormModal.vue`, `app/components/bkkd/BkkdLampiranList.vue`, `app/components/bkkd/BkkdStatusBadge.vue`
+- Components: `app/components/bkkd/BkkdProposalFormModal.vue`, `app/components/bkkd/BkkdVerifikasiFormModal.vue`, `app/components/bkkd/BkkdLampiranList.vue`, `app/components/bkkd/BkkdStatusBadge.vue`
 - Pages: `app/pages/admin/bkkd/proposal/index.vue`, `app/pages/admin/bkkd/proposal/[id].vue`

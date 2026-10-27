@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { BkkdProposal, BkkdVerifikasi, RefBkkdBidang, RefOpd } from '~/types/bkkd';
+import type { BkkdProposal, BkkdVerifikasi, BkkdVerifikasiDokumen, RefBkkdBidang, RefOpd } from '~/types/bkkd';
 import { useBkkdApi } from '~/composables/useBkkdApi';
 
 interface Props {
@@ -35,9 +35,18 @@ const opdList = ref<RefOpd[]>([]);
 const bidangList = ref<RefBkkdBidang[]>([]);
 const loadingOpd = ref(false);
 
+const useExistingDokumen = ref(false);
+const selectedDokumenId = ref<string>('');
+const existingDokumenList = ref<BkkdVerifikasiDokumen[]>([]);
+const loadingDokumenList = ref(false);
+
 const selectedFile = ref<File | null>(null);
 const uploadedDocPath = ref<string | null>(null);
 const uploadedDocName = ref<string | null>(null);
+
+const tipeSumberDokumen = ref<'file' | 'link'>('file');
+const urlLinkDokumen = ref('');
+const labelLinkDokumen = ref('');
 
 const formState = reactive({
   id_opd: '',
@@ -122,6 +131,38 @@ async function loadReferences() {
   }
 }
 
+async function loadExistingDokumen() {
+  loadingDokumenList.value = true;
+  try {
+    const res = await api.fetchDokumenVerifikasiList({
+      tahun_anggaran: activeProposal.value?.tahun_anggaran,
+    });
+    existingDokumenList.value = res.data || [];
+  } catch (err) {
+    console.error('Gagal memuat dokumen berita acara:', err);
+  } finally {
+    loadingDokumenList.value = false;
+  }
+}
+
+function onSelectDokumen(docId: string) {
+  selectedDokumenId.value = docId;
+  const doc = existingDokumenList.value.find((d) => d.id === docId);
+  if (doc) {
+    formState.id_opd = doc.id_opd;
+    formState.nomor_surat_hasil = doc.nomor_surat_hasil;
+    formState.tanggal_verifikasi = doc.tanggal_surat_hasil || doc.tanggal_diterima || formState.tanggal_verifikasi;
+    uploadedDocName.value = doc.nama_dokumen_asli || null;
+    uploadedDocPath.value = null;
+  }
+}
+
+function onToggleUseExisting() {
+  if (useExistingDokumen.value) {
+    loadExistingDokumen();
+  }
+}
+
 watch(
   () => props.open,
   async (newVal) => {
@@ -130,6 +171,9 @@ watch(
       selectedFile.value = null;
       uploadedDocPath.value = null;
       uploadedDocName.value = null;
+      useExistingDokumen.value = !!(props.verifikasi?.id_dokumen);
+      selectedDokumenId.value = props.verifikasi?.id_dokumen || '';
+      existingDokumenList.value = [];
 
       await loadReferences();
 
@@ -145,6 +189,9 @@ watch(
         formState.tinggi_rekomendasi = props.verifikasi.tinggi_rekomendasi ?? activeProposal.value?.tinggi ?? null;
         formState.catatan_opd = props.verifikasi.catatan_opd || '';
         formState.alasan_perubahan = '';
+        tipeSumberDokumen.value = (props.verifikasi.tipe_sumber === 'link' || (!props.verifikasi.has_dokumen && !!props.verifikasi.url_link)) ? 'link' : 'file';
+        urlLinkDokumen.value = props.verifikasi.url_link || '';
+        labelLinkDokumen.value = (props.verifikasi as any).nama_dokumen_asli || props.verifikasi.dokumen_hasil_nama || '';
         uploadedDocName.value = (props.verifikasi as any).nama_dokumen_asli || props.verifikasi.dokumen_hasil_nama || null;
       } else {
         // Otomatis tentukan OPD pemeriksa berdasarkan id_bidang proposal usulan
@@ -159,6 +206,9 @@ watch(
         formState.tinggi_rekomendasi = activeProposal.value?.tinggi ?? null;
         formState.catatan_opd = '';
         formState.alasan_perubahan = '';
+        tipeSumberDokumen.value = 'file';
+        urlLinkDokumen.value = '';
+        labelLinkDokumen.value = '';
       }
     }
   }
@@ -266,9 +316,31 @@ async function handleSubmit() {
       catatan_opd: formState.catatan_opd?.trim() || null,
     };
 
-    if (uploadedDocPath.value) {
-      payload.path_dokumen = uploadedDocPath.value;
-      payload.nama_dokumen_asli = uploadedDocName.value;
+    if (useExistingDokumen.value && selectedDokumenId.value) {
+      payload.id_dokumen = selectedDokumenId.value;
+    } else {
+      payload.tipe_sumber = tipeSumberDokumen.value;
+      if (tipeSumberDokumen.value === 'link') {
+        if (urlLinkDokumen.value.trim()) {
+          try {
+            new URL(urlLinkDokumen.value.trim());
+          } catch {
+            toast.add({
+              icon: 'i-lucide-alert-triangle',
+              title: 'Validasi',
+              description: 'Format URL tautan cloud dokumen tidak valid. Pastikan menyertakan http:// atau https://',
+              color: 'error',
+            });
+            submitting.value = false;
+            return;
+          }
+        }
+        payload.url_link = urlLinkDokumen.value.trim() || null;
+        payload.nama_dokumen_asli = labelLinkDokumen.value.trim() || 'Tautan Dokumen Verifikasi';
+      } else if (uploadedDocPath.value) {
+        payload.path_dokumen = uploadedDocPath.value;
+        payload.nama_dokumen_asli = uploadedDocName.value;
+      }
     }
 
     if (props.isEditing && props.verifikasi) {
@@ -361,6 +433,47 @@ async function handleSubmit() {
             <span class="text-gray-500 shrink-0">Lokasi:</span>
             <span class="text-gray-700 dark:text-gray-300 text-right">{{ activeProposal.lokasi_kegiatan }}</span>
           </div>
+        </div>
+
+        <!-- Opsi Hubungkan Dokumen Berita Acara Kolektif -->
+        <div class="p-3 rounded-xl border border-primary-200/50 dark:border-primary-900/40 bg-primary-50/20 dark:bg-primary-950/20 text-xs flex items-center justify-between gap-3">
+          <div>
+            <span class="font-semibold text-gray-900 dark:text-gray-100 block">Hubungkan Berita Acara Kolektif</span>
+            <span class="text-[11px] text-gray-500">Pilih jika usulan desa ini termasuk dalam dokumen Berita Acara yang sudah pernah diunggah.</span>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer font-medium text-primary-600 dark:text-primary-400">
+            <input
+              v-model="useExistingDokumen"
+              type="checkbox"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+              @change="onToggleUseExisting"
+            />
+            <span>Gunakan Dokumen Ada</span>
+          </label>
+        </div>
+
+        <div v-if="useExistingDokumen" class="space-y-1.5 p-3 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50/60 dark:bg-gray-900/40">
+          <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            Pilih Berita Acara OPD Terdaftar <span class="text-red-500">*</span>
+          </label>
+          <USelectMenu
+            v-model="selectedDokumenId"
+            :items="existingDokumenList.map((d) => ({
+              label: `${d.nomor_surat_hasil} - ${d.opd?.nama || 'OPD'} (${d.total_desa || 0} Desa)`,
+              value: d.id,
+            }))"
+            value-key="value"
+            label-key="label"
+            :loading="loadingDokumenList"
+            placeholder="Pilih nomor surat berita acara..."
+            class="w-full text-xs"
+            size="sm"
+            @update:model-value="onSelectDokumen"
+          />
+          <p v-if="uploadedDocName" class="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium mt-1">
+            <UIcon name="i-lucide-check-circle" class="w-3.5 h-3.5" />
+            <span>Dokumen terpilih: {{ uploadedDocName }} (tidak perlu upload ulang file)</span>
+          </p>
         </div>
 
         <!-- OPD & Nomor Surat -->
@@ -495,23 +608,90 @@ async function handleSubmit() {
           />
         </UFormField>
 
-        <!-- Unggah Dokumen Berita Acara (PDF/Excel) -->
-        <div class="space-y-1">
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">
-            Dokumen Berita Acara / Telaah (PDF / Excel, Maks. 10MB)
-          </label>
-          <div class="flex items-center gap-3">
-            <input
-              type="file"
-              accept=".pdf,.xlsx,.xls,.png,.jpg"
-              class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 dark:file:bg-primary-950/40 dark:file:text-primary-300"
-              @change="handleFileChange"
-            />
-            <span v-if="uploadingFile" class="text-xs text-gray-500 animate-pulse">Mengunggah...</span>
-            <span v-else-if="uploadedDocName" class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
-              <UIcon name="i-lucide-file-check" class="w-4 h-4" />
-              {{ uploadedDocName }}
-            </span>
+        <!-- Lampiran Dokumen Berita Acara / Telaah -->
+        <div v-if="!useExistingDokumen" class="space-y-3 p-3.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50/50 dark:bg-gray-900/30">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+              Dokumen Telaah Teknis OPD
+            </label>
+            <div class="inline-flex p-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-white/[0.08] self-start sm:self-auto">
+              <button
+                type="button"
+                class="px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 min-h-[32px]"
+                :class="tipeSumberDokumen === 'file' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-2xs font-semibold' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200'"
+                @click="tipeSumberDokumen = 'file'"
+              >
+                <UIcon name="i-lucide-upload" class="w-3.5 h-3.5" />
+                <span>Upload Berkas</span>
+              </button>
+              <button
+                type="button"
+                class="px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 min-h-[32px]"
+                :class="tipeSumberDokumen === 'link' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-2xs font-semibold' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200'"
+                @click="tipeSumberDokumen = 'link'"
+              >
+                <UIcon name="i-lucide-cloud" class="w-3.5 h-3.5" />
+                <span>Tautan Cloud</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Opsi File Upload -->
+          <div v-if="tipeSumberDokumen === 'file'" class="space-y-2">
+            <p class="text-[11px] text-gray-500">
+              Format berkas PDF, Excel, atau JPG/PNG, ukuran maksimum 10MB.
+            </p>
+            <div class="flex flex-wrap items-center gap-3">
+              <input
+                type="file"
+                accept=".pdf,.xlsx,.xls,.png,.jpg"
+                class="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 dark:file:bg-primary-950/40 dark:file:text-primary-300 cursor-pointer"
+                @change="handleFileChange"
+              />
+              <span v-if="uploadingFile" class="text-xs text-gray-500 animate-pulse">Mengunggah...</span>
+              <span v-else-if="uploadedDocName" class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                <UIcon name="i-lucide-file-check" class="w-4 h-4" />
+                <span>{{ uploadedDocName }}</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Opsi Cloud Link -->
+          <div v-else class="space-y-2.5">
+            <p class="text-[11px] text-gray-500">
+              Gunakan tautan penyimpanan cloud (Google Drive, OneDrive, atau server dinas).
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div class="sm:col-span-2">
+                <UInput
+                  v-model="urlLinkDokumen"
+                  type="url"
+                  placeholder="https://drive.google.com/... atau tautan dokumen dinas"
+                  icon="i-lucide-link"
+                  class="w-full text-xs"
+                  size="sm"
+                />
+              </div>
+              <div>
+                <UInput
+                  v-model="labelLinkDokumen"
+                  placeholder="Keterangan dokumen (opsional)"
+                  class="w-full text-xs"
+                  size="sm"
+                />
+              </div>
+            </div>
+            <div v-if="urlLinkDokumen" class="flex items-center gap-2 text-[11px]">
+              <a
+                :href="urlLinkDokumen"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400 hover:underline font-medium"
+              >
+                <UIcon name="i-lucide-external-link" class="w-3.5 h-3.5" />
+                <span>Uji buka tautan</span>
+              </a>
+            </div>
           </div>
         </div>
 

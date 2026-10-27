@@ -14,8 +14,9 @@ class StoreBkkdVerifikasiRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'id_dokumen' => ['nullable', 'uuid', 'exists:bkkd_verifikasi_dokumen,id'],
             'id_opd' => ['nullable', 'uuid', 'exists:ref_opd,id'],
-            'nomor_surat_hasil' => ['required', 'string', 'max:150'],
+            'nomor_surat_hasil' => ['required_without:id_dokumen', 'nullable', 'string', 'max:150'],
             'tanggal_surat_hasil' => ['nullable', 'date'],
             'tanggal_verifikasi' => ['nullable', 'date'],
             'tanggal_diterima' => ['nullable', 'date'],
@@ -26,7 +27,8 @@ class StoreBkkdVerifikasiRequest extends FormRequest
             'panjang_rekomendasi' => ['nullable', 'numeric', 'min:0'],
             'lebar_rekomendasi' => ['nullable', 'numeric', 'min:0'],
             'tinggi_rekomendasi' => ['nullable', 'numeric', 'min:0'],
-            'catatan_opd' => ['nullable', 'string'],
+            'tipe_sumber' => ['nullable', 'string', 'in:file,link'],
+            'url_link' => ['nullable', 'required_if:tipe_sumber,link', 'url', 'max:1000'],
             'path_dokumen' => ['nullable', 'string'],
             'nama_dokumen_asli' => ['nullable', 'string'],
         ];

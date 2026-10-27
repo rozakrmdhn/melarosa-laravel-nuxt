@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { BkkdProposal, BkkdRiwayat } from '~/types/bkkd';
+import type { BkkdProposal, BkkdRiwayat, BkkdVerifikasi } from '~/types/bkkd';
 import { useBkkdApi } from '~/composables/useBkkdApi';
 import { usePermission } from '~/composables/usePermission';
 import BkkdStatusBadge from '~/components/bkkd/BkkdStatusBadge.vue';
@@ -147,6 +147,21 @@ const tabsList = computed(() => [
 // Modals
 const modalEditOpen = ref(false);
 const modalVerifOpen = ref(false);
+const isEditingVerif = ref(false);
+const activeVerifForModal = ref<BkkdVerifikasi | null>(null);
+
+function handleCreateVerifikasi() {
+  activeVerifForModal.value = null;
+  isEditingVerif.value = false;
+  modalVerifOpen.value = true;
+}
+
+function handleKoreksiVerifikasi() {
+  activeVerifForModal.value = proposal.value?.verifikasi_aktif || null;
+  isEditingVerif.value = true;
+  modalVerifOpen.value = true;
+}
+
 const modalTapdOpen = ref(false);
 const modalAjukanOpen = ref(false);
 const modalBatalkanOpen = ref(false);
@@ -343,7 +358,7 @@ onUnmounted(() => {
               size="sm"
               icon="i-lucide-clipboard-check"
               label="Catat Hasil Telaah OPD"
-              @click="modalVerifOpen = true"
+              @click="handleCreateVerifikasi"
             />
 
             <UButton
@@ -680,6 +695,16 @@ onUnmounted(() => {
                 versi #{{ proposal.verifikasi_aktif.versi || 1 }}
               </UBadge>
               <BkkdStatusBadge :status="proposal.verifikasi_aktif.hasil" size="sm" />
+              <UButton
+                v-if="canVerifikasi"
+                color="neutral"
+                variant="outline"
+                size="xs"
+                icon="i-lucide-edit-3"
+                label="Koreksi / Tautkan Dokumen"
+                class="cursor-pointer"
+                @click="handleKoreksiVerifikasi"
+              />
             </div>
           </div>
 
@@ -733,9 +758,20 @@ onUnmounted(() => {
             </p>
           </div>
 
-          <div v-if="proposal.verifikasi_aktif.has_dokumen" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+          <div v-if="proposal.verifikasi_aktif.has_dokumen || proposal.verifikasi_aktif.tipe_sumber === 'link' || proposal.verifikasi_aktif.url_link" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
             <span class="text-xs text-gray-500">Dokumen Berita Acara / Telaah Teknis Resmi:</span>
             <a
+              v-if="proposal.verifikasi_aktif.tipe_sumber === 'link' || proposal.verifikasi_aktif.url_link"
+              :href="proposal.verifikasi_aktif.url_link || api.getVerifikasiDownloadUrl(proposal.verifikasi_aktif.id)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-lg text-xs font-semibold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 transition-colors"
+            >
+              <UIcon name="i-lucide-external-link" class="w-4 h-4" />
+              <span>Buka Tautan Cloud ({{ proposal.verifikasi_aktif.nama_dokumen_asli || 'Cloud Link' }})</span>
+            </a>
+            <a
+              v-else-if="proposal.verifikasi_aktif.has_dokumen"
               :href="api.getVerifikasiDownloadUrl(proposal.verifikasi_aktif.id)"
               target="_blank"
               rel="noopener noreferrer"
@@ -744,6 +780,26 @@ onUnmounted(() => {
               <UIcon name="i-lucide-download" class="w-4 h-4" />
               <span>Unduh Berkas Berita Acara Telaah OPD</span>
             </a>
+          </div>
+
+          <div
+            v-else
+            class="p-3.5 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+          >
+            <div class="flex items-center gap-2.5 text-amber-800 dark:text-amber-300">
+              <UIcon name="i-lucide-alert-circle" class="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span>Dokumen Berita Acara / Surat Telaah OPD belum dilampirkan atau ditautkan pada hasil verifikasi ini.</span>
+            </div>
+            <UButton
+              v-if="canVerifikasi"
+              color="warning"
+              variant="solid"
+              size="xs"
+              icon="i-lucide-paperclip"
+              label="Tautkan Dokumen Sekarang"
+              class="shrink-0 cursor-pointer min-h-[36px]"
+              @click="handleKoreksiVerifikasi"
+            />
           </div>
         </div>
 
@@ -794,7 +850,7 @@ onUnmounted(() => {
               size="sm"
               icon="i-lucide-clipboard-check"
               label="Catat Hasil Telaah OPD Sekarang"
-              @click="modalVerifOpen = true"
+              @click="handleCreateVerifikasi"
             />
           </div>
         </div>
@@ -909,6 +965,8 @@ onUnmounted(() => {
     <BkkdVerifikasiFormModal
       v-model:open="modalVerifOpen"
       :proposal="proposal"
+      :verifikasi="activeVerifForModal"
+      :is-editing="isEditingVerif"
       @success="loadProposal(); loadRiwayat()"
     />
 

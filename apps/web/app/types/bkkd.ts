@@ -48,9 +48,30 @@ export interface BkkdProposalLampiran {
   created_at: string;
 }
 
+export interface BkkdVerifikasiDokumen {
+  id: string;
+  id_opd: string;
+  opd?: RefOpd | null;
+  nomor_surat_hasil: string;
+  tanggal_surat_hasil?: string | null;
+  tanggal_diterima?: string | null;
+  tahun_anggaran: number;
+  tipe_sumber?: 'file' | 'link';
+  url_link?: string | null;
+  nama_dokumen_asli?: string | null;
+  has_dokumen?: boolean;
+  catatan_umum?: string | null;
+  total_desa?: number;
+  input_by_name?: string | null;
+  created_at: string;
+}
+
 export interface BkkdVerifikasi {
   id: string;
   id_proposal: string;
+  id_dokumen?: string | null;
+  is_kolektif?: boolean;
+  dokumen?: BkkdVerifikasiDokumen | null;
   id_opd: string;
   kode_opd?: string | null;
   nama_opd?: string | null;
@@ -66,6 +87,8 @@ export interface BkkdVerifikasi {
   lebar_rekomendasi?: number | null;
   tinggi_rekomendasi?: number | null;
   catatan_opd?: string | null;
+  tipe_sumber?: 'file' | 'link';
+  url_link?: string | null;
   nama_dokumen_asli?: string | null;
   dokumen_hasil_nama?: string | null;
   has_dokumen?: boolean;

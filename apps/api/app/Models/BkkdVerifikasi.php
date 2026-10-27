@@ -19,6 +19,7 @@ class BkkdVerifikasi extends Model
 
     protected $fillable = [
         'id_proposal',
+        'id_dokumen',
         'id_opd',
         'nomor_surat_hasil',
         'tanggal_surat_hasil',
@@ -30,6 +31,8 @@ class BkkdVerifikasi extends Model
         'lebar_rekomendasi',
         'tinggi_rekomendasi',
         'catatan_opd',
+        'tipe_sumber',
+        'url_link',
         'path_dokumen',
         'nama_dokumen_asli',
         'is_aktif',
@@ -53,6 +56,11 @@ class BkkdVerifikasi extends Model
     public function proposal(): BelongsTo
     {
         return $this->belongsTo(BkkdProposal::class, 'id_proposal', 'id')->withTrashed();
+    }
+
+    public function dokumen(): BelongsTo
+    {
+        return $this->belongsTo(BkkdVerifikasiDokumen::class, 'id_dokumen', 'id');
     }
 
     public function opd(): BelongsTo

@@ -15,6 +15,7 @@ class UpdateBkkdVerifikasiRequest extends FormRequest
     {
         return [
             'alasan_perubahan' => ['required', 'string', 'max:1000'],
+            'id_dokumen' => ['nullable', 'uuid', 'exists:bkkd_verifikasi_dokumen,id'],
             'id_opd' => ['required', 'uuid', 'exists:ref_opd,id'],
             'nomor_surat_hasil' => ['required', 'string', 'max:150'],
             'tanggal_surat_hasil' => ['nullable', 'date'],
@@ -28,6 +29,8 @@ class UpdateBkkdVerifikasiRequest extends FormRequest
             'lebar_rekomendasi' => ['nullable', 'numeric', 'min:0'],
             'tinggi_rekomendasi' => ['nullable', 'numeric', 'min:0'],
             'catatan_opd' => ['nullable', 'string'],
+            'tipe_sumber' => ['nullable', 'string', 'in:file,link'],
+            'url_link' => ['nullable', 'required_if:tipe_sumber,link', 'url', 'max:1000'],
             'path_dokumen' => ['nullable', 'string'],
             'nama_dokumen_asli' => ['nullable', 'string'],
         ];

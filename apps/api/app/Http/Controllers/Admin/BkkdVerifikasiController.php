@@ -3,15 +3,19 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreBkkdVerifikasiKolektifRequest;
 use App\Http\Requests\Admin\StoreBkkdVerifikasiRequest;
 use App\Http\Requests\Admin\UpdateBkkdVerifikasiRequest;
 use App\Http\Resources\BkkdRiwayatResource;
+use App\Http\Resources\BkkdVerifikasiDokumenResource;
 use App\Http\Resources\BkkdVerifikasiResource;
 use App\Models\BkkdProposal;
 use App\Models\BkkdVerifikasi;
+use App\Models\BkkdVerifikasiDokumen;
 use App\Models\TemporaryUpload;
 use App\Services\BkkdRiwayatService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -33,6 +37,7 @@ class BkkdVerifikasiController extends Controller
         $showDeletedProposal = filter_var($request->input('show_deleted_proposal', false), FILTER_VALIDATE_BOOLEAN);
 
         $query = BkkdVerifikasi::with([
+            'dokumen.opd:id,kode,nama',
             'proposal.kecamatan:id,nama_kecamatan',
             'proposal.desa:id,nama_desa',
             'proposal.bidang:id,nama',
@@ -119,7 +124,9 @@ class BkkdVerifikasiController extends Controller
             $validated['lebar_rekomendasi'] = null;
             $validated['tinggi_rekomendasi'] = null;
         }
-        $idOpd = $validated['id_opd'] ?? $proposal->bidang?->id_opd_default;
+        $idDokumen = $validated['id_dokumen'] ?? null;
+        $dokumenInduk = $idDokumen ? BkkdVerifikasiDokumen::find($idDokumen) : null;
+        $idOpd = $validated['id_opd'] ?? $dokumenInduk?->id_opd ?? $proposal->bidang?->id_opd_default;
 
         if (!$idOpd) {
             return response()->json([
@@ -128,17 +135,35 @@ class BkkdVerifikasiController extends Controller
             ], 422);
         }
 
-        $verifikasi = DB::transaction(function () use ($proposal, $validated, $idOpd, $tglSurat, $tglDiterima, $nilaiRekom, $user) {
-            $tempPath = $validated['path_dokumen'] ?? null;
-            $namaAsli = $validated['nama_dokumen_asli'] ?? ($tempPath ? basename($tempPath) : 'dokumen_verifikasi.pdf');
-            $permanenPath = $tempPath ?: sprintf('bkkd/%s/%s/verifikasi/%s.pdf', $proposal->tahun_anggaran, $proposal->id, Str::uuid7());
+        $verifikasi = DB::transaction(function () use ($proposal, $validated, $idOpd, $dokumenInduk, $tglSurat, $tglDiterima, $nilaiRekom, $user) {
+            if ($dokumenInduk) {
+                $tipeSumber = $dokumenInduk->tipe_sumber ?? 'file';
+                $urlLink = $dokumenInduk->url_link;
+                $permanenPath = $dokumenInduk->path_dokumen;
+                $namaAsli = $dokumenInduk->nama_dokumen_asli;
+                $nomorSurat = $dokumenInduk->nomor_surat_hasil;
+                $tglSuratFinal = $dokumenInduk->tanggal_surat_hasil?->format('Y-m-d') ?? $tglSurat;
+                $tglDiterimaFinal = $dokumenInduk->tanggal_diterima?->format('Y-m-d') ?? $tglDiterima;
+            } else {
+                $nomorSurat = $validated['nomor_surat_hasil'];
+                $tglSuratFinal = $tglSurat;
+                $tglDiterimaFinal = $tglDiterima;
+                $tipeSumber = $validated['tipe_sumber'] ?? (!empty($validated['url_link']) ? 'link' : 'file');
+                $urlLink = $validated['url_link'] ?? null;
+                $tempPath = $validated['path_dokumen'] ?? null;
+                $namaAsli = $validated['nama_dokumen_asli'] ?? ($tipeSumber === 'link' ? 'Tautan Dokumen Verifikasi' : ($tempPath ? basename($tempPath) : 'dokumen_verifikasi.pdf'));
+                $permanenPath = null;
 
-            // Pindahkan dokumen hasil verifikasi jika dari temporary upload
-            if ($tempPath && Storage::disk('local')->exists($tempPath) && str_starts_with($tempPath, 'temporary/')) {
-                $extension = pathinfo($tempPath, PATHINFO_EXTENSION);
-                $permanenPath = sprintf('bkkd/%s/%s/verifikasi/%s.%s', $proposal->tahun_anggaran, $proposal->id, Str::uuid7(), $extension);
-                Storage::disk('local')->move($tempPath, $permanenPath);
-                TemporaryUpload::where('path', $tempPath)->delete();
+                if ($tipeSumber === 'file') {
+                    $permanenPath = $tempPath ?: sprintf('bkkd/%s/%s/verifikasi/%s.pdf', $proposal->tahun_anggaran, $proposal->id, Str::uuid7());
+                    // Pindahkan dokumen hasil verifikasi jika dari temporary upload
+                    if ($tempPath && Storage::disk('local')->exists($tempPath) && str_starts_with($tempPath, 'temporary/')) {
+                        $extension = pathinfo($tempPath, PATHINFO_EXTENSION);
+                        $permanenPath = sprintf('bkkd/%s/%s/verifikasi/%s.%s', $proposal->tahun_anggaran, $proposal->id, Str::uuid7(), $extension);
+                        Storage::disk('local')->move($tempPath, $permanenPath);
+                        TemporaryUpload::where('path', $tempPath)->delete();
+                    }
+                }
             }
 
             // Jika ada verifikasi lama yang aktif, jadikan is_aktif = false dan rekam superseded
@@ -158,10 +183,11 @@ class BkkdVerifikasiController extends Controller
 
             $verifikasi = BkkdVerifikasi::create([
                 'id_proposal' => $proposal->id,
+                'id_dokumen' => $dokumenInduk?->id,
                 'id_opd' => $idOpd,
-                'nomor_surat_hasil' => $validated['nomor_surat_hasil'],
-                'tanggal_surat_hasil' => $tglSurat,
-                'tanggal_diterima' => $tglDiterima,
+                'nomor_surat_hasil' => $nomorSurat,
+                'tanggal_surat_hasil' => $tglSuratFinal,
+                'tanggal_diterima' => $tglDiterimaFinal,
                 'hasil' => $validated['hasil'],
                 'nilai_rekomendasi' => $nilaiRekom,
                 'volume_rekomendasi' => $validated['volume_rekomendasi'] ?? null,
@@ -169,6 +195,8 @@ class BkkdVerifikasiController extends Controller
                 'lebar_rekomendasi' => $validated['lebar_rekomendasi'] ?? null,
                 'tinggi_rekomendasi' => $validated['tinggi_rekomendasi'] ?? null,
                 'catatan_opd' => $validated['catatan_opd'] ?? null,
+                'tipe_sumber' => $tipeSumber,
+                'url_link' => $tipeSumber === 'link' ? $urlLink : null,
                 'path_dokumen' => $permanenPath,
                 'nama_dokumen_asli' => $namaAsli,
                 'is_aktif' => true,
@@ -251,8 +279,29 @@ class BkkdVerifikasiController extends Controller
         $updated = DB::transaction(function () use ($verifikasi, $validated, $alasan, $user) {
             $proposal = $verifikasi->proposal;
 
-            // Cek jika path_dokumen berganti
-            if (isset($validated['path_dokumen']) && $validated['path_dokumen'] !== $verifikasi->path_dokumen) {
+            // Cek jika menautkan ke dokumen berita acara induk kolektif
+            $idDokumen = $validated['id_dokumen'] ?? null;
+            if ($idDokumen) {
+                $dokumenInduk = BkkdVerifikasiDokumen::find($idDokumen);
+                if ($dokumenInduk) {
+                    $validated['id_dokumen'] = $dokumenInduk->id;
+                    $validated['id_opd'] = $dokumenInduk->id_opd;
+                    $validated['nomor_surat_hasil'] = $dokumenInduk->nomor_surat_hasil;
+                    $validated['tanggal_surat_hasil'] = $dokumenInduk->tanggal_surat_hasil?->format('Y-m-d') ?? ($validated['tanggal_surat_hasil'] ?? now()->toDateString());
+                    $validated['tanggal_diterima'] = $dokumenInduk->tanggal_diterima?->format('Y-m-d') ?? ($validated['tanggal_diterima'] ?? now()->toDateString());
+                    $validated['tipe_sumber'] = $dokumenInduk->tipe_sumber ?? 'file';
+                    $validated['url_link'] = $dokumenInduk->url_link;
+                    $validated['path_dokumen'] = $dokumenInduk->path_dokumen;
+                    $validated['nama_dokumen_asli'] = $dokumenInduk->nama_dokumen_asli;
+                }
+            } elseif (isset($validated['tipe_sumber']) && $validated['tipe_sumber'] === 'link') {
+                $validated['id_dokumen'] = null;
+                $validated['path_dokumen'] = null;
+                if (empty($validated['nama_dokumen_asli'])) {
+                    $validated['nama_dokumen_asli'] = 'Tautan Dokumen Verifikasi';
+                }
+            } elseif (isset($validated['path_dokumen']) && $validated['path_dokumen'] !== $verifikasi->path_dokumen) {
+                $validated['id_dokumen'] = null;
                 $tempPath = $validated['path_dokumen'];
                 if (Storage::disk('local')->exists($tempPath) && str_starts_with($tempPath, 'temporary/')) {
                     $extension = pathinfo($tempPath, PATHINFO_EXTENSION);
@@ -261,6 +310,8 @@ class BkkdVerifikasiController extends Controller
                     TemporaryUpload::where('path', $tempPath)->delete();
                     $validated['path_dokumen'] = $permanenPath;
                 }
+                $validated['tipe_sumber'] = 'file';
+                $validated['url_link'] = null;
             }
 
             $updatedVerifikasi = $this->riwayatService->catatKoreksiVerifikasi(
@@ -300,12 +351,18 @@ class BkkdVerifikasiController extends Controller
         ]);
     }
 
-    public function download(Request $request, string $id): StreamedResponse
+    public function download(Request $request, string $id): StreamedResponse|RedirectResponse
     {
         $verifikasi = BkkdVerifikasi::with('proposal')->findOrFail($id);
         Gate::authorize('view', $verifikasi);
 
-        if (!Storage::disk('local')->exists($verifikasi->path_dokumen)) {
+        if ($verifikasi->tipe_sumber === 'link' || (!empty($verifikasi->url_link) && empty($verifikasi->path_dokumen))) {
+            if (!empty($verifikasi->url_link)) {
+                return redirect()->away($verifikasi->url_link);
+            }
+        }
+
+        if (!$verifikasi->path_dokumen || !Storage::disk('local')->exists($verifikasi->path_dokumen)) {
             abort(404, 'File dokumen verifikasi tidak ditemukan di penyimpanan server.');
         }
 
@@ -323,5 +380,201 @@ class BkkdVerifikasiController extends Controller
             'ok' => true,
             'data' => BkkdRiwayatResource::collection($riwayat),
         ]);
+    }
+
+    public function storeKolektif(StoreBkkdVerifikasiKolektifRequest $request): JsonResponse
+    {
+        Gate::authorize('create', BkkdVerifikasi::class);
+
+        $user = $request->user();
+        $validated = $request->validated();
+
+        $result = DB::transaction(function () use ($validated, $user) {
+            $tahun = $validated['tahun_anggaran'] ?? now()->year;
+            $tipeSumber = $validated['tipe_sumber'] ?? (!empty($validated['url_link']) ? 'link' : 'file');
+            $urlLink = $validated['url_link'] ?? null;
+            $tempPath = $validated['path_dokumen'] ?? null;
+            $namaAsli = $validated['nama_dokumen_asli'] ?? ($tipeSumber === 'link' ? 'Tautan Dokumen Verifikasi' : ($tempPath ? basename($tempPath) : 'dokumen_verifikasi.pdf'));
+
+            $permanenPath = null;
+            if ($tipeSumber === 'file' && $tempPath) {
+                $permanenPath = $tempPath;
+                if (Storage::disk('local')->exists($tempPath) && str_starts_with($tempPath, 'temporary/')) {
+                    $extension = pathinfo($tempPath, PATHINFO_EXTENSION);
+                    $permanenPath = sprintf('bkkd/%s/verifikasi-dokumen/%s.%s', $tahun, Str::uuid7(), $extension);
+                    Storage::disk('local')->move($tempPath, $permanenPath);
+                    TemporaryUpload::where('path', $tempPath)->delete();
+                }
+            }
+
+            $dokumen = BkkdVerifikasiDokumen::create([
+                'id_opd' => $validated['id_opd'],
+                'nomor_surat_hasil' => $validated['nomor_surat_hasil'],
+                'tanggal_surat_hasil' => $validated['tanggal_surat_hasil'],
+                'tanggal_diterima' => $validated['tanggal_diterima'] ?? $validated['tanggal_surat_hasil'],
+                'tahun_anggaran' => $tahun,
+                'tipe_sumber' => $tipeSumber,
+                'url_link' => $tipeSumber === 'link' ? $urlLink : null,
+                'path_dokumen' => $permanenPath,
+                'nama_dokumen_asli' => $namaAsli,
+                'catatan_umum' => $validated['catatan_umum'] ?? null,
+                'input_by' => $user->uuid,
+            ]);
+
+            $savedVerifikasi = [];
+
+            foreach ($validated['items'] as $item) {
+                $proposal = BkkdProposal::with('bidang')->lockForUpdate()->findOrFail($item['id_proposal']);
+
+                $nilaiRekom = $item['nilai_rekomendasi'] ?? null;
+                if (in_array($item['hasil'], ['tidak_layak', 'dikembalikan'])) {
+                    $nilaiRekom = null;
+                    $item['volume_rekomendasi'] = null;
+                    $item['panjang_rekomendasi'] = null;
+                    $item['lebar_rekomendasi'] = null;
+                    $item['tinggi_rekomendasi'] = null;
+                }
+
+                $verifikasiLama = BkkdVerifikasi::where('id_proposal', $proposal->id)
+                    ->where('is_aktif', true)
+                    ->first();
+
+                if ($verifikasiLama) {
+                    $verifikasiLama->update(['is_aktif' => false]);
+                    $this->riwayatService->catatAksiVerifikasi(
+                        verifikasi: $verifikasiLama,
+                        aksi: 'superseded',
+                        alasan: sprintf('Hasil telaah digantikan oleh Berita Acara Kolektif No %s', $dokumen->nomor_surat_hasil),
+                        user: $user
+                    );
+                }
+
+                $verifikasi = BkkdVerifikasi::create([
+                    'id_proposal' => $proposal->id,
+                    'id_dokumen' => $dokumen->id,
+                    'id_opd' => $dokumen->id_opd,
+                    'nomor_surat_hasil' => $dokumen->nomor_surat_hasil,
+                    'tanggal_surat_hasil' => $dokumen->tanggal_surat_hasil,
+                    'tanggal_diterima' => $dokumen->tanggal_diterima,
+                    'hasil' => $item['hasil'],
+                    'nilai_rekomendasi' => $nilaiRekom,
+                    'volume_rekomendasi' => $item['volume_rekomendasi'] ?? null,
+                    'panjang_rekomendasi' => $item['panjang_rekomendasi'] ?? null,
+                    'lebar_rekomendasi' => $item['lebar_rekomendasi'] ?? null,
+                    'tinggi_rekomendasi' => $item['tinggi_rekomendasi'] ?? null,
+                    'catatan_opd' => $item['catatan_opd'] ?? null,
+                    'tipe_sumber' => $dokumen->tipe_sumber,
+                    'url_link' => $dokumen->url_link,
+                    'path_dokumen' => $dokumen->path_dokumen,
+                    'nama_dokumen_asli' => $dokumen->nama_dokumen_asli,
+                    'is_aktif' => true,
+                    'versi' => 1,
+                    'input_by' => $user->uuid,
+                ]);
+
+                $statusSebelum = $proposal->status;
+                $proposal->update([
+                    'status' => $item['hasil'],
+                    'updated_by' => $user->uuid,
+                ]);
+
+                $this->riwayatService->catatAksiProposal(
+                    proposal: $proposal,
+                    aksi: 'status_changed',
+                    alasan: sprintf('Sinkronisasi status dari Berita Acara Kolektif: "%s"', $item['hasil']),
+                    user: $user,
+                    extraSebelum: ['status' => $statusSebelum],
+                    extraSesudah: ['status' => $item['hasil']]
+                );
+
+                $this->riwayatService->catatAksiVerifikasi(
+                    verifikasi: $verifikasi,
+                    aksi: 'created',
+                    alasan: sprintf('Pencatatan telaah via Berita Acara Kolektif No %s', $dokumen->nomor_surat_hasil),
+                    user: $user,
+                    extraSesudah: [
+                        'hasil' => $verifikasi->hasil,
+                        'nomor_surat_hasil' => $verifikasi->nomor_surat_hasil,
+                        'nilai_rekomendasi' => $verifikasi->nilai_rekomendasi,
+                    ]
+                );
+
+                $savedVerifikasi[] = $verifikasi;
+            }
+
+            return [
+                'dokumen' => $dokumen,
+                'total_desa' => count($savedVerifikasi),
+            ];
+        });
+
+        return response()->json([
+            'ok' => true,
+            'message' => sprintf('Berita acara kolektif berhasil disimpan untuk %d usulan desa.', $result['total_desa']),
+            'data' => [
+                'dokumen' => new BkkdVerifikasiDokumenResource($result['dokumen']),
+                'total_desa' => $result['total_desa'],
+            ],
+        ], 201);
+    }
+
+    public function dokumenList(Request $request): JsonResponse
+    {
+        Gate::authorize('viewAny', BkkdVerifikasi::class);
+
+        $query = BkkdVerifikasiDokumen::with(['opd:id,kode,nama', 'verifikator:uuid,name'])
+            ->withCount(['verifikasi as total_desa' => function ($q) {
+                $q->where('is_aktif', true);
+            }]);
+
+        if ($request->filled('id_opd')) {
+            $query->where('id_opd', $request->input('id_opd'));
+        }
+
+        if ($request->filled('tahun_anggaran')) {
+            $query->where('tahun_anggaran', (int) $request->input('tahun_anggaran'));
+        }
+
+        if ($request->filled('search')) {
+            $search = '%' . $request->input('search') . '%';
+            $query->where(function ($q) use ($search) {
+                $q->where('nomor_surat_hasil', 'ilike', $search)
+                  ->orWhere('catatan_umum', 'ilike', $search);
+            });
+        }
+
+        $query->orderByDesc('tanggal_surat_hasil')->orderByDesc('created_at');
+        $perPage = max(1, min(100, (int) $request->input('per_page', 20)));
+        $results = $query->paginate($perPage);
+
+        return response()->json([
+            'ok' => true,
+            'data' => BkkdVerifikasiDokumenResource::collection($results->items()),
+            'meta' => [
+                'current_page' => $results->currentPage(),
+                'last_page' => $results->lastPage(),
+                'per_page' => $results->perPage(),
+                'total' => $results->total(),
+            ],
+        ]);
+    }
+
+    public function downloadDokumen(string $id): StreamedResponse|RedirectResponse
+    {
+        Gate::authorize('viewAny', BkkdVerifikasi::class);
+
+        $dokumen = BkkdVerifikasiDokumen::findOrFail($id);
+
+        if ($dokumen->tipe_sumber === 'link' || (!empty($dokumen->url_link) && empty($dokumen->path_dokumen))) {
+            if (!empty($dokumen->url_link)) {
+                return redirect()->away($dokumen->url_link);
+            }
+        }
+
+        if (!$dokumen->path_dokumen || !Storage::disk('local')->exists($dokumen->path_dokumen)) {
+            abort(404, 'File dokumen berita acara tidak ditemukan di penyimpanan server.');
+        }
+
+        return Storage::disk('local')->download($dokumen->path_dokumen, $dokumen->nama_dokumen_asli);
     }
 }

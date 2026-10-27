@@ -80,15 +80,18 @@ melarosa-laravel-nuxt/
 │       ├── nuxt.config.ts             # Konfigurasi modul Nuxt, proxy Nitro, CSP
 │       └── server.mjs                 # Server launcher produksi (Node.js ESM)
 │
-├── docs/                              # Dokumentasi teknis terpusat
+├── docs/                              # Dokumentasi teknis & spesifikasi desain
 │   ├── features/                      # Dokumentasi 11 komponen per fitur modular
 │   ├── issues/                        # Rencana pengerjaan milestone sistem
+│   ├── DESIGN.md                      # Master sistem desain dan token antarmuka
+│   ├── DESIGN_LANDING.md              # Spesifikasi UI/UX halaman beranda publik
+│   ├── DESIGN_ADMIN.md                # Spesifikasi UI/UX admin dashboard spasial
+│   ├── DESIGN_MAPS.md                 # Spesifikasi UI/UX WebGIS dan peta interaktif
 │   └── README.md                      # Indeks matriks dokumentasi teknis
 │
 ├── docker-compose.yml                 # Orkestrasi multi-service (API, Web, Martin, Redis)
 ├── martin.yaml                        # Konfigurasi sumber layer Martin Tile Server
 ├── Justfile                           # Task runner otomasi perintah monorepo
-├── DESIGN.md                          # Panduan identitas visual dan token antarmuka
 ├── Installation.md                    # Panduan instalasi dan deployment lokal/server
 └── README.md                          # Dokumen utama ini
 ```
@@ -136,4 +139,7 @@ melarosa-laravel-nuxt/
 - Panduan instalasi dan setup lokal/Docker: [Installation.md](./Installation.md)
 - Indeks dokumentasi teknis dan standar pengujian: [docs/README.md](./docs/README.md)
 - Dokumentasi fitur spesifik: [docs/features/](./docs/features/)
-- Panduan desain antarmuka WebGIS: [DESIGN.md](./DESIGN.md)
+- Master Sistem Desain UI/UX & Token Antarmuka: [docs/DESIGN.md](./docs/DESIGN.md)
+  - Desain Halaman Beranda Publik (Landing Page): [docs/DESIGN_LANDING.md](./docs/DESIGN_LANDING.md)
+  - Desain Admin Dashboard Spasial: [docs/DESIGN_ADMIN.md](./docs/DESIGN_ADMIN.md)
+  - Desain Peta Spasial WebGIS: [docs/DESIGN_MAPS.md](./docs/DESIGN_MAPS.md)

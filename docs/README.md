@@ -19,7 +19,11 @@ Pusat dokumentasi arsitektur, panduan teknis, dan katalog modul untuk proyek **M
 
 | Direktori / Berkas | Deskripsi |
 |---|---|
-| [docs/README.md](./README.md) | **Halaman ini** — Indeks utama dan panduan alur dokumentasi seluruh sistem |
+| [docs/README.md](./README.md) | **Halaman ini**: Indeks utama dan panduan alur dokumentasi seluruh sistem |
+| [docs/DESIGN.md](./DESIGN.md) | Master sistem desain UI/UX, token antarmuka global, dan disiplin anti-slop |
+| [docs/DESIGN_LANDING.md](./DESIGN_LANDING.md) | Spesifikasi paten desain halaman beranda publik (Landing Page /) |
+| [docs/DESIGN_ADMIN.md](./DESIGN_ADMIN.md) | Spesifikasi paten desain pusat komando operasional spasial (/admin) |
+| [docs/DESIGN_MAPS.md](./DESIGN_MAPS.md) | Spesifikasi paten desain peta spasial interaktif WebGIS (/maps) |
 | [docs/features/](./features/) | Folder berkas dokumentasi spesifik per modul/fitur dalam format modular |
 | [docs/issues/](./issues/) | Rencana tahapan pengerjaan fase implementasi sistem (Fase 1 s.d. Fase 5) |
 | [docs/laravel-13-features-doc-prompt.md](./laravel-13-features-doc-prompt.md) | Master AI Prompt dan panduan standar 11 poin dokumentasi fitur Laravel 13 |

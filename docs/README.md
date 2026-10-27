@@ -48,6 +48,7 @@ Daftar modul fungsional dalam Melarosa GIS beserta status dokumentasi resminya:
 | **Batas Wilayah Desa** | `docs/features/batas-wilayah-desa.md` | 📝 Terencana | Geometri polygon desa, metadata BPS/Pemkab, split wilayah |
 | **Batas Wilayah Kecamatan** | `docs/features/batas-wilayah-kecamatan.md` | 📝 Terencana | Batas administratif 28 kecamatan di Kabupaten Bojonegoro |
 | **Jalan Poros Desa** | [jalan-poros-desa.md](./features/jalan-poros-desa.md) | ✅ Lengkap | Jaringan linestring ruas jalan, kondisi perkerasan & pemotongan segmen |
+| **Sinkronisasi Simpul Geoportal** | [geoportal-sync-simpul-jaringan.md](./features/geoportal-sync-simpul-jaringan.md) | ✅ Lengkap | Pemanenan otomatis & manual metadata layer OGC CSW & WMS Geoportal Bojonegoro |
 | **Layer & Martin Tile Server** | `docs/features/layer-management.md` | 📝 Terencana | Konfigurasi layer spasial, styling MVT, dan integrasi tile server Martin |
 
 ### 3. Perencanaan & Penganggaran Infrastruktur

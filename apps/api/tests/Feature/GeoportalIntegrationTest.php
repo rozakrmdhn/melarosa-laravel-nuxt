@@ -104,7 +104,18 @@ XML;
 
         $response->assertStatus(200)
             ->assertJsonPath('ok', true)
-            ->assertJsonStructure(['ok', 'message', 'summary']);
+            ->assertJsonStructure([
+                'ok',
+                'message',
+                'summary',
+                'data' => [
+                    'records_found',
+                    'records_inserted',
+                    'records_updated',
+                    'records_skipped',
+                    'duration_seconds',
+                ],
+            ]);
     }
 
     public function test_unauthorized_user_cannot_trigger_sync(): void

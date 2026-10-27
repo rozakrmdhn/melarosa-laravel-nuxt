@@ -75,6 +75,7 @@ Route::prefix('api/v1')->group(function () {
             Route::delete('permissions/{permission}', [PermissionController::class, 'destroy'])->middleware('permission:permissions-manage|permissions-delete')->name('admin.permissions.destroy');
 
             Route::get('users', [UserController::class, 'index'])->middleware('permission:users-view')->name('admin.users.index');
+            Route::get('users/active', [UserController::class, 'activeUsers'])->middleware('permission:users-view')->name('admin.users.active');
             Route::post('users', [UserController::class, 'store'])->middleware('permission:users-create')->name('admin.users.store');
             Route::get('users/{user}', [UserController::class, 'show'])->middleware('permission:users-view')->name('admin.users.show');
             Route::put('users/{user}', [UserController::class, 'update'])->middleware('permission:users-update')->name('admin.users.update');

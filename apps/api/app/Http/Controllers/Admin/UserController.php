@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Helpers\Utils;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AuditLogService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -23,11 +25,13 @@ class UserController extends Controller
         $search = $request->query('search');
         $role = $request->query('role');
         $actor = $request->user();
+        $cutoff = now()->subMinutes(5)->timestamp;
 
         $users = User::with([
             'roles:id,name',
             'kecamatan:id,nama_kecamatan',
             'desa:id,nama_desa',
+            'latestSession',
         ])
             ->when($search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
@@ -41,6 +45,12 @@ class UserController extends Controller
             // Filter status: ?status=1 (aktif), ?status=0 (nonaktif)
             ->when($request->has('status') && $request->query('status') !== null && $request->query('status') !== '', function ($query) use ($request) {
                 $query->where('status', filter_var($request->query('status'), FILTER_VALIDATE_BOOLEAN));
+            })
+            // Filter online saja
+            ->when($request->boolean('online_only'), function ($query) use ($cutoff) {
+                $query->whereHas('sessions', function ($q) use ($cutoff) {
+                    $q->where('last_activity', '>=', $cutoff);
+                });
             })
             // Filter wilayah jika actor bukan admin (pembatasan wilayah actor)
             ->when(!$actor->hasRole('admin') && $actor->id_kecamatan, function ($query) use ($actor) {
@@ -71,12 +81,113 @@ class UserController extends Controller
             ->latest()
             ->paginate($request->integer('per_page', 15));
 
+        // Format status online dan aktivitas terakhir per pengguna
+        $users->getCollection()->transform(function ($user) use ($cutoff, $actor) {
+            $latest = $user->latestSession;
+            $lastActivity = $latest ? (int) $latest->last_activity : null;
+            $carbon = $lastActivity ? Carbon::createFromTimestamp($lastActivity) : null;
+            $isOnline = $lastActivity !== null && $lastActivity >= $cutoff;
+
+            $user->is_online = $isOnline;
+            $user->last_activity = $carbon?->toIso8601String();
+            $user->last_activity_human = $carbon?->diffForHumans();
+            $user->is_current_user = $user->id === $actor->id;
+
+            unset($user->latestSession);
+
+            return $user;
+        });
+
         $roles = Role::select(['id', 'name'])->orderBy('name')->get();
 
         return response()->json([
             'ok' => true,
             'users' => $users,
             'roles' => $roles,
+        ]);
+    }
+
+    /**
+     * Display a list of currently active users based on recent session activity.
+     */
+    public function activeUsers(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', User::class);
+
+        $actor = $request->user();
+        $thresholdMinutes = max(1, min(60, $request->integer('threshold', 5)));
+        $cutoff = now()->subMinutes($thresholdMinutes)->timestamp;
+        $search = $request->query('search');
+
+        $query = User::query()
+            ->whereHas('sessions', function ($q) use ($cutoff) {
+                $q->where('last_activity', '>=', $cutoff);
+            })
+            ->with([
+                'roles:id,name',
+                'kecamatan:id,nama_kecamatan',
+                'desa:id,nama_desa',
+                'sessions' => function ($q) use ($cutoff) {
+                    $q->where('last_activity', '>=', $cutoff)
+                      ->orderBy('last_activity', 'desc');
+                },
+            ])
+            ->when($search, function ($query, $search) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
+            // Filter wilayah jika actor bukan admin (pembatasan wilayah actor)
+            ->when(!$actor->hasRole('admin') && $actor->id_kecamatan, function ($query) use ($actor) {
+                $query->where('id_kecamatan', $actor->id_kecamatan);
+            })
+            ->when(!$actor->hasRole('admin') && $actor->id_desa, function ($query) use ($actor) {
+                $query->where('id_desa', $actor->id_desa);
+            });
+
+        $activeUsers = $query->get()->map(function ($user) use ($actor) {
+            $latestSession = $user->sessions->first();
+            $deviceName = 'Tidak diketahui';
+            if ($latestSession && $latestSession->user_agent) {
+                try {
+                    $deviceName = Utils::getDeviceNameFromDetector(
+                        Utils::getDeviceDetectorByUserAgent($latestSession->user_agent)
+                    );
+                } catch (\Throwable $e) {
+                    $deviceName = 'Perangkat Tidak Dikenal';
+                }
+            }
+
+            $lastActivityTimestamp = $latestSession ? (int) $latestSession->last_activity : null;
+            $lastActivityCarbon = $lastActivityTimestamp ? Carbon::createFromTimestamp($lastActivityTimestamp) : null;
+
+            return [
+                'id' => $user->id,
+                'uuid' => $user->uuid,
+                'name' => $user->name,
+                'email' => $user->email,
+                'avatar' => $user->avatar,
+                'roles' => $user->roles->map(fn($r) => ['id' => $r->id, 'name' => $r->name]),
+                'kecamatan' => $user->kecamatan ? ['id' => $user->kecamatan->id, 'nama_kecamatan' => $user->kecamatan->nama_kecamatan] : null,
+                'desa' => $user->desa ? ['id' => $user->desa->id, 'nama_desa' => $user->desa->nama_desa] : null,
+                'status' => $user->status,
+                'is_current_user' => $user->id === $actor->id,
+                'active_sessions_count' => $user->sessions->count(),
+                'latest_session' => $latestSession ? [
+                    'ip_address' => $latestSession->ip_address,
+                    'device_name' => $deviceName,
+                    'last_activity' => $lastActivityCarbon?->toIso8601String(),
+                    'last_activity_human' => $lastActivityCarbon?->diffForHumans(),
+                ] : null,
+            ];
+        });
+
+        return response()->json([
+            'ok' => true,
+            'threshold_minutes' => $thresholdMinutes,
+            'total_active' => $activeUsers->count(),
+            'users' => $activeUsers,
         ]);
     }
 

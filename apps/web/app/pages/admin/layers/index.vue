@@ -580,11 +580,18 @@ async function handleSyncGeoportal() {
     const res = await $http<{
       ok: boolean;
       message: string;
-      data: {
+      data?: {
         records_found: number;
         records_inserted: number;
         records_updated: number;
         records_skipped: number;
+        duration_seconds: number;
+      };
+      summary?: {
+        found: number;
+        inserted: number;
+        updated: number;
+        skipped: number;
         duration_seconds: number;
       };
     }>("admin/layers/geoportal/sync", {
@@ -592,11 +599,19 @@ async function handleSyncGeoportal() {
     });
 
     if (res?.ok) {
-      syncResult.value = res.data;
+      const summaryData = res.data ?? {
+        records_found: res.summary?.found ?? 0,
+        records_inserted: res.summary?.inserted ?? 0,
+        records_updated: res.summary?.updated ?? 0,
+        records_skipped: res.summary?.skipped ?? 0,
+        duration_seconds: res.summary?.duration_seconds ?? 0,
+      };
+
+      syncResult.value = summaryData;
       toast.add({
         icon: "i-heroicons-check-circle",
         title: res.message || "Sinkronisasi Geoportal berhasil.",
-        description: `${res.data.records_found} layer dipanen (${res.data.records_inserted} baru, ${res.data.records_updated} diperbarui) dalam ${res.data.duration_seconds}s.`,
+        description: `${summaryData.records_found} layer dipanen (${summaryData.records_inserted} baru, ${summaryData.records_updated} diperbarui) dalam ${summaryData.duration_seconds}s.`,
         color: "success",
       });
       await refresh();

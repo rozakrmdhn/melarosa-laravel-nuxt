@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: "users-view",
@@ -18,6 +18,37 @@ interface UserItem {
   email_verified_at: string | null;
   created_at: string;
   roles: Role[];
+  is_online?: boolean;
+  last_activity?: string | null;
+  last_activity_human?: string | null;
+  is_current_user?: boolean;
+}
+
+export interface ActiveUserItem {
+  id: number | string;
+  uuid?: string;
+  name: string;
+  email: string;
+  avatar: string | null;
+  roles: Role[];
+  kecamatan?: { id: number; nama_kecamatan: string } | null;
+  desa?: { id: number; nama_desa: string } | null;
+  status?: boolean;
+  is_current_user: boolean;
+  active_sessions_count: number;
+  latest_session: {
+    ip_address: string;
+    device_name: string;
+    last_activity: string | null;
+    last_activity_human: string | null;
+  } | null;
+}
+
+export interface ActiveUsersResponse {
+  ok: boolean;
+  threshold_minutes: number;
+  total_active: number;
+  users: ActiveUserItem[];
 }
 
 interface UsersResponse {
@@ -50,12 +81,14 @@ useSeoMeta({
 // ─── Filter & Query State ───────────────────────────────────────────────────
 const search = ref("");
 const roleFilter = ref<string>("ALL");
+const isOnlineFilter = ref(false);
 const page = ref(1);
 
 const queryParams = computed(() => ({
   page: page.value,
   search: search.value.trim() || undefined,
   role: roleFilter.value !== "ALL" ? roleFilter.value : undefined,
+  online_only: isOnlineFilter.value ? 1 : undefined,
 }));
 
 const { data, status, refresh, error } = useHttp<UsersResponse>("admin/users", {
@@ -63,6 +96,22 @@ const { data, status, refresh, error } = useHttp<UsersResponse>("admin/users", {
 });
 
 const loading = computed(() => status.value === "pending");
+
+// ─── Active Users Modal & Polling ───────────────────────────────────────────
+const isActiveUsersModalOpen = ref(false);
+const activeThreshold = ref(5);
+
+const {
+  data: activeUsersData,
+  status: activeUsersStatus,
+  refresh: refreshActiveUsers,
+} = useHttp<ActiveUsersResponse>("admin/users/active", {
+  query: computed(() => ({ threshold: activeThreshold.value })),
+  lazy: true,
+});
+
+const activeUsersLoading = computed(() => activeUsersStatus.value === "pending");
+const totalActiveCount = computed(() => activeUsersData.value?.total_active ?? 0);
 
 const roleFilterItems = computed(() => {
   const allRoles = (data.value?.roles || []).map((r) => ({
@@ -73,7 +122,7 @@ const roleFilterItems = computed(() => {
 });
 
 // Reset page on search or filter change
-watch([search, roleFilter], () => {
+watch([search, roleFilter, isOnlineFilter], () => {
   page.value = 1;
 });
 
@@ -455,7 +504,7 @@ const columns = computed(() => [
           icon="i-lucide-search"
           placeholder="Cari nama atau email..."
           size="sm"
-          class="w-56"
+          class="w-52"
         />
 
         <!-- Role Filter Dropdown -->
@@ -465,8 +514,36 @@ const columns = computed(() => [
           value-key="value"
           label-key="label"
           size="sm"
-          class="w-40"
+          class="w-36"
         />
+
+        <!-- Filter Online Saja -->
+        <UButton
+          :icon="isOnlineFilter ? 'i-lucide-check-circle-2' : 'i-lucide-circle-dot'"
+          :label="isOnlineFilter ? 'Online' : 'Semua'"
+          :color="isOnlineFilter ? 'success' : 'neutral'"
+          :variant="isOnlineFilter ? 'solid' : 'outline'"
+          size="sm"
+          class="cursor-pointer text-xs"
+          @click="isOnlineFilter = !isOnlineFilter"
+        />
+
+        <!-- Button Dialog User Aktif -->
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="outline"
+          class="relative cursor-pointer text-xs"
+          @click="isActiveUsersModalOpen = true"
+        >
+          <template #leading>
+            <span class="relative flex size-2 mr-0.5">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full size-2 bg-emerald-500"></span>
+            </span>
+          </template>
+          <span>User Aktif ({{ totalActiveCount }})</span>
+        </UButton>
 
         <!-- Button Tambah Pengguna -->
         <UButton
@@ -551,10 +628,17 @@ const columns = computed(() => [
               <!-- User Info Column -->
               <td class="py-3 px-4">
                 <div class="flex items-center gap-3">
-                  <div
-                    class="size-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs shrink-0"
-                  >
-                    {{ user.name?.charAt(0).toUpperCase() || 'U' }}
+                  <div class="relative shrink-0">
+                    <div
+                      class="size-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs"
+                    >
+                      {{ user.name?.charAt(0).toUpperCase() || 'U' }}
+                    </div>
+                    <span
+                      v-if="user.is_online"
+                      class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#0b0f19]"
+                      title="Sedang online"
+                    ></span>
                   </div>
                   <div class="min-w-0">
                     <div class="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
@@ -598,22 +682,50 @@ const columns = computed(() => [
 
               <!-- Status Column -->
               <td class="py-3 px-3 text-center">
-                <UBadge
-                  v-if="user.email_verified_at"
-                  label="Terverifikasi"
-                  color="primary"
-                  variant="soft"
-                  size="xs"
-                  class="text-[10px]"
-                />
-                <UBadge
-                  v-else
-                  label="Belum Verifikasi"
-                  color="neutral"
-                  variant="outline"
-                  size="xs"
-                  class="text-[10px] text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-800"
-                />
+                <div class="space-y-1">
+                  <div>
+                    <UBadge
+                      v-if="user.is_online"
+                      label="Online"
+                      color="success"
+                      variant="subtle"
+                      size="xs"
+                      class="text-[10px]"
+                    >
+                      <template #leading>
+                        <span class="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      </template>
+                    </UBadge>
+                    <span
+                      v-else-if="user.last_activity_human"
+                      class="text-[10px] text-gray-400 dark:text-gray-500 block truncate"
+                      :title="user.last_activity ? dayjs(user.last_activity).format('DD/MM/YYYY HH:mm') : ''"
+                    >
+                      {{ user.last_activity_human }}
+                    </span>
+                    <span v-else class="text-[10px] text-gray-400 dark:text-gray-500 block">
+                      Offline
+                    </span>
+                  </div>
+                  <div>
+                    <UBadge
+                      v-if="user.email_verified_at"
+                      label="Terverifikasi"
+                      color="primary"
+                      variant="soft"
+                      size="xs"
+                      class="text-[10px]"
+                    />
+                    <UBadge
+                      v-else
+                      label="Belum Verifikasi"
+                      color="neutral"
+                      variant="outline"
+                      size="xs"
+                      class="text-[10px] text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-800"
+                    />
+                  </div>
+                </div>
               </td>
 
               <!-- Joined Column -->
@@ -1027,6 +1139,142 @@ const columns = computed(() => [
             variant="solid"
             :loading="deleting"
             @click="handleDeleteUser"
+          />
+        </div>
+      </template>
+    </UModal>
+
+    <!-- ═══ MODAL: DAFTAR PENGGUNA SEDANG AKTIF ═════════════════════════════════ -->
+    <UModal
+      v-model:open="isActiveUsersModalOpen"
+      title="Pengguna Sedang Aktif"
+      description="Daftar pengguna yang sedang login dan beraktivitas dalam sesi sistem."
+      :ui="{ content: 'dark:bg-[#0b0f19] dark:border-white/[0.08] max-w-2xl' }"
+    >
+      <template #body>
+        <div class="space-y-4">
+          <!-- Filter Bar dalam Modal: Threshold Waktu & Tombol Segarkan -->
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 bg-gray-50/80 dark:bg-white/[0.02] rounded-lg border border-gray-200/60 dark:border-white/[0.06]">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">Rentang waktu:</span>
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  v-for="t in [5, 15, 30, 60]"
+                  :key="t"
+                  class="px-2.5 py-1 text-xs rounded-md font-medium transition-colors cursor-pointer"
+                  :class="activeThreshold === t ? 'bg-primary-500 text-white font-semibold' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+                  @click="activeThreshold = t"
+                >
+                  {{ t }}m
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between sm:justify-end gap-3">
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                Total: <strong class="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{{ activeUsersData?.total_active ?? 0 }}</strong> aktif
+              </span>
+              <UButton
+                icon="i-lucide-refresh-cw"
+                label="Segarkan"
+                size="xs"
+                color="neutral"
+                variant="subtle"
+                :loading="activeUsersLoading"
+                @click="() => refreshActiveUsers()"
+              />
+            </div>
+          </div>
+
+          <!-- Loading State -->
+          <div v-if="activeUsersLoading" class="p-8 text-center space-y-2">
+            <UIcon name="i-lucide-loader-2" class="size-6 animate-spin mx-auto text-primary-500" />
+            <p class="text-xs text-gray-500 dark:text-gray-400">Memeriksa sesi pengguna aktif...</p>
+          </div>
+
+          <!-- Empty State -->
+          <div
+            v-else-if="!activeUsersData?.users || activeUsersData.users.length === 0"
+            class="p-8 text-center space-y-2"
+          >
+            <div class="size-10 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 mx-auto flex items-center justify-center">
+              <UIcon name="i-lucide-user-x" class="size-5 opacity-60" />
+            </div>
+            <p class="text-sm font-semibold text-gray-800 dark:text-gray-200">Tidak ada pengguna aktif</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              Tidak ada pengguna yang beraktivitas dalam {{ activeThreshold }} menit terakhir.
+            </p>
+          </div>
+
+          <!-- User Cards List -->
+          <div v-else class="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+            <div
+              v-for="activeUser in activeUsersData.users"
+              :key="activeUser.id"
+              class="p-3 rounded-lg border border-gray-200/80 dark:border-white/[0.08] bg-white dark:bg-[#070b14]/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-emerald-500/30 transition-colors"
+            >
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="relative shrink-0">
+                  <div class="size-9 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs">
+                    {{ activeUser.name?.charAt(0).toUpperCase() || 'U' }}
+                  </div>
+                  <span class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#0b0f19]"></span>
+                </div>
+
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="font-medium text-xs text-gray-900 dark:text-white truncate">{{ activeUser.name }}</span>
+                    <UBadge
+                      v-if="activeUser.is_current_user"
+                      label="Anda"
+                      color="primary"
+                      variant="subtle"
+                      size="xs"
+                      class="text-[9px] px-1 py-0 h-4 leading-none"
+                    />
+                    <UBadge
+                      v-for="r in activeUser.roles"
+                      :key="r.id"
+                      :label="r.name"
+                      color="neutral"
+                      variant="outline"
+                      size="xs"
+                      class="text-[9px] px-1 py-0 h-4 leading-none capitalize"
+                    />
+                  </div>
+                  <p class="text-[11px] text-gray-500 dark:text-gray-400 truncate">{{ activeUser.email }}</p>
+                  <p v-if="activeUser.kecamatan || activeUser.desa" class="text-[10px] text-gray-400 dark:text-gray-500 truncate">
+                    {{ [activeUser.kecamatan?.nama_kecamatan, activeUser.desa?.nama_desa].filter(Boolean).join(' • ') }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Device & Activity Info -->
+              <div class="shrink-0 text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-gray-100 dark:border-white/[0.04]">
+                <div class="flex items-center sm:justify-end gap-1 text-[11px] font-medium text-gray-700 dark:text-gray-300">
+                  <UIcon name="i-lucide-monitor" class="size-3 text-gray-400 shrink-0" />
+                  <span class="truncate max-w-[180px]">{{ activeUser.latest_session?.device_name || 'Browser' }}</span>
+                </div>
+                <div class="flex items-center sm:justify-end gap-2 text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                  <span v-if="activeUser.latest_session?.ip_address" class="font-mono">IP: {{ activeUser.latest_session.ip_address }}</span>
+                  <span>•</span>
+                  <span class="text-emerald-600 dark:text-emerald-400 font-medium">{{ activeUser.latest_session?.last_activity_human || 'Baru saja' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex justify-end w-full">
+          <UButton
+            label="Tutup"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            @click="isActiveUsersModalOpen = false"
           />
         </div>
       </template>

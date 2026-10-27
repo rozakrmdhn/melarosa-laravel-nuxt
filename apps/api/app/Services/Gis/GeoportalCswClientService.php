@@ -353,6 +353,14 @@ class GeoportalCswClientService
 
             Log::info("Geoportal CSW sync succeeded: {$inserted} inserted, {$updated} updated, {$skipped} skipped in {$duration}s.");
 
+            $stats = [
+                'records_found' => $found,
+                'records_inserted' => $inserted,
+                'records_updated' => $updated,
+                'records_skipped' => $skipped,
+                'duration_seconds' => $duration,
+            ];
+
             return [
                 'ok' => true,
                 'message' => "Sinkronisasi Geoportal berhasil ({$found} katalog ditemukan: {$inserted} baru, {$updated} diperbarui).",
@@ -363,6 +371,7 @@ class GeoportalCswClientService
                     'skipped' => $skipped,
                     'duration_seconds' => $duration,
                 ],
+                'data' => $stats,
                 'log_id' => $syncLog->id,
             ];
         } catch (Exception $e) {
@@ -381,6 +390,14 @@ class GeoportalCswClientService
                 'exception' => $e,
             ]);
 
+            $stats = [
+                'records_found' => $found,
+                'records_inserted' => $inserted,
+                'records_updated' => $updated,
+                'records_skipped' => $skipped,
+                'duration_seconds' => $duration,
+            ];
+
             return [
                 'ok' => false,
                 'message' => 'Gagal menyinkronkan katalog Geoportal: ' . $e->getMessage(),
@@ -391,6 +408,7 @@ class GeoportalCswClientService
                     'skipped' => $skipped,
                     'duration_seconds' => $duration,
                 ],
+                'data' => $stats,
                 'log_id' => $syncLog->id,
             ];
         }

@@ -1,111 +1,112 @@
-# Paten Desain & Master Sistem Desain UI/UX: Melarosa
-**Aplikasi**: Melarosa - Sistem Informasi Geospasial & Infrastruktur Wilayah Kabupaten Bojonegoro  
-**Versi Sistem**: 2.0 (Master Design Architecture & System Standards)  
-**Tanggal Pengesahan**: 27 Oktober 2026  
-**Status**: Standar Resmi & Mengikat (*Binding Architectural Standard*)  
-**Disiplin Anti-Slop**: Lolos Otomatis (*Strict Anti-Slop Discipline, Zero Em Dash, Real Verified Evidence*)
+# Arsitektur & Standar Sistem Desain UI/UX: MELAROSA
+
+**Aplikasi**: MELAROSA (Sistem Informasi Geospasial & Infrastruktur Wilayah Kabupaten Bojonegoro)  
+**Versi Dokumen**: 2.1  
+**Pembaruan Terakhir**: 29 Oktober 2026  
+**Status**: Standar Desain Aktif  
 
 ---
 
 ## 1. Pembagian Spesifikasi Desain Menurut Domain Sistem
 
-Untuk menjaga kejelasan arsitektur, modularitas dokumentasi, dan kemudahan pemeliharaan antarmuka, spesifikasi desain sistem Melarosa secara resmi dipisahkan ke dalam **3 dokumen paten spesifikasi domain** yang tersimpan rapi di dalam direktori `docs/`:
+Dokumentasi desain MELAROSA dibagi ke dalam 3 dokumen spesifikasi sesuai domain rute dan kebutuhan pengguna di dalam direktori `docs/`:
 
-| Domain Antarmuka | Rute Aplikasi | Dokumen Spesifikasi Resmi | Fokus Utama & Peran Antarmuka |
+| Domain Antarmuka | Rute Aplikasi | Dokumen Spesifikasi | Cakupan Halaman & Peran Antarmuka |
 |---|---|---|---|
-| **1. Landing Page** | `/` | [DESIGN_LANDING.md](./DESIGN_LANDING.md) | Pintu gerbang geospasial publik, pencarian instan 28 kecamatan & koordinat WGS 84, grid asimetris 4 pilar pembangunan (konektivitas jalan poros, cagar geopark, BKKD, dan geoportal). |
-| **2. Admin Dashboard** | `/admin` | [DESIGN_ADMIN.md](./DESIGN_ADMIN.md) | Pusat komando operasional spasial berbasis peran (Superadmin, BAPPEDA, Verifikator Kecamatan, Operator Desa), validasi ruas jalan poros 1.187 ruas, audit log riil, dan mode editor peta full-bleed. |
-| **3. Peta Spasial WebGIS** | `/maps` | [DESIGN_MAPS.md](./DESIGN_MAPS.md) | Kanvas peta OpenLayers modern kelas dunia (*split view* desktop 400px, lembar bawah mobile 3 snap level, integrasi Martin MVT, OGC WMS Geoserver, GPS tracking, dan kompas dial). |
+| **1. Portal Publik & Editorial Geospasial** | `/`, `/dataset`, `/geopark`, `/geopark/[slug]`, `/statistik` | [DESIGN_LANDING.md](./DESIGN_LANDING.md) | Beranda publik (`/`), Katalog Dataset & Metadata Simpul JIGN (`/dataset`), Direktori & Artikel Editorial 31 Situs Geopark (`/geopark` & `/geopark/[slug]`), serta Statistik & Analitik Infrastruktur Jalan 4-level (`/statistik`). |
+| **2. Peta Spasial WebGIS** | `/maps` | [DESIGN_MAPS.md](./DESIGN_MAPS.md) | Kanvas peta interaktif OpenLayers (`split view` desktop, `bottom sheet` 3 tingkat pada layar seluler, integrasi Martin MVT, OGC WMS/WFS GeoServer, pencari lokasi, pelacakan GPS, dan inspektor atribut). |
+| **3. Panel Operasional Admin** | `/admin` | [DESIGN_ADMIN.md](./DESIGN_ADMIN.md) | Ruang kerja pengelolaan data spasial berbasis peran (Superadmin, BAPPEDA, Verifikator Kecamatan, Operator Desa), rekapitulasi jalan poros, manajemen layer, audit log, dan editor geometri. |
 
 ---
 
-## 2. Identitas Visual & Filosofi Inti (Brand Identity)
+## 2. Identitas Visual & Prinsip Inti
 
-Melarosa dirancang sebagai **sistem informasi geospasial daerah kelas dunia** yang mencerminkan keandalan data teknis pemerintahan, keanggunan kartografi modern, dan transparansi pembangunan Kabupaten Bojonegoro.
+MELAROSA menyajikan data infrastruktur pekerjaan umum, batas administrasi, dan kawasan Geopark Nasional Bojonegoro melalui antarmuka yang jernih, terstruktur, dan mudah diverifikasi oleh masyarakat maupun perangkat daerah.
 
-### Prinsip Inti Antarmuka:
-1. **Bukti Nyata Berbasis Data Sah (*Evidence Over Claims - C-5 & R-38*)**:
-   - Seluruh visualisasi dan kartu metrik dibangun atas data terverifikasi: **28** Kecamatan, **430** Desa/Kelurahan, **2.307** km² Luas Wilayah, **1.187** Ruas Jalan Poros (**1.424,8** km), dan **31** Geosite Geopark Nasional Bojonegoro.
-   - Dilarang memalsukan angka, menampilkan testimonial fiktif, atau menyematkan klaim kosong.
-2. **Kejelasan Hierarki Kartografi (*Cartographic Precision*)**:
-   - Peta dan data tematik disajikan di atas basemap monokromatik netral (*Carto Positron / Esri Light Gray*) agar rute infrastruktur dan zona batas wilayah memiliki ketajaman visual tinggi tanpa interferensi warna latar.
-3. **Ergonomi Sentuh & Bebas Tombol Mati (*Touch Ergonomics & Zero Dead Controls*)**:
-   - Seluruh target interaktif berukuran minimal 44x44 piksel pada perangkat mobile.
-   - Setiap elemen yang dapat diklik memiliki fungsi nyata (*zero dead buttons*).
-4. **Bebas Em Dash (R-02)**:
-   - Dilarang menggunakan karakter em dash (`-`). Gunakan tanda hubung `-`, koma `,`, titik dua `:`, atau kurung `()`.
+### Prinsip Desain Utama
+
+1. **Data Terverifikasi & Bukti Nyata**:
+   - Seluruh angka, tabel, dan grafik bersumber dari basis data spasial serta endpoint resmi Pemerintah Kabupaten Bojonegoro: **28** Kecamatan, **430** Desa/Kelurahan, **2.307 km²** Luas Wilayah, jaringan jalan poros desa beserta segmen perkerasan dari endpoint `/rekap/kecamatan`, serta **31** Situs Geopark Nasional Bojonegoro (**17** situs geologi, **5** situs biologi, **9** situs budaya).
+   - Jangan menampilkan angka karangan, klaim tanpa rujukan, atau kutipan testimoni fiktif.
+2. **Hierarki Permukaan Tonal (*Tonal Surface & Gestalt Hierarchy*)**:
+   - Halaman publik menggunakan pergeseran warna latar yang lembut (`#F7F8F5` kanvas utama, `#EAEFE9` kontainer sekunder, `#FFFFFF` permukaan fokus) untuk mengelompokkan informasi secara alami tanpa menumpuk garis tepi (*border*) tebal di setiap kartu.
+3. **Kejelasan Kartografi**:
+   - Kanvas peta menggunakan *basemap* netral agar garis jaringan jalan, batas desa/kecamatan, dan titik situs Geopark langsung terbaca tanpa gangguan warna latar.
+4. **Ergonomi Sentuh & Fungsi Nyata**:
+   - Target sentuh kontrol interaktif berukuran minimal `44 x 44 px` pada layar seluler.
+   - Setiap tombol, tab, filter, dan tautan wajib menjalankan fungsi nyata.
+5. **Navigasi Bersih Antar Halaman**:
+   - Setiap perpindahan rute pada halaman publik (`Beranda | Peta | Katalog Dataset | Geopark | Statistik`) mereset posisi gulir kembali ke bagian paling atas (`top: 0, left: 0`).
+6. **Gaya Bahasa & Tanda Baca**:
+   - Gunakan kalimat bahasa Indonesia yang lugas, spesifik, dan informatif.
+   - Hindari penggunaan tanda pisah em dash, klaim promosi berlebihan, atau istilah teknis yang tidak dijelaskan konteksnya.
 
 ---
 
 ## 3. Token Desain Terpadu (Global Design Tokens)
 
-### 3.1. Palet Warna Resmi Kabupaten Bojonegoro
+### 3.1. Palet Warna Sistem
 
-```
-Obsidian Night (#03080f / #070b14) ─── Latar Belakang Kanvas Peta & Shell Admin
-Slate Base (#f8fafc / #0f172a)      ─── Permukaan Netral & Tipografi Keterbacaan Tinggi
-Royal Blue 600 (#2563eb / #3b82f6)  ─── Aksen Primer, Jalan Poros & Interaksi Utama
-Emerald Green 600 (#16a34a)        ─── Warisan Geologi, Cagar Geopark Bojonegoro
-Amber Gold 600 (#d97706)           ─── Plotting Anggaran BKKD & Infrastruktur Fisik
-Rose Crimson 600 (#e11d48)         ─── Kondisi Jalan Rusak Berat & Peringatan Sistem
-```
-
-| Token Global | Mode Terang (*Light*) | Mode Gelap (*Dark*) | Alokasi Penggunaan |
+| Token / Peran Visual | Mode Terang (*Light*) | Mode Gelap (*Dark*) | Penggunaan Utama |
 |---|---|---|---|
-| `color-canvas-hero` | `#03080f` | `#03080f` | Latar kanvas hero landing page |
-| `color-canvas-app` | `#f8fafc` (Slate 50) | `#070b14` (Obsidian) | Kanvas aplikasi peta & admin |
-| `color-surface-panel`| `#ffffff` | `#0c1424` / `#0b1322`| Panel kiri WebGIS, sidebar admin |
-| `color-surface-card` | `#ffffff` | `#0f172a` | Kartu pilar, kartu metrik, dialog |
-| `color-border` | `rgba(226,232,240,0.85)` | `rgba(255,255,255,0.08)`| Garis batas komponen dan tabel |
-| `color-primary` | `#2563eb` (Blue 600) | `#3b82f6` (Blue 500) | Tombol aksi utama, tab aktif |
-| `color-geopark` | `#16a34a` (Emerald 600)| `#10b981` (Emerald 500)| Geosite Geopark Bojonegoro |
-| `color-bkkd` | `#d97706` (Amber 600) | `#f59e0b` (Amber 500) | Plotting anggaran desa |
-| `color-danger` | `#ef4444` (Red 500) | `#f87171` (Red 400) | Jalan rusak berat, hapus layer |
+| **Kanvas Portal Publik** | `#F7F8F5` (Warm Alabaster) | `#070B14` (Obsidian Night) | Latar utama halaman `/`, `/dataset`, `/geopark`, dan `/statistik` |
+| **Permukaan Fokus / Kartu Aktif** | `#FFFFFF` (Pure White) | `#0C1522` / `#0F172A` | Kartu metrik utama, panel inspeksi, baris tabel aktif, dan dialog modal |
+| **Permukaan Tonal Sekunder** | `#EAEFE9` / `#F4F7F3` | `#111C2D` | Kontainer pengelompokan daftar, latar *header* tabel, dan *chip* filter pasif |
+| **Garis Pemisah Halus (*Hairline*)** | `#E4EAE3` / `#ECEFEB` | `rgba(255, 255, 255, 0.08)` | Pemisah baris tabel dan batas antar seksi editorial |
+| **Teks Utama** | `#14261E` / `#0F172A` | `#F8FAFC` | Judul halaman, angka KPI, dan isi artikel |
+| **Teks Sekunder & Metadata** | `#4E5E56` / `#5A6B62` | `#94A3B8` | Keterangan satuan, label kolom, dan abstrak |
+| **Aksen Hijau Institusional** | `#176B4D` / `#059669` | `#10B981` | Identitas utama portal publik, jalan terbangun, dan status terverifikasi |
+| **Aksen Biru Spasial** | `#2563EB` | `#3B82F6` | Tautan koordinat, layanan OGC WMS/WFS, dan kontrol aktif WebGIS |
+| **Aksen Oranye Konstruksi** | `#D97706` / `#F59E0B` | `#FBBF24` | Indikator sisa jalan belum terbangun dan plotting anggaran BKKD |
+| **Aksen Merah Peringatan** | `#DC2626` / `#E11D48` | `#F87171` | Kondisi perkerasan rusak berat, prioritas percepatan (`< 40%`), dan status galat |
 
-### 3.2. Standar Tipografi Global
+### 3.2. Standar Tipografi
 
-- **Keluarga Font**: Inter, Outfit, serta font sans-serif proporsional sistem modern.
-- **Standar Angka Tabular (`tabular-nums`)**:
-  - Seluruh angka koordinat geospasial WGS 84, panjang ruas kilometer/meter, luas wilayah hektar, jumlah desa/kecamatan, dan nominal rupiah anggaran BKKD **wajib disajikan dengan kelas CSS `tabular-nums`**. Hal ini menjamin lebar tiap karakter angka sejajar dan mudah dibaca secara cepat.
-- **Larangan Font Monospace**:
-  - Dilarang keras menggunakan font monospace (`font-mono`) untuk teks narasi, heading, kartu fitur, atau identifikasi atribut spasial; font mono hanya diizinkan untuk penulisan baris perintah kode teknis atau format data JSON murni.
+- **Keluarga Huruf**: `Plus Jakarta Sans` atau `Inter` untuk judul dan antarmuka; keluarga huruf sans-serif proporsional sistem untuk teks bacaan panjang.
+- **Angka Tabular (`tabular-nums`)**:
+  - Seluruh angka statistik, panjang jalan (`km` dengan 2 angka desimal atau `m`), persentase capaian (`%`), luas wilayah (`km²`), dan koordinat geospasial (`WGS 84`) wajib menggunakan `font-variant-numeric: tabular-nums` (`tabular-nums`) agar sejajar secara vertikal pada tabel maupun grafik.
+- **Penggunaan Huruf Monospace**:
+  - Jangan gunakan `font-mono` untuk label antarmuka, lencana kategori, atau angka tabel. Huruf monospace hanya digunakan bila menampilkan blok kode atau kueri mentah.
 
-### 3.3. Sistem Kelengkungan Sudut (*Border Radius Scale*)
+### 3.3. Hierarki Lapisan (*Z-Index Layering*)
 
-- `rounded-full` (100% Pill Radius): Digunakan khusus untuk segmented control tab navigasi (Peta, Dataset, Geopark), chip pencarian cepat kecamatan, avatar status, dan grab handle sentuh mobile.
-- `rounded-2xl` (16px) / `rounded-3xl` (24px): Kartu pilar landing page, kontainer formulir pencarian hero, dan modal dialog spasial.
-- `rounded-xl` (12px): Kartu layer aktif, kontrol mengambang kanvas peta, dan kartu metrik dashboard.
-- `rounded-lg` (8px): Tombol aksi sekunder, input formulir data, dan badge status KUGI.
+Untuk mencegah tumpang tindih antara bilah navigasi mengambang dan jendela dialog pada seluruh halaman publik maupun peta:
+
+| Elemen Antarmuka | Kelas `z-index` | Keterangan |
+|---|---|---|
+| Konten Halaman & Kartu Sticky | `z-10` s/d `z-30` | Panel detail kecamatan, sidebar artikel Geopark, dan header tabel |
+| Navigasi Utama (`PublicNavbar.vue`) | `z-[70]` | Bilah navigasi mengambang di bagian atas layar |
+| Overlay Modal (`UModal`) | `z-[100]` | Latar redup (`bg-slate-950/65 backdrop-blur-xs`) yang menutup seluruh halaman termasuk navbar |
+| Konten Dialog Modal (`UModal`) | `z-[110]` | Jendela inspektor metadata JIGN (`/dataset`), modal metadata peta, dan pratinjau peta ruas (`ModalPreviewPeta.vue`) |
 
 ---
 
-## 4. Matriks Disiplin Anti-Slop Global (R-01 hingga R-38)
+## 4. Standar Kualitas Antarmuka & Penulisan Konten
 
-Seluruh komponen pada ketiga domain wajib mematuhi matriks kepatuhan antislop berikut:
+Seluruh halaman dan komponen wajib memenuhi ketentuan berikut:
 
-| Kode Aturan | Ketentuan Kepatuhan Mutlak |
+| Aspek | Ketentuan Implementasi |
 |---|---|
-| **R-01: Zero AI Gradient Cliché** | Dilarang menggunakan gradien ungu-biru atau neon tanpa tujuan. Gunakan palet resmi Melarosa (Obsidian, Royal Blue, Slate, Emerald). |
-| **R-02: Zero Em Dash** | Dilarang menggunakan `-` pada seluruh teks antarmuka. Gunakan `-`, `,`, `:`, atau `()`. |
-| **R-03: Responsif & Target Sentuh** | Target sentuh tombol dan elemen interaktif minimal 44x44 piksel pada layar sentuh ponsel. |
-| **R-05: Layout Berorientasi Konten** | Menggunakan grid asimetris (7:5 dan 6:6 kolom). Menolak template 3 kartu identik dan bento box generik. |
-| **R-15: CTA Kontekstual** | Tombol aksi memiliki label spesifik ("Cari di Peta", "Lihat Peta Jalan Poros", "Verifikasi Ruas"). |
-| **R-17 & R-36: Bukti Data Nyata** | Menolak angka palsu ("10k+ users", "+12% delta"). Menampilkan metrik nyata dari basis data Bojonegoro. |
-| **R-18: Bebas Testimonial Fiktif** | Dilarang membuat ulasan atau testimonial rekayasa AI. |
-| **R-21 & R-34: Integritas Kedua Mode Tema** | Mode Terang dan Mode Gelap wajib berfungsi 100% dengan kontras legal WCAG AA (minimal 4.5:1). |
-| **R-26: Zero Dead Buttons** | Setiap kontrol, link, filter, toggle mata, dan tombol tutup memiliki handler aktif. Dilarang memasang tombol mati. |
-| **R-27: Kelengkapan Tiga Status UI** | Setiap komponen data memiliki penanganan status *Loading* (skeleton), *Empty* (solutif), dan *Error* (ramah). |
+| **Komposisi Layout** | Gunakan tata letak yang sesuai dengan bentuk data: kombinasi *split hero* `7:5`, kartu *featured* editorial, grafik batang bertumpuk horizontal, dan tabel hierarki 4-level. Hindari deretan kartu seragam yang berulang di setiap bagian. |
+| **Format Angka & Satuan** | Gunakan format angka lokal Indonesia (`id-ID`, koma untuk desimal dan titik untuk ribuan). Panjang jalan dalam kilometer ditampilkan dengan 2 angka desimal (contoh: `1.424,80 km` atau `60,39 km`). |
+| **Label & Teks Aksi (CTA)** | Gunakan kata kerja spesifik yang menjelaskan tujuan halaman atau aksi (contoh: `Buka Peta Interaktif`, `Rincian Metadata & Skema`, `Baca Artikel Lengkap`, `Unduh Laporan Excel`). |
+| **Kelengkapan Status Data** | Setiap komponen yang memuat data dari API wajib menangani 3 kondisi: *Loading* (skeleton proporsional), *Empty* (pesan jelas beserta tombol reset filter), dan *Error* (pesan kendala beserta tombol `Coba Lagi`). |
+| **Keterbacaan & Kontras** | Pastikan rasio kontras teks memenuhi standar WCAG AA (minimal `4,5:1` untuk teks normal) baik pada mode terang maupun mode gelap. |
+| **Responsivitas Seluler** | Hindari *horizontal overflow* pada layar ponsel (`320px` ke atas). Gunakan pembungkus gulir horizontal (`overflow-x-auto`) khusus pada tabel data multi-kolom. |
 
 ---
 
-## 5. Direktori Berkas Spesifikasi Lengkap
+## 5. Direktori Berkas Spesifikasi & Implementasi
 
-1. **Halaman Beranda Publik (Landing Page)**:
-   - Berkas Spesifikasi: [DESIGN_LANDING.md](./DESIGN_LANDING.md)
-   - Implementasi Kode: [apps/web/app/pages/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/index.vue)
-2. **Admin Dashboard (Pusat Komando Spasial)**:
-   - Berkas Spesifikasi: [DESIGN_ADMIN.md](./DESIGN_ADMIN.md)
-   - Implementasi Kode: [apps/web/app/pages/admin.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/admin.vue) dan [apps/web/app/pages/admin/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/admin/index.vue)
-3. **Peta Spasial WebGIS (/maps)**:
-   - Berkas Spesifikasi: [DESIGN_MAPS.md](./DESIGN_MAPS.md)
-   - Implementasi Kode: [apps/web/app/pages/maps/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/maps/index.vue) dan [apps/web/app/components/maps/](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/components/maps/)
+1. **Portal Publik & Editorial Geospasial (`/`, `/dataset`, `/geopark`, `/statistik`)**:
+   - Dokumen Spesifikasi: [DESIGN_LANDING.md](./DESIGN_LANDING.md)
+   - Beranda: [apps/web/app/pages/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/index.vue)
+   - Katalog Dataset & Metadata JIGN: [apps/web/app/pages/dataset/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/dataset/index.vue)
+   - Direktori & Artikel Geopark: [apps/web/app/pages/geopark/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/geopark/index.vue) dan [apps/web/app/pages/geopark/[slug].vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/geopark/%5Bslug%5D.vue)
+   - Statistik & Analitik Infrastruktur Jalan: [apps/web/app/pages/statistik/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/statistik/index.vue)
+2. **Peta Spasial WebGIS (`/maps`)**:
+   - Dokumen Spesifikasi: [DESIGN_MAPS.md](./DESIGN_MAPS.md)
+   - Implementasi: [apps/web/app/pages/maps/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/maps/index.vue) dan [apps/web/app/components/maps/](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/components/maps/)
+3. **Panel Operasional Admin (`/admin`)**:
+   - Dokumen Spesifikasi: [DESIGN_ADMIN.md](./DESIGN_ADMIN.md)
+   - Implementasi: [apps/web/app/pages/admin.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/admin.vue) dan [apps/web/app/pages/admin/index.vue](file:///c:/laragon/www/melarosa-laravel-nuxt/apps/web/app/pages/admin/index.vue)

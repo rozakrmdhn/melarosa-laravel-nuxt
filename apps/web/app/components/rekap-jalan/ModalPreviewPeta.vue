@@ -901,9 +901,10 @@ onBeforeUnmount(() => {
     :description="`Peta Spasial Jalan ${resolvedInfo.namaRuas}`"
     :close="false"
     :ui="{
+      overlay: 'z-[100] bg-slate-950/65 backdrop-blur-xs',
       content: isFullscreen
-        ? 'fixed inset-0 w-screen h-screen max-w-none max-h-none rounded-none bg-white dark:bg-[#0b0f19] border-0 flex flex-col overflow-hidden m-0 p-0 shadow-none z-50'
-        : 'sm:max-w-6xl md:max-w-7xl w-[calc(100vw-2rem)] h-[88vh] max-h-[850px] bg-white dark:bg-[#0b0f19] border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden p-0',
+        ? 'z-[110] fixed inset-0 w-screen h-screen max-w-none max-h-none rounded-none bg-white dark:bg-[#0b0f19] border-0 flex flex-col overflow-hidden m-0 p-0 shadow-none'
+        : 'z-[110] sm:max-w-6xl md:max-w-7xl w-[calc(100vw-2rem)] h-[88vh] max-h-[850px] bg-white dark:bg-[#0b0f19] border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden p-0',
       body: 'p-0 sm:p-0 flex-1 flex flex-col min-h-0 overflow-hidden',
     }"
   >

@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 const route = useRoute();
+const nuxtApp = useNuxtApp();
 const isAdmin = computed(() => route.path.startsWith("/admin"));
 const isAuth = computed(() => route.path.startsWith("/auth"));
 const isMaps = computed(() => route.path.startsWith("/maps"));
@@ -7,6 +8,29 @@ const isHomepage = computed(() => route.path === '/');
 
 // Shared state: diisi oleh pages/maps/index.vue saat sidebar terbuka/tertutup di desktop
 const mapsSidebarWidth = useState<number>("maps_sidebar_width", () => 0);
+
+function scrollToPageTop() {
+  if (!import.meta.client || route.hash) return;
+  window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
+watch(
+  () => route.path,
+  (newPath, oldPath) => {
+    if (newPath !== oldPath) {
+      scrollToPageTop();
+      nextTick(() => {
+        scrollToPageTop();
+      });
+    }
+  }
+);
+
+nuxtApp.hook("page:finish", () => {
+  scrollToPageTop();
+});
 
 onMounted(() => {
   if (import.meta.client) {

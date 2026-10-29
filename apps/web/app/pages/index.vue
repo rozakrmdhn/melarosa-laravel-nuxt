@@ -2,7 +2,6 @@
 import { useGeoparkSites } from '~/composables/useGeoparkSites';
 import LandingHero from '~/components/landing/LandingHero.vue';
 import RegionalMetrics from '~/components/landing/RegionalMetrics.vue';
-import InfrastructureStory from '~/components/landing/InfrastructureStory.vue';
 import DistrictExplorer from '~/components/landing/DistrictExplorer.vue';
 import GeoparkEditorial from '~/components/landing/GeoparkEditorial.vue';
 import SpatialDataStory from '~/components/landing/SpatialDataStory.vue';
@@ -36,13 +35,10 @@ const {
     <!-- 02. Angka Bojonegoro dalam Satu Garis Informasi -->
     <RegionalMetrics />
 
-    <!-- 03. Cerita Infrastruktur -->
-    <InfrastructureStory />
-
-    <!-- 04. Jelajahi Wilayah (Direktori Atlas 28 Kecamatan) -->
+    <!-- 03. Jelajahi Wilayah (Direktori Atlas 28 Kecamatan) -->
     <DistrictExplorer />
 
-    <!-- 05. Cerita Geopark Bojonegoro (Galeri Editorial 31 Situs) -->
+    <!-- 04. Cerita Geopark Bojonegoro (Galeri Editorial 31 Situs) -->
     <GeoparkEditorial
       :sites="geoparkSites"
       :geological-sites="geologicalSites"
@@ -53,13 +49,13 @@ const {
       @refresh="fetchLiveSites(true)"
     />
 
-    <!-- 06. Satu Peta, Banyak Informasi (Penumpukan Lapisan Tematik) -->
+    <!-- 05. Satu Peta, Banyak Informasi (Penumpukan Lapisan Tematik) -->
     <SpatialDataStory />
 
-    <!-- 07. Panduan Eksplorasi Interaktif -->
+    <!-- 06. Panduan Eksplorasi Interaktif -->
     <MapGuide />
 
-    <!-- 08. Ajakan Penutup (CTA) -->
+    <!-- 07. Ajakan Penutup (CTA) -->
     <LandingCTA />
   </main>
 </template>

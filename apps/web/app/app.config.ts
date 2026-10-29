@@ -19,6 +19,12 @@ export default defineAppConfig({
       slots: {
         item: 'cursor-pointer',
       }
+    },
+    modal: {
+      slots: {
+        overlay: 'z-[100] bg-slate-950/60 backdrop-blur-xs',
+        content: 'z-[110]',
+      }
     }
   }
 })

@@ -388,7 +388,8 @@ const spatialExtent = computed(() => {
     :title="props.layer?.name || 'Informasi Metadata Geoportal'"
     description="Metadata standar pyCSW 2.6.0 & OGC WFS/WMS Simpul Jaringan Geoportal Bojonegoro."
     :ui="{
-      content: 'sm:max-w-4xl w-[calc(100vw-2rem)] max-h-[90vh] h-[85vh] bg-white dark:bg-[#09111e] border border-slate-200/90 dark:border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden p-0 sm:p-0',
+      overlay: 'z-[100] bg-slate-950/65 backdrop-blur-xs',
+      content: 'z-[110] sm:max-w-4xl w-[calc(100vw-2rem)] max-h-[88vh] h-[85vh] bg-white dark:bg-[#09111e] border border-slate-200/90 dark:border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden p-0 sm:p-0',
       header: 'px-5 py-3.5 border-b border-slate-100 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.02] shrink-0',
       body: 'p-0 sm:p-0 flex-1 min-h-0 flex flex-col overflow-hidden',
       footer: 'px-5 py-3 border-t border-slate-100 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.02] shrink-0',

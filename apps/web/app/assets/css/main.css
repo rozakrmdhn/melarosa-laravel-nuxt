@@ -65,8 +65,8 @@
 @layer base {
   html,
   body {
-    overflow-x: hidden;
-    height: 100%;
+    overflow-x: clip;
+    min-height: 100%;
     touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;

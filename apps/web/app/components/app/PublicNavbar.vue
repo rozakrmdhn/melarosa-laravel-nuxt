@@ -24,7 +24,11 @@ const scrollY = ref(0);
 const isScrolled = computed(() => scrollY.value > 40);
 
 function handleScroll() {
-  scrollY.value = window.scrollY;
+  scrollY.value =
+    window.scrollY ||
+    document.documentElement.scrollTop ||
+    document.body.scrollTop ||
+    0;
 }
 
 // Fitur pencarian navbar hanya aktif pada halaman utama beranda (/)
@@ -297,10 +301,12 @@ onMounted(() => {
 watch(
   () => route.path,
   (newPath) => {
+    scrollY.value = 0;
     if (!newPath.startsWith("/maps")) {
       isMapsReady.value = false;
     }
     nextTick(() => {
+      handleScroll();
       measureCompactWidth();
     });
   }

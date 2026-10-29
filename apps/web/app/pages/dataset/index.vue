@@ -129,7 +129,7 @@
                     Sinkron: {{ formatRelativeSync(connectionStatus?.last_synced_at) }}
                   </span>
                   <a
-                    href="https://geoportal.bojonegorokab.go.id/csw?service=CSW&version=2.0.2&request=GetCapabilities"
+                    href="https://geoportal.bojonegorokab.go.id/csw/?service=CSW&version=2.0.2&request=GetCapabilities"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
@@ -1640,7 +1640,7 @@ const ogcEndpointsList = computed(() => {
     {
       badge: 'OGC CSW 2.0.2',
       label: 'Catalog Service for the Web (ISO 19139 XML Record)',
-      url: `https://geoportal.bojonegorokab.go.id/csw?service=CSW&version=2.0.2&request=GetRecordById&id=${id}&outputSchema=http://www.isotc211.org/2005/gmd&elementSetName=full`
+      url: `https://geoportal.bojonegorokab.go.id/csw/?service=CSW&version=2.0.2&request=GetRecordById&id=${id}&outputSchema=http://www.isotc211.org/2005/gmd&elementSetName=full`
     }
   ]
 })

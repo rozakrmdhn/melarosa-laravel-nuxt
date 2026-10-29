@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { GeoparkSite } from "~/composables/useGeoparkSites";
+import DOMPurify from "dompurify";
 
 const props = defineProps<{
   site: GeoparkSite;
@@ -75,6 +76,14 @@ function getGeoparkCode(site?: GeoparkSite): string {
   }
   return name.slice(0, 3).toUpperCase() || "GP";
 }
+
+const sanitizedNarasiHtml = computed(() => {
+  if (!props.site?.narasiHtml) return "";
+  if (typeof window !== "undefined") {
+    return DOMPurify.sanitize(props.site.narasiHtml);
+  }
+  return props.site.narasiHtml;
+});
 </script>
 
 <template>
@@ -313,7 +322,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
 
       <!-- ═══ 5. URAIAN & NARASI LENGKAP RESMI (DARI ENDPOINT) ═══════════════ -->
       <div
-        v-if="site.narasiHtml"
+        v-if="sanitizedNarasiHtml"
         class="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200/80 dark:border-white/10 space-y-3 shadow-2xs"
       >
         <div class="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-white/5">
@@ -325,7 +334,7 @@ function getGeoparkCode(site?: GeoparkSite): string {
 
         <div
           class="geopark-prose select-text text-xs sm:text-[12.5px] leading-relaxed text-slate-600 dark:text-slate-300 space-y-3 font-normal"
-          v-html="site.narasiHtml"
+          v-html="sanitizedNarasiHtml"
         />
       </div>
 
@@ -350,6 +359,17 @@ function getGeoparkCode(site?: GeoparkSite): string {
           <UIcon name="i-lucide-external-link" class="size-3.5" />
         </a>
       </div>
+
+      <!-- ═══ 6B. TAUTAN KE HALAMAN MANDIRI ULASAN GEOPARK ═══════════════ -->
+      <NuxtLink
+        v-if="props.site.slug"
+        :to="`/geopark/${props.site.slug}`"
+        class="w-full min-h-[44px] px-4 py-2.5 rounded-xl font-semibold text-xs text-white bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+      >
+        <UIcon name="i-lucide-book-open" class="size-4" />
+        <span>Baca Ulasan Geopark Selengkapnya</span>
+        <UIcon name="i-lucide-external-link" class="size-3.5" />
+      </NuxtLink>
 
       <!-- ═══ 7. TOMBOL KEMBALI DI BAWAH KONTEN ═════════════════════════════ -->
       <div class="pt-2 pb-6">

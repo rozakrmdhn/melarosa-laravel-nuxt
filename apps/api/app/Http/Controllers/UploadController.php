@@ -46,7 +46,7 @@ class UploadController extends Controller
         ]);
 
         $file = $request->file('file');
-        $extension = $file->getClientOriginalExtension();
+        $extension = $file->extension() ?: $file->guessExtension() ?: 'bin';
         $path = $file->storeAs(
             'temporary/'.$request->entity,
             implode('.', [Str::uuid7(), $extension]),

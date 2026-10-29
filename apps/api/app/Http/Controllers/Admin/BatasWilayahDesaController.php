@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Helpers\SpatialHelper;
 use App\Http\Controllers\Controller;
 use App\Models\BatasWilayahDesa;
 use Illuminate\Http\JsonResponse;
@@ -212,7 +213,7 @@ class BatasWilayahDesaController extends Controller
         $desa->pangkat_gol = $validated['pangkat_gol'] ?? null;
 
         // Save geometry directly into PostGIS MultiPolygon SRID 4326
-        $desa->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geoJsonString')), 4326)");
+        $desa->geom = SpatialHelper::geomFromGeoJsonRaw($geoJsonString);
         $desa->save();
 
         $fresh = BatasWilayahDesa::withGeoJson()->find($desa->id);
@@ -270,7 +271,7 @@ class BatasWilayahDesaController extends Controller
                 ? $validated['geometry']
                 : json_encode($validated['geometry']);
 
-            $desa->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geoJsonString')), 4326)");
+            $desa->geom = SpatialHelper::geomFromGeoJsonRaw($geoJsonString);
         }
 
         $desa->save();
@@ -324,7 +325,7 @@ class BatasWilayahDesaController extends Controller
             if (isset($part0['nama_jabatan'])) $desa->nama_jabatan = $part0['nama_jabatan'];
             if (isset($part0['nip'])) $desa->nip = $part0['nip'];
             if (isset($part0['pangkat_gol'])) $desa->pangkat_gol = $part0['pangkat_gol'];
-            $desa->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geo0')), 4326)");
+            $desa->geom = SpatialHelper::geomFromGeoJsonRaw($geo0);
             $desa->save();
 
             $createdFeatures[] = BatasWilayahDesa::withGeoJson()->find($desa->id)->toGeoJsonFeature();
@@ -341,7 +342,7 @@ class BatasWilayahDesaController extends Controller
                 $newDesa->nama_jabatan = $part['nama_jabatan'] ?? null;
                 $newDesa->nip = $part['nip'] ?? null;
                 $newDesa->pangkat_gol = $part['pangkat_gol'] ?? null;
-                $newDesa->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geoPart')), 4326)");
+                $newDesa->geom = SpatialHelper::geomFromGeoJsonRaw($geoPart);
                 $newDesa->save();
 
                 $createdFeatures[] = BatasWilayahDesa::withGeoJson()->find($newDesa->id)->toGeoJsonFeature();

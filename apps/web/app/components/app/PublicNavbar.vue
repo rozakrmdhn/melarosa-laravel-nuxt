@@ -29,6 +29,11 @@ function handleScroll() {
 
 // Fitur pencarian navbar hanya aktif pada halaman utama beranda (/)
 const isHomePage = computed(() => route.path === "/");
+const isMaps = computed(() => route.path.startsWith("/maps"));
+
+// Shared state dengan pages/maps/index.vue: aktif HANYA setelah peta selesai memuat
+const isMapsReady = useState<boolean>("melarosa_maps_ready", () => false);
+const isMapsExpanded = computed(() => isMaps.value && isMapsReady.value);
 
 // ═══ SEARCH FEATURE (HANYA AKTIF PADA BERANDA /) ═════════════════════════════
 const isSearchOpen = ref(false);
@@ -83,14 +88,15 @@ const KECAMATAN_ITEMS: SearchItem[] = [
 // Navigasi halaman publik portal
 const PAGE_ITEMS: SearchItem[] = [
   { id: "page-beranda", title: "Beranda Utama", category: "halaman", desc: "Halaman pengantar portal geospasial", icon: "i-lucide-compass", to: "/" },
-  { id: "page-maps", title: "Peta Interaktif", category: "halaman", desc: "Eksplorasi peta spasial, basemap, dan layer jalan poros", icon: "i-lucide-map", to: "/maps" },
-  { id: "page-dataset", title: "Katalog Dataset JIGN", category: "halaman", desc: "Pusat direktori dataset geospasial resmi JIGN Bojonegoro", icon: "i-lucide-database", to: "/maps?tab=dataset" },
-  { id: "page-geopark", title: "Geopark Bojonegoro", category: "halaman", desc: "20 situs geodiversity dan warisan alam Bojonegoro", icon: "i-lucide-mountain-snow", to: "/maps?tab=geopark" },
+  { id: "page-maps", title: "Peta", category: "halaman", desc: "Eksplorasi peta spasial, basemap, dan layer jalan poros", icon: "i-lucide-map", to: "/maps" },
+  { id: "page-dataset", title: "Katalog Dataset JIGN", category: "halaman", desc: "Pusat direktori dataset geospasial resmi JIGN Bojonegoro", icon: "i-lucide-database", to: "/dataset" },
+  { id: "page-geopark", title: "Geopark Bojonegoro", category: "halaman", desc: "20 situs geodiversity dan warisan alam Bojonegoro", icon: "i-lucide-mountain-snow", to: "/geopark" },
+  { id: "page-statistik", title: "Statistik Geospasial", category: "halaman", desc: "Dashboard analitik dan statistik data spasial Bojonegoro", icon: "i-lucide-bar-chart-3", to: "/statistik" },
 ];
 
 // Deteksi koordinat WGS 84 (format Desimal DD atau DMS)
 const coordinateMatch = computed<SearchItem | null>(() => {
-  if (!isHomePage.value || !searchQuery.value) return null;
+  if (!searchQuery.value) return null;
   const parsed = parseCoordinateString(searchQuery.value);
   if (!parsed) return null;
 
@@ -110,14 +116,13 @@ const defaultSuggestions = computed<SearchItem[]>(() => [
   KECAMATAN_ITEMS[0], // Bojonegoro Kota
   KECAMATAN_ITEMS[10], // Dander
   KECAMATAN_ITEMS[9], // Temayang
-  PAGE_ITEMS[1], // Peta Interaktif
+  PAGE_ITEMS[1], // Peta
   PAGE_ITEMS[2], // Katalog Dataset
   PAGE_ITEMS[3], // Geopark Bojonegoro
 ]);
 
 // Hasil pencarian terfilter
 const searchResults = computed<SearchItem[]>(() => {
-  if (!isHomePage.value) return [];
   const q = searchQuery.value.trim().toLowerCase();
   if (!q) {
     return defaultSuggestions.value;
@@ -146,7 +151,6 @@ const searchResults = computed<SearchItem[]>(() => {
 });
 
 function openSearch() {
-  if (!isHomePage.value) return;
   isSearchOpen.value = true;
   selectedIndex.value = 0;
   nextTick(() => {
@@ -171,7 +175,7 @@ const mobileNavItems = [
     exact: true,
   },
   {
-    label: "Peta Interaktif",
+    label: "Peta",
     desc: "Batas wilayah, basemap, dan layer jalan poros",
     icon: "i-lucide-map",
     to: "/maps",
@@ -181,13 +185,20 @@ const mobileNavItems = [
     label: "Katalog Dataset",
     desc: "Pusat direktori dataset geospasial resmi JIGN",
     icon: "i-lucide-database",
-    to: "/maps?tab=dataset",
+    to: "/dataset",
   },
   {
     label: "Geopark Bojonegoro",
     desc: "20 situs geodiversity dan warisan alam",
     icon: "i-lucide-mountain-snow",
-    to: "/maps?tab=geopark",
+    to: "/geopark",
+  },
+  {
+    label: "Statistik",
+    desc: "Dashboard analitik dan statistik data spasial",
+    icon: "i-lucide-bar-chart-3",
+    to: "/statistik",
+    exact: true,
   },
 ];
 
@@ -216,7 +227,7 @@ function handleSelectResult(item: SearchItem) {
         .replace(/^Kecamatan\s+/i, "")
         .replace(/\s*\(Kota\)$/i, "")
         .trim();
-      kecamatanParam = `&kecamatan=${encodeURIComponent(cleanKecamatan)}`;
+      kecamatanParam = `&kecamatan=${encodeURIComponent(cleanKecamatan)}&wilayah=${encodeURIComponent(cleanKecamatan)}`;
     }
 
     navigateTo(`/maps/@${lat.toFixed(5)},${lng.toFixed(5)},${z}z?search=${encodedSearch}${kecamatanParam}${basemapParam}`);
@@ -249,9 +260,8 @@ watch(
   }
 );
 
-// Shortcut keyboard global: Ctrl+K / Cmd+K untuk buka pencarian (Hanya di Beranda)
+// Shortcut keyboard global: Ctrl+K / Cmd+K untuk buka pencarian
 function handleGlobalKeydown(e: KeyboardEvent) {
-  if (!isHomePage.value) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
     if (isSearchOpen.value) {
@@ -265,10 +275,36 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+const compactNavWidth = ref<string>("min(calc(100vw - 64px), 1216px)");
+
+function measureCompactWidth() {
+  if (desktopNavRef.value && !isMaps.value) {
+    const w = desktopNavRef.value.offsetWidth;
+    if (w > 600) {
+      compactNavWidth.value = `${w}px`;
+    }
+  }
+}
+
 onMounted(() => {
   window.addEventListener("scroll", handleScroll, { passive: true });
   window.addEventListener("keydown", handleGlobalKeydown);
+  nextTick(() => {
+    measureCompactWidth();
+  });
 });
+
+watch(
+  () => route.path,
+  (newPath) => {
+    if (!newPath.startsWith("/maps")) {
+      isMapsReady.value = false;
+    }
+    nextTick(() => {
+      measureCompactWidth();
+    });
+  }
+);
 
 onUnmounted(() => {
   window.removeEventListener("scroll", handleScroll);
@@ -280,72 +316,101 @@ onUnmounted(() => {
   <Teleport to="body">
     <!-- ═══ DESKTOP FLOATING NAV (lg+) ═══════════════════════════════════════ -->
     <div
-      class="pointer-events-none fixed top-0 z-[70] hidden justify-center pt-5 lg:flex transition-[left] duration-300"
-      :class="route.path.startsWith('/maps') ? 'left-0 md:left-[350px] lg:left-[400px] right-0' : 'inset-x-0'"
+      class="pointer-events-none fixed top-0 z-[70] hidden justify-center pt-3.5 sm:pt-4 lg:flex inset-x-0 transition-all duration-300"
     >
-      <nav
-        ref="desktopNavRef"
-        aria-label="Navigasi Utama"
-        class="pointer-events-auto relative flex items-center rounded-2xl px-5 py-2.5 gap-1.5 transition-all duration-300 ease-out"
-        :class="isScrolled
-          ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg shadow-slate-900/8 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none'
-          : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md shadow-slate-900/5 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none'"
+      <div
+        class="w-full flex justify-center transition-all duration-300"
+        :class="isMaps ? 'px-4' : 'max-w-7xl px-4 sm:px-6 lg:px-8 mx-auto'"
       >
-        <!-- Logo -->
-        <NuxtLink
-          to="/"
-          class="shrink-0 flex items-center mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-xl"
-          aria-label="Melarosa"
-          @click="closeSearch"
+        <nav
+          ref="desktopNavRef"
+          aria-label="Navigasi Utama"
+          class="pointer-events-auto relative flex items-center rounded-2xl py-2.5 transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] overflow-hidden will-change-[width]"
+          :style="isMaps ? {
+            width: isMapsExpanded ? 'calc(100vw - 32px)' : compactNavWidth
+          } : {}"
+          :class="[
+            isScrolled
+              ? 'bg-white/90 backdrop-blur-xl border border-slate-300/80 shadow-lg shadow-slate-900/8 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
+              : isMaps
+                ? 'bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md shadow-slate-900/5 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
+                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md shadow-slate-900/5 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50',
+            isMaps
+              ? isMapsExpanded
+                ? 'px-5 sm:px-6 shadow-xl shadow-slate-900/5 dark:shadow-black/50'
+                : 'px-5 sm:px-6 shadow-md shadow-slate-900/5 dark:shadow-black/40'
+              : 'w-full px-5 sm:px-6 shadow-md shadow-slate-900/5 dark:shadow-black/40'
+          ]"
         >
-          <AppLogo />
-        </NuxtLink>
-
-        <!-- Divider kiri -->
-        <span class="mx-2 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0" aria-hidden="true" />
-
-        <!-- Nav Links (Selalu tampil konsisten tanpa tergeser) -->
-        <div class="flex items-center gap-1 shrink-0">
-          <NuxtLink
-            v-for="link in navTree"
-            :key="link.to"
-            :to="link.to"
-            class="rounded-xl px-3.5 py-2 text-[0.88rem] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0"
-            :class="isPathActive(link.to, link.exact)
-              ? 'text-blue-600 bg-blue-50 font-semibold dark:text-white dark:bg-transparent dark:shadow-none dark:font-semibold'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-normal dark:text-slate-400 dark:hover:text-white dark:hover:bg-transparent'"
+          <!-- 1. Bagian Kiri: Brand Logo -->
+          <div
+            class="flex items-center shrink-0 justify-start transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-1 min-w-0"
           >
-            {{ link.label }}
-          </NuxtLink>
-        </div>
+            <NuxtLink
+              to="/"
+              class="shrink-0 flex items-center mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-xl"
+              aria-label="Melarosa"
+              @click="closeSearch"
+            >
+              <AppLogo />
+              <span
+                v-if="isMaps"
+                class="ml-2 text-[10px] font-bold font-mono tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/70 border border-blue-200/60 dark:border-blue-800/40 px-1.5 py-0.5 rounded uppercase leading-none select-none shrink-0"
+              >
+                GIS
+              </span>
+            </NuxtLink>
 
-        <!-- Divider tengah pemisah menu dan search (Hanya tampil di Halaman Beranda) -->
-        <span
-          v-if="isHomePage"
-          class="mx-2 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0"
-          aria-hidden="true"
-        />
-
-        <!-- SEARCH TRIGGER PILL (Fixed width ~200-240px, zero layout shift) -->
-        <button
-          v-if="isHomePage"
-          type="button"
-          class="w-48 xl:w-56 flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-100/90 hover:bg-slate-200/80 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200/70 dark:border-white/10 text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          aria-label="Buka pencarian fitur dan wilayah (Ctrl K)"
-          @click="openSearch"
-        >
-          <div class="flex items-center gap-2 min-w-0">
-            <UIcon name="i-lucide-search" class="size-3.5 text-slate-400 shrink-0" />
-            <span class="font-medium truncate">Cari wilayah...</span>
+            <!-- Divider kiri (khusus mode peta dengan badge GIS) -->
+            <span
+              v-if="isMaps"
+              class="mx-2 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0"
+              aria-hidden="true"
+            />
           </div>
-          <kbd class="hidden xl:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono rounded bg-white dark:bg-white/10 text-slate-500 dark:text-slate-300 border border-slate-200 dark:border-white/10 shadow-2xs shrink-0">Ctrl K</kbd>
-        </button>
 
-        <!-- Divider kanan sebelum controls -->
-        <span class="mx-2 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0" aria-hidden="true" />
+          <!-- 2. Bagian Tengah: Navigasi Utama -->
+          <div class="flex items-center gap-1 shrink-0 justify-center">
+            <NuxtLink
+              v-for="link in navTree"
+              :key="link.to"
+              :to="link.to"
+              class="rounded-xl px-3.5 py-2 text-[0.88rem] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
+              :class="isPathActive(link.to, link.exact)
+                ? 'text-blue-600 bg-blue-50/90 font-bold border border-blue-200/70 dark:text-blue-400 dark:bg-blue-950/70 dark:border-blue-800/60 dark:shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 font-medium dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/5 border border-transparent'"
+            >
+              {{ link.label }}
+            </NuxtLink>
+          </div>
 
-        <!-- Right controls -->
-        <div class="flex items-center gap-2 ml-auto shrink-0">
+          <!-- 3. Bagian Kanan: Search Icon Button + Theme Mode & Masuk / User -->
+          <div
+            class="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-end transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-1 min-w-0"
+          >
+          <!-- Divider sebelum aksi -->
+          <span
+            class="mx-1 h-5 w-px bg-slate-200 dark:bg-white/15 shrink-0"
+            aria-hidden="true"
+          />
+
+          <!-- SEARCH TRIGGER ICON BUTTON (Hanya icon pencarian, hemat ruang navigasi) -->
+          <button
+            type="button"
+            class="size-9 flex items-center justify-center rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/90 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 border border-slate-200/70 dark:border-white/10 dark:bg-white/5 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95 shrink-0 relative"
+            :class="isSearchOpen ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border-blue-200/80 dark:border-blue-800/50' : ''"
+            aria-label="Buka pencarian fitur dan wilayah (Ctrl K)"
+            title="Pencarian Cepat (Ctrl+K)"
+            @click="openSearch"
+          >
+            <UIcon name="i-lucide-search" class="size-4" />
+            <!-- Dot indicator jika terdapat filter/pencarian aktif -->
+            <span
+              v-if="route.query.search || route.query.geosite || route.query.kecamatan"
+              class="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-blue-600 dark:bg-blue-400 ring-2 ring-white dark:ring-[#09111e]"
+            />
+          </button>
+
           <UColorModeButton
             size="sm"
             class="rounded-xl border border-transparent dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 transition-all"
@@ -376,13 +441,14 @@ onUnmounted(() => {
           <NuxtLink
             v-else
             to="/auth/login"
-            class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-[0.9rem] font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-sm shadow-blue-600/25 dark:bg-blue-500/20 dark:border dark:border-blue-400/30 dark:text-blue-300 dark:hover:bg-blue-500/30 dark:hover:text-white dark:shadow-none"
+            class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-[0.9rem] font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-sm shadow-blue-600/25 dark:bg-blue-600 dark:hover:bg-blue-500 dark:text-white dark:border-transparent dark:shadow-xs shrink-0"
           >
             Masuk
           </NuxtLink>
         </div>
       </nav>
     </div>
+  </div>
 
     <!-- ═══ MOBILE FLOATING NAV (below lg) ═══════════════════════════════════ -->
     <div class="pointer-events-none fixed inset-x-0 top-0 z-[70] lg:hidden">
@@ -395,8 +461,8 @@ onUnmounted(() => {
             aria-label="Melarosa WebGIS Bojonegoro"
             class="pointer-events-auto flex items-center gap-2 rounded-2xl px-3 py-2 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-h-[44px] shrink-0 active:scale-[0.98] cursor-pointer"
             :class="isScrolled
-              ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none'
-              : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none'"
+              ? 'bg-white/90 backdrop-blur-xl border border-slate-300/80 shadow-lg dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
+              : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'"
           >
             <!-- Logo Kabupaten Bojonegoro -->
             <img
@@ -417,21 +483,20 @@ onUnmounted(() => {
 
           <!-- Right Action Controls (Search + Hamburger, both min 44x44px) -->
           <div class="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
-            <!-- 1. Search Trigger Button on Mobile (Hanya tampil di Halaman Beranda) -->
+            <!-- 1. Search Trigger Button on Mobile (Tampil di semua halaman) -->
             <button
-              v-if="isHomePage"
               type="button"
               aria-label="Buka pencarian kecamatan dan wilayah"
               class="relative flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
               :class="isScrolled
-                ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none dark:text-slate-200 dark:hover:text-white'
-                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none dark:text-slate-200 dark:hover:text-white'"
+                ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'
+                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'"
               @click="openSearch"
             >
               <UIcon name="i-lucide-search" class="size-5" />
               <!-- Dot indicator if route has active search or kecamatan filter -->
               <span
-                v-if="route.query.search || route.query.kecamatan"
+                v-if="route.query.search || route.query.geosite || route.query.kecamatan"
                 class="absolute top-2 right-2 size-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-2 ring-white dark:ring-[#09111e]"
               />
             </button>
@@ -443,8 +508,8 @@ onUnmounted(() => {
               :aria-expanded="isMobileMenuOpen"
               class="relative flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
               :class="isScrolled
-                ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/90 dark:backdrop-blur-xl dark:border-white/15 dark:shadow-none dark:text-slate-200 dark:hover:text-white'
-                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e]/75 dark:backdrop-blur-xl dark:border-white/10 dark:shadow-none dark:text-slate-200 dark:hover:text-white'"
+                ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'
+                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'"
               @click="isMobileMenuOpen = !isMobileMenuOpen"
             >
               <UIcon
@@ -474,7 +539,7 @@ onUnmounted(() => {
       leave-to-class="opacity-0 scale-[0.98]"
     >
       <div
-        v-if="isHomePage && isSearchOpen"
+        v-if="isSearchOpen"
         class="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm p-3 sm:p-6 md:p-10 flex justify-center items-start overflow-y-auto"
         role="dialog"
         aria-modal="true"

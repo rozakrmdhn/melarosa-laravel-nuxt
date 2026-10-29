@@ -53,6 +53,20 @@ class BkkdVerifikasiPolicy
 
     public function update(User $user, BkkdVerifikasi $verifikasi): bool
     {
-        return $this->hasPerm($user, ['bkkd-verifikasi-manage']);
+        if (!$this->hasPerm($user, ['bkkd-verifikasi-manage'])) {
+            return false;
+        }
+
+        if ($user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+            return true;
+        }
+
+        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
+            $verifikasi->loadMissing('proposal');
+
+            return (int) $verifikasi->proposal?->id_kecamatan === (int) $user->id_kecamatan;
+        }
+
+        return false;
     }
 }

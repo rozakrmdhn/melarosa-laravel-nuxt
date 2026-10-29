@@ -10,20 +10,27 @@ const publicNavTreeState = ref<PublicNavItem[]>([
     description: 'Portal spasial dan data geospasial Kabupaten Bojonegoro',
   },
   {
-    label: 'Peta Interaktif',
+    label: 'Peta',
     to: '/maps',
     exact: true,
     description: 'Peta digital batas wilayah desa, batas kecamatan, dan jalan poros',
   },
   {
     label: 'Katalog Dataset',
-    to: '/maps?tab=dataset',
+    to: '/dataset',
+    exact: true,
     description: 'Pusat direktori dataset geospasial resmi JIGN Bojonegoro',
   },
   {
     label: 'Geopark',
-    to: '/maps?tab=geopark',
+    to: '/geopark',
     description: '20 situs geodiversity dan warisan geologi Kabupaten Bojonegoro',
+  },
+  {
+    label: 'Statistik',
+    to: '/statistik',
+    exact: true,
+    description: 'Pusat dashboard analitik dan statistik data geospasial Kabupaten Bojonegoro',
   },
 ]);
 
@@ -83,7 +90,7 @@ export function usePublicNavigation() {
           description: 'Pusat direktori dataset geospasial resmi JIGN Bojonegoro',
         };
       }
-      if (route.query.tab === 'geopark') {
+      if (route.query.tab === 'geopark' || route.query.tab === 'geosite') {
         return {
           title: 'Geopark Bojonegoro',
           description: '20 situs geodiversity dan warisan geologi Kabupaten Bojonegoro',
@@ -234,8 +241,7 @@ export function usePublicNavigation() {
 
     if (exact || normalizedTarget === '/') {
       if (normalizedTarget === '/maps') {
-        // Peta Interaktif is only active when no tab query is specified
-        return currentBase === '/maps' && !route.query.tab;
+        return currentBase === '/maps';
       }
       return currentBase === normalizedTarget;
     }

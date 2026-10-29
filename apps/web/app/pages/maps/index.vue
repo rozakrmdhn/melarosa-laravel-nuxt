@@ -213,7 +213,6 @@ useSeoMeta({
   ogTitle: () => ogPageTitle.value,
   ogDescription: () => ogPageDescription.value,
   ogImage: () => ogImageUrl.value,
-  ogImageType: "image/svg+xml",
   ogImageWidth: 1200,
   ogImageHeight: 675,
   ogType: "website",
@@ -253,6 +252,9 @@ function startLoadingSimulation() {
   }, 260);
 }
 
+// Shared state dengan PublicNavbar.vue: menandai bahwa peta telah selesai dimuat
+const isMapsReady = useState<boolean>("melarosa_maps_ready", () => false);
+
 function handleMapLoaded() {
   if (progressTimer) {
     clearInterval(progressTimer);
@@ -262,10 +264,13 @@ function handleMapLoaded() {
   loadingStageText.value = "Peta spasial siap digunakan";
   setTimeout(() => {
     isMapCanvasLoaded.value = true;
+
+    // Jeda nyaman setelah peta selesai memuat (650ms), lalu picu transisi simultan melebar & panel kiri
     setTimeout(() => {
-      requestThumbnailUpdate(true);
-    }, 450);
-  }, 220);
+      isMapsReady.value = true;
+      isLeftPanelMounted.value = true;
+    }, 650);
+  }, 260);
 }
 
 // Mobile drawers & screen detection
@@ -686,23 +691,31 @@ watch(
     // Filter layer MVT jika terdapat parameter kecamatan atau nama pencarian kecamatan
     const targetKecParam = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
       ? route.query.kecamatan.trim()
-      : (searchLabel
-          ? (/^kecamatan\s+/i.test(searchLabel)
-              ? searchLabel.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
-              : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchLabel.toLowerCase())?.name || null))
-          : null);
+      : (typeof route.query.wilayah === "string" && route.query.wilayah.trim()
+          ? route.query.wilayah.trim()
+          : (searchLabel
+              ? (/^kecamatan\s+/i.test(searchLabel)
+                  ? searchLabel.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
+                  : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchLabel.toLowerCase())?.name || null))
+              : null));
 
     const parsedCoords = searchLabel ? parseCoordinateString(searchLabel) : null;
 
     if (targetKecParam) {
-      handleFilterWilayah(targetKecParam);
-      const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === targetKecParam.toLowerCase());
-      if (matched && matched.bbox) {
-        mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
-        clickedCoordinate.value = null;
-        mapCanvasRef.value?.dismissPulse?.();
-        searchedLocationLabel.value = `Kecamatan ${matched.name}`;
+      // Hanya eksekusi jika filter kecamatan belum aktif atau berbeda dari yang sedang aktif
+      if (targetKecParam.toLowerCase() !== (selectedKecamatanFilter.value || "").toLowerCase()) {
+        handleFilterWilayah(targetKecParam);
+        const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === targetKecParam.toLowerCase());
+        if (matched && matched.bbox) {
+          mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
+          clickedCoordinate.value = null;
+          mapCanvasRef.value?.dismissPulse?.();
+          searchedLocationLabel.value = `Kecamatan ${matched.name}`;
+        }
       }
+    } else if (selectedKecamatanFilter.value && !route.query.wilayah && !route.query.kecamatan) {
+      // Jika parameter wilayah/kecamatan sudah dibersihkan dari query URL, sinkronkan reset
+      handleFilterWilayah(null);
     } else if (pv && (searchLabel || route.query.pin)) {
       clickedCoordinate.value = pv.center;
       searchedLocationLabel.value = searchLabel;
@@ -759,14 +772,16 @@ onMounted(async () => {
     }
   } catch {}
 
-  // Filter layer MVT pada inisialisasi jika query kecamatan tersedia
+  // Filter layer MVT pada inisialisasi jika query kecamatan/wilayah tersedia
   const initialKec = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
     ? route.query.kecamatan.trim()
-    : (searchedLocationLabel.value
-        ? (/^kecamatan\s+/i.test(searchedLocationLabel.value)
-            ? searchedLocationLabel.value.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
-            : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchedLocationLabel.value!.toLowerCase())?.name || null))
-        : null);
+    : (typeof route.query.wilayah === "string" && route.query.wilayah.trim()
+        ? route.query.wilayah.trim()
+        : (searchedLocationLabel.value
+            ? (/^kecamatan\s+/i.test(searchedLocationLabel.value)
+                ? searchedLocationLabel.value.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
+                : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchedLocationLabel.value!.toLowerCase())?.name || null))
+            : null));
   const initialCoord = searchedLocationLabel.value ? parseCoordinateString(searchedLocationLabel.value) : null;
   if (initialKec) {
     handleFilterWilayah(initialKec);
@@ -923,6 +938,40 @@ function handleSelectKecamatan(payload: {
   if (isMobileScreen.value) {
     mobileSheetSnap.value = "peek";
     mobileDrawerOpen.value = true;
+  }
+}
+
+function handleSelectCoordinate(payload: {
+  coordinate: [number, number];
+  formatted: string;
+  zoom?: number;
+}) {
+  clickedCoordinate.value = payload.coordinate;
+  searchedLocationLabel.value = `Titik Koordinat: ${payload.formatted}`;
+  locationBarOpen.value = true;
+
+  const targetZoom = payload.zoom ?? 16;
+
+  if (isMobileScreen.value) {
+    mobileDrawerTab.value = "layer";
+    mobileSheetSnap.value = "peek";
+    mobileDrawerOpen.value = true;
+    mapCanvasRef.value?.flyTo(payload.coordinate, targetZoom, "peek");
+  } else {
+    leftPanelOpen.value = true;
+    mobileDrawerOpen.value = false;
+    mapCanvasRef.value?.flyTo(payload.coordinate, targetZoom);
+  }
+
+  // Sinkronkan query parameter ?search= ke URL browser dan pastikan basemap aktif tetap terjaga
+  if (import.meta.client) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("search", payload.formatted);
+    url.searchParams.set("pin", "1");
+    if (currentBasemap.value && currentBasemap.value !== "osm") {
+      url.searchParams.set("basemap", currentBasemap.value);
+    }
+    window.history.replaceState(window.history.state, "", url.toString());
   }
 }
 
@@ -1126,12 +1175,13 @@ function findGeoparkSiteBySlugOrId(querySite: string, list: GeoparkSite[]): Geop
   if (!querySite || !list.length) return null;
   const q = String(querySite).trim().toLowerCase();
   return list.find((s) => {
-    if (s.id.toLowerCase() === q) return true;
-    if (s.code.toLowerCase() === q) return true;
-    const slug = s.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (s.slug && s.slug.toLowerCase() === q) return true;
+    if (s.id && s.id.toLowerCase() === q) return true;
+    if (s.code && s.code.toLowerCase() === q) return true;
+    const slug = s.name ? s.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : "";
     if (slug === q) return true;
-    if (s.name.toLowerCase() === q) return true;
-    if (s.title.toLowerCase() === q) return true;
+    if (s.name && s.name.toLowerCase() === q) return true;
+    if (s.title && s.title.toLowerCase() === q) return true;
     return false;
   }) || null;
 }
@@ -1161,26 +1211,29 @@ function updateMapQuery(newParams: Record<string, string | null | undefined>, re
   }
 }
 
-// Active Tab derived directly from route.query.tab (Single source of truth)
+// Active Tab derived directly from route.query.tab atau route.query.geosite (Single source of truth)
 const currentMainTab = computed<MainTab>(() => {
   const raw = String(route.query.tab || "").toLowerCase();
-  if (raw === "geopark") return "geopark";
+  const siteQuery = route.query.geosite || route.query.site;
+  if (raw === "geosite" || raw === "geopark" || Boolean(siteQuery)) return "geopark";
   if (raw === "dataset" || raw === "geoportal") return "dataset";
   return "layers";
 });
 
 const selectedGeoparkSite = computed<GeoparkSite | null>(() => {
-  if (currentMainTab.value !== "geopark" || !route.query.site) return null;
-  return findGeoparkSiteBySlugOrId(String(route.query.site), geoparkSites.value);
+  const siteQuery = route.query.geosite || route.query.site;
+  if (!siteQuery) return null;
+  return findGeoparkSiteBySlugOrId(String(siteQuery), geoparkSites.value);
 });
 
 function handleTabChange(tab: MainTab) {
   if (tab !== "layers") {
     previousTabBeforeIdentify.value = null;
   }
-  const queryTab = tab === "layers" ? undefined : tab;
+  const queryTab = tab === "layers" ? undefined : tab === "geopark" ? "geosite" : tab;
   updateMapQuery({
     tab: queryTab,
+    geosite: undefined,
     site: undefined,
     layer: undefined,
   });
@@ -1244,11 +1297,18 @@ function handleCloseLayerDetail() {
 }
 
 function handleOpenGeoparkDetail(site: GeoparkSite) {
-  const slug = getGeoparkSiteSlug(site);
+  const slug = site.slug || getGeoparkSiteSlug(site);
   updateMapQuery({
-    tab: "geopark",
-    site: slug,
+    tab: "geosite",
+    geosite: slug,
+    site: undefined,
   });
+  if (site.hasCoordinate && site.coordinate) {
+    mapCanvasRef.value?.flyTo(site.coordinate, site.zoom || 15);
+  }
+  if (!leftPanelOpen.value && !isMobileScreen.value) {
+    leftPanelOpen.value = true;
+  }
   if (isMobileScreen.value) {
     mobileDrawerTab.value = "geopark";
     mobileSheetSnap.value = "peek";
@@ -1257,7 +1317,10 @@ function handleOpenGeoparkDetail(site: GeoparkSite) {
 }
 
 function handleCloseGeoparkDetail() {
-  updateMapQuery({ site: undefined });
+  updateMapQuery({
+    geosite: undefined,
+    site: undefined,
+  });
 }
 
 function handleMobileSearchFocus() {
@@ -1281,8 +1344,9 @@ function handleMobileSearchClose() {
 function applyRouteQueryToViews() {
   const q = route.query;
   const rawTab = String(q.tab || "").toLowerCase();
+  const siteQuery = q.geosite || q.site;
   const mainTab: MainTab =
-    rawTab === "geopark"
+    rawTab === "geosite" || rawTab === "geopark" || Boolean(siteQuery)
       ? "geopark"
       : rawTab === "dataset" || rawTab === "geoportal"
         ? "dataset"
@@ -1296,18 +1360,24 @@ function applyRouteQueryToViews() {
         : "layer";
 
   // Check sub-views
-  if (mainTab === "geopark" && q.site) {
-    const matched = findGeoparkSiteBySlugOrId(String(q.site), geoparkSites.value);
+  if (siteQuery) {
+    const matched = findGeoparkSiteBySlugOrId(String(siteQuery), geoparkSites.value);
     if (matched) {
       desktopLeftPanelRef.value?.openGeoparkDetail(matched);
       mobileLeftPanelRef.value?.openGeoparkDetail(matched);
+      if (!leftPanelOpen.value && !isMobileScreen.value) {
+        leftPanelOpen.value = true;
+      }
+      if (matched.hasCoordinate && matched.coordinate) {
+        mapCanvasRef.value?.flyTo(matched.coordinate, matched.zoom || 15);
+      }
       if (isMobileScreen.value) {
         mobileDrawerTab.value = "geopark";
         mobileSheetSnap.value = "peek";
         mobileDrawerOpen.value = true;
       }
     }
-  } else if (!q.site) {
+  } else {
     desktopLeftPanelRef.value?.closeGeoparkDetail();
     mobileLeftPanelRef.value?.closeGeoparkDetail();
   }
@@ -1327,9 +1397,10 @@ function applyRouteQueryToViews() {
     mobileLeftPanelRef.value?.closeLayerDetail();
   }
 
-  if (q.wilayah) {
+  const rawKec = q.wilayah || q.kecamatan;
+  if (rawKec) {
     const matchedKec = KECAMATAN_ENTRIES.find(
-      (k) => k.name.toLowerCase() === String(q.wilayah).toLowerCase()
+      (k) => k.name.toLowerCase() === String(rawKec).toLowerCase()
     );
     if (matchedKec && selectedKecamatanFilter.value !== matchedKec.name) {
       selectedKecamatanFilter.value = matchedKec.name;
@@ -1338,7 +1409,7 @@ function applyRouteQueryToViews() {
         mobileDrawerOpen.value = true;
       }
     }
-  } else if (!q.wilayah && selectedKecamatanFilter.value) {
+  } else if (!rawKec && selectedKecamatanFilter.value) {
     selectedKecamatanFilter.value = null;
   }
 }
@@ -1354,11 +1425,23 @@ watch(
 watch(
   () => geoparkSites.value,
   (list) => {
-    if (list.length && route.query.site && route.query.tab === "geopark") {
-      const matched = findGeoparkSiteBySlugOrId(String(route.query.site), list);
+    const siteQuery = route.query.geosite || route.query.site;
+    if (list.length && siteQuery) {
+      const matched = findGeoparkSiteBySlugOrId(String(siteQuery), list);
       if (matched) {
         desktopLeftPanelRef.value?.openGeoparkDetail(matched);
         mobileLeftPanelRef.value?.openGeoparkDetail(matched);
+        if (!leftPanelOpen.value && !isMobileScreen.value) {
+          leftPanelOpen.value = true;
+        }
+        if (matched.hasCoordinate && matched.coordinate) {
+          mapCanvasRef.value?.flyTo(matched.coordinate, matched.zoom || 15);
+        }
+        if (isMobileScreen.value) {
+          mobileDrawerTab.value = "geopark";
+          mobileSheetSnap.value = "peek";
+          mobileDrawerOpen.value = true;
+        }
       }
     }
   }
@@ -1417,11 +1500,25 @@ function handleUpdateLayerFilter(payload: { layerId: string; kecamatan: string |
     }
     return layer;
   });
+
+  // Jika layer di-clear dan tidak ada lagi layer dengan filter kecamatan aktif
+  const hasRemainingFilter = activeLayers.value.some(
+    (l) => Boolean(l.filterKecamatan && l.filterKecamatan !== "ALL")
+  );
+  if (!hasRemainingFilter && selectedKecamatanFilter.value) {
+    handleFilterWilayah(null);
+  }
 }
 
 function handleFilterWilayah(kecamatanName: string | null) {
   selectedKecamatanFilter.value = kecamatanName;
-  updateMapQuery({ wilayah: kecamatanName || undefined });
+  updateMapQuery({
+    wilayah: kecamatanName || undefined,
+    kecamatan: kecamatanName || undefined,
+    search: kecamatanName ? (route.query.search as string) : (route.query.search && /^kecamatan/i.test(String(route.query.search)) ? undefined : (route.query.search as string)),
+    name: kecamatanName ? (route.query.name as string) : (route.query.name && /^kecamatan/i.test(String(route.query.name)) ? undefined : (route.query.name as string)),
+    q: kecamatanName ? (route.query.q as string) : (route.query.q && /^kecamatan/i.test(String(route.query.q)) ? undefined : (route.query.q as string)),
+  });
   if (isMobileScreen.value && kecamatanName) {
     mobileSheetSnap.value = "peek";
     mobileDrawerOpen.value = true;
@@ -1429,6 +1526,26 @@ function handleFilterWilayah(kecamatanName: string | null) {
   if (kecamatanName) {
     clickedCoordinate.value = null;
     mapCanvasRef.value?.dismissPulse?.();
+  } else {
+    searchedLocationLabel.value = null;
+    if (import.meta.client) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("wilayah");
+      url.searchParams.delete("kecamatan");
+      const s = url.searchParams.get("search");
+      if (s && (/^kecamatan\s+/i.test(s) || KECAMATAN_ENTRIES.some((k) => k.name.toLowerCase() === s.toLowerCase()))) {
+        url.searchParams.delete("search");
+      }
+      const n = url.searchParams.get("name");
+      if (n && (/^kecamatan\s+/i.test(n) || KECAMATAN_ENTRIES.some((k) => k.name.toLowerCase() === n.toLowerCase()))) {
+        url.searchParams.delete("name");
+      }
+      const q = url.searchParams.get("q");
+      if (q && (/^kecamatan\s+/i.test(q) || KECAMATAN_ENTRIES.some((k) => k.name.toLowerCase() === q.toLowerCase()))) {
+        url.searchParams.delete("q");
+      }
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
   }
   activeLayers.value = activeLayers.value.map((layer) => {
     const isMvt =
@@ -1467,15 +1584,55 @@ function handleSelectDataset(dataset: any) {
 
   leftPanelOpen.value = true;
 }
+
+// Transisi masuk Floating Left Panel (muncul anggun setelah navbar meregang ke kiri & kanan)
+const isLeftPanelMounted = ref(false);
+
+onMounted(() => {
+  if (import.meta.client) {
+    isMapsReady.value = false;
+    isLeftPanelMounted.value = false;
+    updateIsMobile();
+    window.addEventListener("resize", updateIsMobile, { passive: true });
+    startLoadingSimulation();
+
+    // Fallback keselamatan jika event map loaded tertahan lebih dari 4 detik
+    setTimeout(() => {
+      if (!isMapsReady.value) {
+        isMapsReady.value = true;
+        isLeftPanelMounted.value = true;
+      }
+    }, 4500);
+  }
+});
+
+onUnmounted(() => {
+  if (import.meta.client) {
+    window.removeEventListener("resize", updateIsMobile);
+  }
+  isMapsReady.value = false;
+  isLeftPanelMounted.value = false;
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+  if (urlUpdateTimer) {
+    clearTimeout(urlUpdateTimer);
+    urlUpdateTimer = null;
+  }
+});
 </script>
 
 <template>
   <div
     class="wrapper-maps flex w-full h-full relative overflow-hidden bg-gray-100 dark:bg-[#070b14] select-none font-sans antialiased text-gray-900 dark:text-gray-100"
   >
-    <!-- Panel Kiri: Desktop Split (lebar standar 400px, responsif 350px pada tablet) -->
+    <!-- Panel Kiri: Desktop Floating Card (melayang di bawah Floating Navbar) -->
     <aside
-      class="hidden md:flex flex-col w-[350px] lg:w-[400px] shrink-0 h-full relative z-20 bg-white dark:bg-[#09111e] border-r border-slate-200 dark:border-white/8 shadow-lg overflow-hidden transition-[width] duration-200 ease-out"
+      class="hidden md:flex flex-col w-[350px] lg:w-[400px] shrink-0 absolute top-[76px] sm:top-[80px] left-3 sm:left-4 bottom-3 sm:bottom-4 z-20 bg-white dark:bg-[#09111e] rounded-2xl sm:rounded-3xl shadow-2xl shadow-slate-900/10 dark:shadow-black/50 border border-slate-200/80 dark:border-white/10 overflow-hidden transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] will-change-transform"
+      :class="isLeftPanelMounted
+        ? 'opacity-100 translate-x-0 pointer-events-auto'
+        : 'opacity-0 -translate-x-12 pointer-events-none'"
       aria-label="Panel Navigasi Spasial Kiri"
     >
       <LeftPanel
@@ -1506,13 +1663,14 @@ function handleSelectDataset(dataset: any) {
         @close-inspector="handleCloseInspector"
         @clear-pin="handleClearPin"
         @select-feature="handleSelectFeature"
+        @select-coordinate="handleSelectCoordinate"
         @share="handleOpenShare"
       />
     </aside>
 
-    <!-- Panel Kanan: Map Canvas Container (mengisi sisa layar penuh) -->
+    <!-- Kanvas Peta: Memenuhi seluruh layar latar belakang (Edge-to-Edge) -->
     <main
-      class="flex-1 h-full min-w-0 relative overflow-hidden bg-gray-100 dark:bg-[#070b14]"
+      class="w-full h-full relative overflow-hidden bg-gray-100 dark:bg-[#070b14]"
       aria-label="Kanvas Peta Interaktif"
     >
       <ClientOnly>
@@ -1629,7 +1787,7 @@ function handleSelectDataset(dataset: any) {
 
       <!-- Floating Display & Layer Group (Kiri Bawah di dalam Kanvas Peta) -->
       <div
-        class="absolute z-20 pointer-events-auto select-none flex flex-col items-start gap-1.5 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-3 sm:left-4"
+        class="absolute z-20 pointer-events-auto select-none flex flex-col items-start gap-1.5 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-3 sm:left-4 md:left-[380px] lg:left-[432px]"
         :class="[
           mobileDrawerOpen && mobileSheetSnap === 'full'
             ? 'opacity-0 pointer-events-none translate-y-4 md:opacity-100 md:pointer-events-auto md:translate-y-0 md:bottom-4'
@@ -1752,7 +1910,7 @@ function handleSelectDataset(dataset: any) {
               Dataset
             </button>
 
-            <!-- Tab 3: Geopark -->
+            <!-- Tab 3: Geosite -->
             <button
               type="button"
               role="tab"
@@ -1763,7 +1921,7 @@ function handleSelectDataset(dataset: any) {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
               @click="handleMobileTabClick('geopark')"
             >
-              Geopark
+              Geosite
             </button>
           </div>
 
@@ -1812,6 +1970,7 @@ function handleSelectDataset(dataset: any) {
           @close-inspector="handleCloseInspector"
           @clear-pin="handleClearPin"
           @select-feature="handleSelectFeature"
+          @select-coordinate="handleSelectCoordinate"
           @share="handleOpenShare"
           @search-focus="handleMobileSearchFocus"
           @search-close="handleMobileSearchClose"

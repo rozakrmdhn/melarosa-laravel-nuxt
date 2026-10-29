@@ -201,6 +201,17 @@ class BkkdProposalController extends Controller
 
         $user = $request->user();
         $validated = $request->validated();
+
+        // Auto-lock wilayah jika pengguna memiliki pembatasan wilayah (desa / kecamatan)
+        if ($user && !$user->hasRole('admin') && !$user->hasRole('verifierBappeda')) {
+            if ($user->id_kecamatan) {
+                $validated['id_kecamatan'] = $user->id_kecamatan;
+            }
+            if ($user->id_desa) {
+                $validated['id_desa'] = $user->id_desa;
+            }
+        }
+
         if (empty($validated['tanggal_diterima'])) {
             $validated['tanggal_diterima'] = now()->toDateString();
         }
@@ -717,7 +728,7 @@ class BkkdProposalController extends Controller
 
         $file = $request->file('file');
         $namaAsli = $file->getClientOriginalName();
-        $extension = $file->getClientOriginalExtension();
+        $extension = $file->extension() ?: $file->guessExtension() ?: 'bin';
 
         $path = sprintf('bkkd/%s/%s/%s.%s', $proposal->tahun_anggaran, $proposal->id, Str::uuid7(), $extension);
         Storage::disk('local')->putFileAs(dirname($path), $file, basename($path));

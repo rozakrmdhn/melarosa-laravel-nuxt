@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Helpers\SpatialHelper;
 use App\Http\Controllers\Controller;
 use App\Models\BatasWilayahKecamatan;
 use Illuminate\Http\JsonResponse;
@@ -217,7 +218,7 @@ class BatasWilayahKecamatanController extends Controller
             $kec->nama_jabatan = $validated['nama_jabatan'] ?? 'Camat';
             $kec->nip = $validated['nip'] ?? null;
             $kec->pangkat_gol = $validated['pangkat_gol'] ?? null;
-            $kec->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geoJsonString')), 4326)");
+            $kec->geom = SpatialHelper::geomFromGeoJsonRaw($geoJsonString);
             $kec->save();
 
             $fresh = BatasWilayahKecamatan::withGeoJson()->find($kec->id);
@@ -290,7 +291,7 @@ class BatasWilayahKecamatanController extends Controller
                     ], 422);
                 }
 
-                $kec->geom = DB::raw("ST_SetSRID(ST_Multi(ST_GeomFromGeoJSON('$geoJsonString')), 4326)");
+                $kec->geom = SpatialHelper::geomFromGeoJsonRaw($geoJsonString);
             }
 
             $kec->save();

@@ -1,6 +1,6 @@
 # 📚 Indeks & Panduan Dokumentasi Melarosa GIS
 
-Pusat dokumentasi arsitektur, panduan teknis, dan katalog modul untuk proyek **Melarosa GIS** (Laravel 13 REST API + Nuxt 4 WebGIS + PostGIS & Martin Tile Server).
+Pusat dokumentasi arsitektur, panduan teknis, dan katalog modul untuk proyek **Melarosa GIS (Monitoring Evaluasi Data Spasial Desa)** Kabupaten Bojonegoro (Laravel 13 REST API + Nuxt 4 WebGIS + PostGIS & Martin Tile Server).
 
 ---
 
@@ -40,6 +40,7 @@ Daftar modul fungsional dalam Melarosa GIS beserta status dokumentasi resminya:
 
 | Modul / Fitur | Berkas Dokumentasi | Status | Deskripsi Singkat |
 |---|---|:---:|---|
+| **Pedoman Keamanan Sistem** | [system-security-guidelines.md](./features/system-security-guidelines.md) | ✅ Lengkap | Standar paten keamanan fitur (Anti-SQLi PostGIS, BOLA/IDOR, Octane, DOMPurify, Upload) |
 | **Audit Trail & Logs** | [audit-logs.md](./features/audit-logs.md) | ✅ Lengkap | Jejak riwayat mutasi data spasial, administratif, dan sistem |
 | **Autentikasi & Sesi** | [auth-and-sessions.md](./features/auth-and-sessions.md) | ✅ Lengkap | Login Sanctum, penutupan pendaftaran mandiri, device session, & roadmap aduan spasial |
 | **RBAC (Roles & Permissions)** | `docs/features/roles-and-permissions.md` | 📝 Terencana | Matriks hak akses Spatie (Superadmin, Bappeda, Kecamatan, Desa) |

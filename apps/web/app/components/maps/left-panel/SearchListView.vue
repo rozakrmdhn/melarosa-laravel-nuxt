@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { KecamatanEntry, DatasetResultItem } from "~/components/maps/LeftPanel.vue";
 import type { GeoparkSite } from "~/composables/useGeoparkSites";
+import { formatDMS, getKecamatanFromCoordinate, type ParsedCoordinate } from "~/utils/gis-helpers";
 
 const props = defineProps<{
   filteredKecamatanResults: KecamatanEntry[];
@@ -8,18 +10,73 @@ const props = defineProps<{
   filteredGeoparkResults: GeoparkSite[];
   totalSearchResultsCount: number;
   universalSearchQuery: string;
+  parsedCoordinateResult?: ParsedCoordinate | null;
 }>();
 
 const emit = defineEmits<{
   (e: "select-kecamatan", k: KecamatanEntry): void;
   (e: "select-dataset", d: DatasetResultItem): void;
   (e: "select-geopark", site: GeoparkSite): void;
+  (e: "select-coordinate", coord: ParsedCoordinate): void;
   (e: "close-search"): void;
 }>();
+
+const coordinateDMS = computed(() => {
+  if (!props.parsedCoordinateResult) return "";
+  return formatDMS(props.parsedCoordinateResult.lat, props.parsedCoordinateResult.lng);
+});
+
+const nearbyKecamatan = computed(() => {
+  if (!props.parsedCoordinateResult) return null;
+  return getKecamatanFromCoordinate(props.parsedCoordinateResult.lat, props.parsedCoordinateResult.lng);
+});
 </script>
 
 <template>
   <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-3 space-y-4">
+    <!-- 0. Kategori Titik Koordinat (WGS 84) - Prioritas Utama saat terdeteksi -->
+    <div v-if="props.parsedCoordinateResult" class="space-y-2">
+      <div class="flex items-center justify-between px-1">
+        <span class="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+          <UIcon name="i-lucide-crosshair" class="size-4" />
+          <span>Hasil Pencarian Koordinat</span>
+        </span>
+        <span class="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums">
+          WGS 84
+        </span>
+      </div>
+
+      <div class="space-y-1.5">
+        <button
+          type="button"
+          class="w-full flex items-center justify-between p-3 rounded-2xl text-left transition-all cursor-pointer bg-blue-50/80 dark:bg-blue-950/40 hover:bg-blue-100/90 dark:hover:bg-blue-900/50 border border-blue-200/80 dark:border-blue-800/60 hover:border-blue-400 dark:hover:border-blue-500 group min-h-[52px] shadow-2xs"
+          @click="emit('select-coordinate', props.parsedCoordinateResult)"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="size-9 rounded-full flex items-center justify-center shrink-0 bg-blue-600 text-white shadow-xs group-hover:scale-105 transition-transform">
+              <UIcon name="i-lucide-navigation" class="size-4.5" />
+            </div>
+            <div class="min-w-0">
+              <p class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate tabular-nums">
+                {{ props.parsedCoordinateResult.formatted }}
+              </p>
+              <p class="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5 tabular-nums">
+                {{ coordinateDMS }}
+                <span v-if="nearbyKecamatan" class="text-blue-600 dark:text-blue-400 font-semibold">
+                  · Kec. {{ nearbyKecamatan.name }}
+                </span>
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
+            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-600 text-white shadow-2xs">
+              Fly To Peta
+            </span>
+            <UIcon name="i-lucide-chevron-right" class="size-4 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </button>
+      </div>
+    </div>
     <!-- 1. Kategori Wilayah & Kecamatan -->
     <div v-if="props.filteredKecamatanResults.length > 0" class="space-y-2">
       <div class="flex items-center justify-between px-1">
@@ -165,7 +222,7 @@ const emit = defineEmits<{
 
     <!-- State kosong saat tidak ada hasil -->
     <div
-      v-if="props.totalSearchResultsCount === 0"
+      v-if="props.totalSearchResultsCount === 0 && !props.parsedCoordinateResult"
       class="py-10 px-3 text-center space-y-2.5"
     >
       <div class="size-12 rounded-full bg-slate-100 dark:bg-white/5 text-slate-500 mx-auto flex items-center justify-center">
@@ -176,7 +233,7 @@ const emit = defineEmits<{
           Tidak ada hasil yang cocok
         </p>
         <p class="text-xs text-slate-500 dark:text-slate-400 px-4">
-          Tidak ditemukan wilayah, dataset, atau geosite untuk kata kunci "{{ props.universalSearchQuery }}".
+          Tidak ditemukan wilayah, koordinat, dataset, atau geosite untuk kata kunci "{{ props.universalSearchQuery }}".
         </p>
       </div>
       <button

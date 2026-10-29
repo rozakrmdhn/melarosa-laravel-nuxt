@@ -41,6 +41,10 @@ class BkkdProposalPolicy
             return (int) $proposal->id_kecamatan === (int) $user->id_kecamatan;
         }
 
+        if ($user->id_desa) {
+            return (int) $proposal->id_desa === (int) $user->id_desa;
+        }
+
         return false;
     }
 
@@ -51,16 +55,48 @@ class BkkdProposalPolicy
 
     public function update(User $user, BkkdProposal $proposal): bool
     {
-        return $this->hasPerm($user, ['bkkd-proposal-update']);
+        if (!$this->hasPerm($user, ['bkkd-proposal-update'])) {
+            return false;
+        }
+
+        if ($user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+            return true;
+        }
+
+        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
+            return (int) $proposal->id_kecamatan === (int) $user->id_kecamatan;
+        }
+
+        if ($user->id_desa) {
+            return (int) $proposal->id_desa === (int) $user->id_desa;
+        }
+
+        return false;
     }
 
     public function delete(User $user, BkkdProposal $proposal): bool
     {
-        return $this->hasPerm($user, ['bkkd-proposal-delete']);
+        if (!$this->hasPerm($user, ['bkkd-proposal-delete'])) {
+            return false;
+        }
+
+        if ($user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+            return true;
+        }
+
+        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
+            return (int) $proposal->id_kecamatan === (int) $user->id_kecamatan;
+        }
+
+        if ($user->id_desa) {
+            return (int) $proposal->id_desa === (int) $user->id_desa;
+        }
+
+        return false;
     }
 
     public function restore(User $user, BkkdProposal $proposal): bool
     {
-        return $this->hasPerm($user, ['bkkd-proposal-delete']);
+        return $this->delete($user, $proposal);
     }
 }

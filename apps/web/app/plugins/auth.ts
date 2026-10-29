@@ -1,7 +1,8 @@
 export default defineNuxtPlugin(async (nuxtApp) => {
   const auth = useAuthStore();
+  const xsrf = useCookie('XSRF-TOKEN');
 
-  if (import.meta.client) {
+  if (import.meta.client && !xsrf.value) {
     try {
       await auth.fetchCsrf();
     } catch (error) {

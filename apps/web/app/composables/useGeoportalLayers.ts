@@ -104,6 +104,9 @@ export interface GeoportalLayerItem {
   last_synced_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  title?: string;
+  abstract?: string;
+  agency?: string;
 }
 
 export interface GeoportalSyncTimelineItem {
@@ -191,7 +194,7 @@ export type GeoportalGroupedMap = Record<string, GeoportalLayerItem[]>;
 
 export function useGeoportalLayers() {
   const searchQuery = ref("");
-  const selectedCategory = ref<string>("ALL");
+  const selectedCategory = ref<string | null>("ALL");
   const {
     connectionStatus,
     checking: checkingStatus,
@@ -260,7 +263,7 @@ export function useGeoportalLayers() {
     const result: GeoportalGroupedMap = {};
 
     for (const [groupName, items] of Object.entries(groupedLayers.value)) {
-      if (cat !== "ALL" && groupName !== cat) continue;
+      if (cat && cat !== "ALL" && groupName !== cat) continue;
 
       const filteredItems = (items || []).filter((item) => {
         if (!q) return true;

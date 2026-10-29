@@ -1,3 +1,5 @@
+import { KECAMATAN_ENTRIES, type KecamatanEntry } from "~/constants/kecamatan";
+
 export function getKondisiColor(kondisi: string | null | undefined): string {
   if (!kondisi) return "#71717a"; // slate-500
   const k = kondisi.toLowerCase();
@@ -32,19 +34,59 @@ export interface ParsedCoordinate {
 }
 
 /**
+ * Format koordinat desimal ke format derajat menit detik (DMS) standar WGS 84.
+ * Contoh: -7.15406, 111.89261 -> 7°09'14.6"S 111°53'33.4"E
+ */
+export function formatDMS(lat: number, lng: number): string {
+  function toDmsStr(val: number, posHemi: string, negHemi: string): string {
+    const isNeg = val < 0;
+    const absVal = Math.abs(val);
+    const deg = Math.floor(absVal);
+    const minFloat = (absVal - deg) * 60;
+    const min = Math.floor(minFloat);
+    const sec = ((minFloat - min) * 60).toFixed(1);
+    const hemi = isNeg ? negHemi : posHemi;
+    const minPad = String(min).padStart(2, "0");
+    const secPad = parseFloat(sec) < 10 ? "0" + sec : sec;
+    return `${deg}°${minPad}'${secPad}"${hemi}`;
+  }
+  return `${toDmsStr(lat, "N", "S")} ${toDmsStr(lng, "E", "W")}`;
+}
+
+/**
+ * Mencari kecamatan Bojonegoro yang melingkupi titik koordinat (berdasarkan bounding box spasial).
+ */
+export function getKecamatanFromCoordinate(lat: number, lng: number): KecamatanEntry | null {
+  for (const k of KECAMATAN_ENTRIES) {
+    const [minLng, minLat, maxLng, maxLat] = k.bbox;
+    if (lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat) {
+      return k;
+    }
+  }
+  return null;
+}
+
+/**
  * Parsing input koordinat dari pengguna baik dalam format Desimal (DD) maupun DMS (Degrees Minutes Seconds).
  * Mendukung format:
- * - Desimal: `-7.1552, 111.9071` atau `111.9071, -7.1552`
- * - DMS Internasional: `7°09'14.6"S 111°53'33.4"E` atau `7° 9' 14.6" S, 111° 53' 33.4" E`
+ * - Desimal: `-7.1552, 111.9071`, `-7.1552 111.9071`, `111.9071, -7.1552`, `-7.1552; 111.9071`
+ * - Desimal Kardinal: `7.1552° S, 111.9071° E`
+ * - DMS Internasional: `7°09'14.6"S 111°53'33.4"E`, `7° 9' 14.6" S, 111° 53' 33.4" E`, `-7° 9' 14.6", 111° 53' 33.4"`
  * - DMS Indonesia: `7°09'14.6"LS 111°53'33.4"BT`
+ * - DDM (Degrees Decimal Minutes): `7° 9.243' S 111° 53.556' E`
  */
 export function parseCoordinateString(input: string): ParsedCoordinate | null {
   if (!input) return null;
-  const q = input.trim();
+  let q = input.trim();
   if (!q) return null;
 
-  // 1. Cek format desimal standar: -7.12345, 111.12345 atau 111.12345, -7.12345
-  const decimalRegex = /^(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)$/;
+  // Bersihkan label teks awalan umum
+  q = q.replace(/(?:latitude|lat|lintang)\s*[:=]?\s*/gi, "")
+       .replace(/(?:longitude|long|lon|lng|bujur)\s*[:=]?\s*/gi, " ")
+       .trim();
+
+  // 1. Cek format desimal standar: -7.12345, 111.12345 atau 111.12345, -7.12345 (pemisah koma, spasi, titik koma, slash)
+  const decimalRegex = /^(-?\d{1,3}(?:\.\d+)?)[,\s;/]+(-?\d{1,3}(?:\.\d+)?)$/;
   const decMatch = q.match(decimalRegex);
   if (decMatch) {
     const num1 = parseFloat(decMatch[1]);
@@ -69,8 +111,8 @@ export function parseCoordinateString(input: string): ParsedCoordinate | null {
     }
   }
 
-  // 2. Cek format DMS (Degrees Minutes Seconds)
-  const dmsTokenRegex = /([NSEWLUlsbt]{1,2})?\s*(\d+(?:\.\d+)?)\s*[°ºd\s]\s*(?:(\d+(?:\.\d+)?)\s*['′m\s]\s*)?(?:(\d+(?:\.\d+)?)\s*["″s\s]?)?\s*([NSEWLUlsbt]{1,2})?/gi;
+  // 2. Cek format DMS (Degrees Minutes Seconds) & DDM (Degrees Decimal Minutes)
+  const dmsTokenRegex = /([NSEWLUlsbt]{1,2})?\s*(-?\d+(?:\.\d+)?)\s*[°ºd\s]\s*(?:(\d+(?:\.\d+)?)\s*['′m\s]\s*)?(?:(\d+(?:\.\d+)?)\s*["″s\s]?)?\s*([NSEWLUlsbt]{1,2})?/gi;
   const matches = [...q.matchAll(dmsTokenRegex)];
   const validTokens = matches.filter((m) => m[2] !== undefined && m[2] !== "");
 
@@ -81,26 +123,29 @@ export function parseCoordinateString(input: string): ParsedCoordinate | null {
     for (let i = 0; i < 2; i++) {
       const token = validTokens[i];
       const prefixHemi = (token[1] || "").toUpperCase();
-      const deg = parseFloat(token[2]);
+      const rawDeg = parseFloat(token[2]);
+      const isNeg = rawDeg < 0;
+      const deg = Math.abs(rawDeg);
       const min = token[3] ? parseFloat(token[3]) : 0;
       const sec = token[4] ? parseFloat(token[4]) : 0;
       const suffixHemi = (token[5] || "").toUpperCase();
       const hemi = suffixHemi || prefixHemi;
 
-      const decVal = deg + min / 60 + sec / 3600;
+      let decVal = deg + min / 60 + sec / 3600;
+      if (isNeg) decVal = -decVal;
 
       if (hemi === "S" || hemi === "LS") {
-        lat = -decVal;
+        lat = -Math.abs(decVal);
       } else if (hemi === "N" || hemi === "LU") {
-        lat = decVal;
+        lat = Math.abs(decVal);
       } else if (hemi === "W" || hemi === "BB") {
-        lng = -decVal;
+        lng = -Math.abs(decVal);
       } else if (hemi === "E" || hemi === "BT") {
-        lng = decVal;
+        lng = Math.abs(decVal);
       } else {
-        if (lat === null && decVal <= 90) {
+        if (lat === null && Math.abs(decVal) <= 90) {
           lat = decVal;
-        } else if (lng === null && decVal <= 180) {
+        } else if (lng === null && Math.abs(decVal) <= 180) {
           lng = decVal;
         }
       }

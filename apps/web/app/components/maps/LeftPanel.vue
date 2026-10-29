@@ -3,7 +3,6 @@ import type { BasemapKey } from "~/components/maps/MapCanvas.vue";
 import type { ActiveLayerItem, MainTab } from "~/types/map-layers";
 import { KECAMATAN_ENTRIES, type KecamatanEntry } from "~/constants/kecamatan";
 import GeoportalLayerSection from "./GeoportalLayerSection.vue";
-import BottomLocationBar from "./BottomLocationBar.vue";
 import { useGeoportalLayers, type GeoportalLayerItem } from "~/composables/useGeoportalLayers";
 import type { IdentifiedFeature } from "~/components/maps/IdentifyFeatures.vue";
 import SearchListView from "./left-panel/SearchListView.vue";
@@ -14,6 +13,12 @@ import IdentifyView from "./left-panel/IdentifyView.vue";
 import GeoparkListView from "./left-panel/GeoparkListView.vue";
 import GeoparkDetailView from "./left-panel/GeoparkDetailView.vue";
 import { useGeoparkSites, type GeoparkSite, type GeoparkCategoryFilter } from "~/composables/useGeoparkSites";
+import {
+  parseCoordinateString,
+  formatDMS,
+  getKecamatanFromCoordinate,
+  type ParsedCoordinate,
+} from "~/utils/gis-helpers";
 
 const { setActivePillarFilter } = useGeoparkSites();
 
@@ -22,7 +27,7 @@ const props = withDefaults(
     isMobileDrawer?: boolean;
     activeLayers?: ActiveLayerItem[];
     currentBasemap?: BasemapKey;
-    activeTab?: "layers" | "geoportal" | "dataset" | "geopark";
+    activeTab?: "layers" | "geoportal" | "dataset" | "geopark" | "geosite";
     selectedKecamatanFilter?: string | null;
     clickedCoordinate?: [number, number] | null;
     locationLabel?: string | null;
@@ -74,10 +79,15 @@ const emit = defineEmits<{
   (e: "close-layer-detail"): void;
   (e: "open-geopark-detail", site: GeoparkSite): void;
   (e: "close-geopark-detail"): void;
+  (e: "select-coordinate", payload: {
+    coordinate: [number, number];
+    formatted: string;
+    zoom?: number;
+  }): void;
 }>();
 
 const localActiveTab = ref<MainTab>(
-  props.activeTab === "geopark"
+  props.activeTab === "geopark" || props.activeTab === "geosite"
     ? "geopark"
     : props.activeTab === "geoportal" || props.activeTab === "dataset"
       ? "dataset"
@@ -88,7 +98,7 @@ watch(
   () => props.activeTab,
   (val) => {
     const target: MainTab =
-      val === "geopark"
+      val === "geopark" || val === "geosite"
         ? "geopark"
         : val === "geoportal" || val === "dataset"
           ? "dataset"
@@ -100,7 +110,7 @@ watch(
 const currentActiveTab = computed<MainTab>(() => {
   if (props.inspectorOpen) return "layers";
   if (props.isMobileDrawer) {
-    if (props.activeTab === "geopark") return "geopark";
+    if (props.activeTab === "geopark" || props.activeTab === "geosite") return "geopark";
     if (props.activeTab === "geoportal" || props.activeTab === "dataset") return "dataset";
     return "layers";
   }
@@ -122,7 +132,7 @@ const selectedLayer = computed(() =>
 export type SearchSubView = "list" | "detail";
 const searchSubView = ref<SearchSubView>("list");
 
-export type SearchItemType = "kecamatan" | "dataset" | "geopark" | "landmark";
+export type SearchItemType = "kecamatan" | "dataset" | "geopark" | "landmark" | "coordinate";
 export interface SelectedSearchItem {
   type: SearchItemType;
   data: any;
@@ -316,8 +326,15 @@ const filteredGeoparkResults = computed(() => {
   });
 });
 
+const parsedCoordinateResult = computed<ParsedCoordinate | null>(() => {
+  const q = universalSearchQuery.value.trim();
+  if (!q) return null;
+  return parseCoordinateString(q);
+});
+
 const totalSearchResultsCount = computed(() => {
   return (
+    (parsedCoordinateResult.value ? 1 : 0) +
     filteredKecamatanResults.value.length +
     filteredDatasetResults.value.length +
     filteredGeoparkResults.value.length
@@ -334,6 +351,8 @@ const detailSubPageTitle = computed(() => {
     case "geopark":
     case "landmark":
       return "Tentang Geosite";
+    case "coordinate":
+      return "Tentang Titik Koordinat";
     default:
       return "Tentang";
   }
@@ -343,12 +362,12 @@ const previousTabBeforeSearch = ref<MainTab>("layers");
 
 const searchPlaceholder = computed(() => {
   if (currentActiveTab.value === "geopark") {
-    return "Cari nama geosite, fosil, api abadi, tradisi...";
+    return "Cari nama geosite, fosil, api abadi, koordinat...";
   }
   if (currentActiveTab.value === "dataset") {
-    return "Cari dataset tematik, OPD, atau layer spasial...";
+    return "Cari dataset tematik, OPD, layer, koordinat...";
   }
-  return "Cari wilayah, dataset, atau geosite geopark...";
+  return "Cari wilayah, koordinat desimal/derajat, layer...";
 });
 
 function handleSearchFocus() {
@@ -425,6 +444,9 @@ function handleGoToGeopark(category?: GeoparkCategoryFilter) {
 }
 
 function handleCloseSearch() {
+  if (selectedSearchItem.value?.type === "geopark") {
+    emit("close-geopark-detail");
+  }
   isSearchOpen.value = false;
   searchSubView.value = "list";
   selectedSearchItem.value = null;
@@ -443,6 +465,9 @@ function handleCloseSearch() {
 }
 
 function handleBackToSearchList() {
+  if (selectedSearchItem.value?.type === "geopark") {
+    emit("close-geopark-detail");
+  }
   searchSubView.value = "list";
   selectedSearchItem.value = null;
 }
@@ -471,6 +496,57 @@ function handleSelectGeoparkFromSearch(site: GeoparkSite) {
   }
   selectedSearchItem.value = { type: "geopark", data: site };
   searchSubView.value = "detail";
+  emit("open-geopark-detail", site);
+}
+
+function handleSelectCoordinateFromSearch(coord: ParsedCoordinate) {
+  const nearbyKec = getKecamatanFromCoordinate(coord.lat, coord.lng);
+  const dmsStr = formatDMS(coord.lat, coord.lng);
+
+  emit("select-coordinate", {
+    coordinate: [coord.lng, coord.lat],
+    formatted: coord.formatted,
+    zoom: 16,
+  });
+
+  selectedSearchItem.value = {
+    type: "coordinate",
+    data: {
+      lat: coord.lat,
+      lng: coord.lng,
+      formatted: coord.formatted,
+      dms: dmsStr,
+      kecamatan: nearbyKec,
+    },
+  };
+  searchSubView.value = "detail";
+}
+
+function handleZoomCoordinateInDetail(coord: any) {
+  emit("select-coordinate", {
+    coordinate: [coord.lng, coord.lat],
+    formatted: coord.formatted,
+    zoom: 16,
+  });
+}
+
+function handleSearchSubmit() {
+  if (parsedCoordinateResult.value) {
+    handleSelectCoordinateFromSearch(parsedCoordinateResult.value);
+    return;
+  }
+  if (filteredKecamatanResults.value.length > 0) {
+    handleSelectKecamatanFromSearch(filteredKecamatanResults.value[0]);
+    return;
+  }
+  if (filteredDatasetResults.value.length > 0) {
+    handleSelectDatasetFromSearch(filteredDatasetResults.value[0]);
+    return;
+  }
+  if (filteredGeoparkResults.value.length > 0) {
+    handleSelectGeoparkFromSearch(filteredGeoparkResults.value[0]);
+    return;
+  }
 }
 
 function handleOpenGeoparkTabFromAbout(site: GeoparkSite) {
@@ -698,7 +774,7 @@ defineExpose({
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
           @click="handleTabClick('geopark')"
         >
-          Geopark
+          Geosite
         </button>
       </div>
     </div>
@@ -728,6 +804,7 @@ defineExpose({
             @focus="handleSearchFocus"
             @click="handleSearchFocus"
             @input="handleSearchFocus"
+            @keydown.enter="handleSearchSubmit"
           />
           <button
             v-if="isSearchOpen || universalSearchQuery"
@@ -753,9 +830,11 @@ defineExpose({
           :filtered-geopark-results="filteredGeoparkResults"
           :total-search-results-count="totalSearchResultsCount"
           :universal-search-query="universalSearchQuery"
+          :parsed-coordinate-result="parsedCoordinateResult"
           @select-kecamatan="handleSelectKecamatanFromSearch"
           @select-dataset="handleSelectDatasetFromSearch"
           @select-geopark="handleSelectGeoparkFromSearch"
+          @select-coordinate="handleSelectCoordinateFromSearch"
           @close-search="handleCloseSearch"
         />
 
@@ -771,6 +850,7 @@ defineExpose({
           @zoom-dataset="handleZoomToDatasetInDetail"
           @toggle-dataset="handleToggleDatasetInDetail"
           @zoom-geopark="handleZoomToGeoparkInDetail"
+          @zoom-coordinate="handleZoomCoordinateInDetail"
           @open-geopark-tab="handleOpenGeoparkTabFromAbout"
         />
 

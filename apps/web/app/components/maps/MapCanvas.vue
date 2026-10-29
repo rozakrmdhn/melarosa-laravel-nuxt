@@ -977,17 +977,7 @@ function resetNorth() {
 
 function flyTo(coordinate: [number, number], zoom = 14, snapOverride?: "min" | "peek" | "full") {
   if (!mapInstance || !olModules) return;
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
-  if (isMobile) {
-    fitCoordinateWithPadding(coordinate, zoom, 600, snapOverride);
-    return;
-  }
-  const cleanCoord = normalizeCoordLonLat(coordinate);
-  mapInstance.getView().animate({
-    center: olModules.fromLonLat(cleanCoord),
-    zoom,
-    duration: 600,
-  });
+  fitCoordinateWithPadding(coordinate, zoom, 600, snapOverride);
 }
 
 function locateUser() {
@@ -2285,7 +2275,10 @@ function getDeviceMapPadding(snapOverride?: "min" | "peek" | "full"): [number, n
         : 170;
     return [80, 24, bottomPadding, 24];
   }
-  return [80, 64, 52, 48];
+  // Desktop & Tablet: kompensasi padding kiri untuk Floating Left Panel (350px tablet / 400px desktop) dan top padding untuk Floating Navbar (80px)
+  const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
+  const leftPadding = isTablet ? 390 : 440;
+  return [96, 48, 48, leftPadding];
 }
 
 function normalizeCoordLonLat(coord: [number, number]): [number, number] {

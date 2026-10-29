@@ -30,7 +30,7 @@ Route::get('/', function () {
     return ['ok' => true, 'message' => 'Welcome to the API'];
 });
 
-Route::prefix('api/v1')->group(function () {
+Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
     Route::get('sanctum/csrf-cookie', [\Laravel\Sanctum\Http\Controllers\CsrfCookieController::class, 'show'])->name('sanctum.csrf-cookie.alias');
     Route::get('login/{provider}/redirect', [AuthController::class, 'redirect'])->name('login.provider.redirect');
     Route::get('login/{provider}/callback', [AuthController::class, 'callback'])->name('login.provider.callback');
@@ -261,9 +261,11 @@ Route::prefix('api/v1')->group(function () {
         }
 
         try {
-            $response = \Illuminate\Support\Facades\Http::withoutVerifying()
-                ->timeout(10)
-                ->get($url);
+            $http = \Illuminate\Support\Facades\Http::timeout(10);
+            if (!app()->isProduction()) {
+                $http = $http->withoutVerifying();
+            }
+            $response = $http->get($url);
 
             if ($response->successful()) {
                 return $response->json() ?? ['type' => 'FeatureCollection', 'features' => [], 'raw' => $response->body()];
@@ -286,11 +288,13 @@ Route::prefix('api/v1')->group(function () {
 
         $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 86400, function () use ($codeUpper) {
             try {
-                $response = \Illuminate\Support\Facades\Http::withoutVerifying()
-                    ->timeout(8)
-                    ->get('https://kugi.ina-sdi.or.id/kugiapi/featuretypegetbycode', [
-                        'code' => $codeUpper,
-                    ]);
+                $http = \Illuminate\Support\Facades\Http::timeout(8);
+                if (!app()->isProduction()) {
+                    $http = $http->withoutVerifying();
+                }
+                $response = $http->get('https://kugi.ina-sdi.or.id/kugiapi/featuretypegetbycode', [
+                    'code' => $codeUpper,
+                ]);
 
                 if ($response->successful()) {
                     return $response->json() ?? [];
@@ -314,19 +318,21 @@ Route::prefix('api/v1')->group(function () {
         $force = (bool) $request->query('refresh', false);
         $cacheKey = 'geopark_bojonegoro_sites_list_v2';
 
-        if ($force) {
+        if ($force && $request->user()) {
             \Illuminate\Support\Facades\Cache::forget($cacheKey);
         }
 
         $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 900, function () {
             try {
-                $response = \Illuminate\Support\Facades\Http::withoutVerifying()
-                    ->timeout(12)
+                $http = \Illuminate\Support\Facades\Http::timeout(12)
                     ->withHeaders([
                         'Accept' => 'application/json',
                         'User-Agent' => 'MelarosaWebGIS/1.0',
-                    ])
-                    ->get('https://geopark.bojonegorokab.go.id/api/diversity/list-diversity-site-list');
+                    ]);
+                if (!app()->isProduction()) {
+                    $http = $http->withoutVerifying();
+                }
+                $response = $http->get('https://geopark.bojonegorokab.go.id/api/diversity/list-diversity-site-list');
 
                 if ($response->successful()) {
                     $json = $response->json();

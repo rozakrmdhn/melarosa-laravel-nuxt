@@ -93,6 +93,7 @@ const KECAMATAN_ITEMS: SearchItem[] = [
 const PAGE_ITEMS: SearchItem[] = [
   { id: "page-beranda", title: "Beranda Utama", category: "halaman", desc: "Halaman pengantar portal geospasial", icon: "i-lucide-compass", to: "/" },
   { id: "page-maps", title: "Peta", category: "halaman", desc: "Eksplorasi peta spasial, basemap, dan layer jalan poros", icon: "i-lucide-map", to: "/maps" },
+  { id: "page-maps-isometric", title: "Peta 3D RDTR & Isometrik", category: "halaman", desc: "Peta 3D RDTR Bojonegoro (MapLibre GL JS) dan mode piksel isometrik", icon: "i-lucide-boxes", to: "/maps/isometric" },
   { id: "page-dataset", title: "Katalog Dataset JIGN", category: "halaman", desc: "Pusat direktori dataset geospasial resmi JIGN Bojonegoro", icon: "i-lucide-database", to: "/dataset" },
   { id: "page-geopark", title: "Geopark Bojonegoro", category: "halaman", desc: "20 situs geodiversity dan warisan alam Bojonegoro", icon: "i-lucide-mountain-snow", to: "/geopark" },
   { id: "page-statistik", title: "Statistik Geospasial", category: "halaman", desc: "Dashboard analitik dan statistik data spasial Bojonegoro", icon: "i-lucide-bar-chart-3", to: "/statistik" },
@@ -331,37 +332,33 @@ onUnmounted(() => {
         <nav
           ref="desktopNavRef"
           aria-label="Navigasi Utama"
-          class="pointer-events-auto relative flex items-center rounded-2xl py-2.5 transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] overflow-hidden will-change-[width]"
+          class="pointer-events-auto relative flex items-center rounded-full py-1.5 transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] overflow-hidden will-change-[width]"
           :style="isMaps ? {
             width: isMapsExpanded ? 'calc(100vw - 32px)' : compactNavWidth
           } : {}"
           :class="[
             isScrolled
-              ? 'bg-white/90 backdrop-blur-xl border border-slate-300/80 shadow-lg shadow-slate-900/8 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
-              : isMaps
-                ? 'bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md shadow-slate-900/5 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
-                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md shadow-slate-900/5 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50',
+              ? 'bg-white border border-slate-300 shadow-lg shadow-slate-900/8 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
+              : 'bg-white border border-slate-200 shadow-md shadow-slate-900/5 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50',
             isMaps
-              ? isMapsExpanded
-                ? 'px-5 sm:px-6 shadow-xl shadow-slate-900/5 dark:shadow-black/50'
-                : 'px-5 sm:px-6 shadow-md shadow-slate-900/5 dark:shadow-black/40'
-              : 'w-full px-5 sm:px-6 shadow-md shadow-slate-900/5 dark:shadow-black/40'
+              ? 'px-3.5 sm:px-4 shadow-lg shadow-slate-900/5 dark:shadow-black/50'
+              : 'w-full px-3.5 sm:px-4 shadow-md shadow-slate-900/5 dark:shadow-black/40'
           ]"
         >
           <!-- 1. Bagian Kiri: Brand Logo -->
           <div
-            class="flex items-center shrink-0 justify-start transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-1 min-w-0"
+            class="flex items-center shrink-0 justify-start transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] flex-1 min-w-0 pl-1"
           >
             <NuxtLink
               to="/"
-              class="shrink-0 flex items-center mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-xl"
+              class="shrink-0 flex items-center mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
               aria-label="Melarosa"
               @click="closeSearch"
             >
               <AppLogo />
               <span
                 v-if="isMaps"
-                class="ml-2 text-[10px] font-bold font-mono tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/70 border border-blue-200/60 dark:border-blue-800/40 px-1.5 py-0.5 rounded uppercase leading-none select-none shrink-0"
+                class="ml-2 text-[10px] font-bold font-mono tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/70 border border-blue-200/60 dark:border-blue-800/40 px-1.5 py-0.5 rounded-full uppercase leading-none select-none shrink-0"
               >
                 GIS
               </span>
@@ -375,16 +372,17 @@ onUnmounted(() => {
             />
           </div>
 
-          <!-- 2. Bagian Tengah: Navigasi Utama -->
-          <div class="flex items-center gap-1 shrink-0 justify-center">
+          <!-- 2. Bagian Tengah: Navigasi Utama (Gaya Segmented Pill Tab Menu) -->
+          <div class="flex items-center gap-0.5 p-1 bg-slate-100 dark:bg-white/[0.06] rounded-full shrink-0 justify-center">
             <NuxtLink
               v-for="link in navTree"
               :key="link.to"
               :to="link.to"
-              class="rounded-xl px-3.5 py-2 text-[0.88rem] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
+              :aria-current="isPathActive(link.to, link.exact) ? 'page' : undefined"
+              class="rounded-full px-3.5 xl:px-4 py-1.5 min-h-[36px] inline-flex items-center justify-center text-[13px] tracking-tight transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
               :class="isPathActive(link.to, link.exact)
-                ? 'text-blue-600 bg-blue-50/90 font-bold border border-blue-200/70 dark:text-blue-400 dark:bg-blue-950/70 dark:border-blue-800/60 dark:shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 font-medium dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/5 border border-transparent'"
+                ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white font-bold shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
             >
               {{ link.label }}
             </NuxtLink>
@@ -400,11 +398,11 @@ onUnmounted(() => {
             aria-hidden="true"
           />
 
-          <!-- SEARCH TRIGGER ICON BUTTON (Hanya icon pencarian, hemat ruang navigasi) -->
+          <!-- SEARCH TRIGGER ICON BUTTON -->
           <button
             type="button"
-            class="size-9 flex items-center justify-center rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/90 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 border border-slate-200/70 dark:border-white/10 dark:bg-white/5 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95 shrink-0 relative"
-            :class="isSearchOpen ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border-blue-200/80 dark:border-blue-800/50' : ''"
+            class="size-10 flex items-center justify-center rounded-full text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-95 shrink-0 relative"
+            :class="isSearchOpen ? 'bg-slate-100 text-slate-900 dark:bg-white/10 dark:text-white' : ''"
             aria-label="Buka pencarian fitur dan wilayah (Ctrl K)"
             title="Pencarian Cepat (Ctrl+K)"
             @click="openSearch"
@@ -413,13 +411,13 @@ onUnmounted(() => {
             <!-- Dot indicator jika terdapat filter/pencarian aktif -->
             <span
               v-if="route.query.search || route.query.geosite || route.query.kecamatan"
-              class="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-blue-600 dark:bg-blue-400 ring-2 ring-white dark:ring-[#09111e]"
+              class="absolute top-2 right-2 size-1.5 rounded-full bg-blue-600 dark:bg-blue-400 ring-2 ring-white dark:ring-[#09111e]"
             />
           </button>
 
           <UColorModeButton
             size="sm"
-            class="rounded-xl border border-transparent dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 transition-all"
+            class="rounded-full size-10 flex items-center justify-center dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 transition-all"
           />
 
           <UDropdownMenu
@@ -427,10 +425,10 @@ onUnmounted(() => {
             :items="userItems"
             :content="{ side: 'bottom', align: 'end' }"
           >
-            <ULink class="cursor-pointer">
+            <ULink class="cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
               <UAvatar
                 icon="i-heroicons-user"
-                class="rounded-lg"
+                class="rounded-full"
                 size="sm"
                 :src="$storage(auth.user.avatar)"
                 :alt="auth.user.name"
@@ -447,7 +445,7 @@ onUnmounted(() => {
           <NuxtLink
             v-else
             to="/auth/login"
-            class="inline-flex items-center justify-center rounded-xl px-4 py-2 text-[0.9rem] font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-sm shadow-blue-600/25 dark:bg-blue-600 dark:hover:bg-blue-500 dark:text-white dark:border-transparent dark:shadow-xs shrink-0"
+            class="inline-flex items-center justify-center rounded-full px-4 py-2 min-h-[40px] text-[13px] font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] shadow-xs dark:bg-blue-600 dark:hover:bg-blue-500 dark:text-white shrink-0"
           >
             Masuk
           </NuxtLink>
@@ -465,10 +463,10 @@ onUnmounted(() => {
           <NuxtLink
             to="/"
             aria-label="Melarosa WebGIS Bojonegoro"
-            class="pointer-events-auto flex items-center gap-2 rounded-2xl px-3 py-2 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-h-[44px] shrink-0 active:scale-[0.98] cursor-pointer"
+            class="pointer-events-auto flex items-center gap-2 rounded-full px-3.5 py-2 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-h-[44px] shrink-0 active:scale-[0.98] cursor-pointer"
             :class="isScrolled
-              ? 'bg-white/90 backdrop-blur-xl border border-slate-300/80 shadow-lg dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
-              : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'"
+              ? 'bg-white border border-slate-300 shadow-lg dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
+              : 'bg-white border border-slate-200 shadow-md dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'"
           >
             <!-- Logo Kabupaten Bojonegoro -->
             <img
@@ -481,7 +479,7 @@ onUnmounted(() => {
               <span class="font-black text-[15px] sm:text-base tracking-tight text-slate-900 dark:text-white">
                 MELAROSA
               </span>
-              <span class="text-[9px] font-bold font-mono tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/70 border border-blue-200/60 dark:border-blue-800/40 px-1 py-0.5 rounded uppercase leading-none">
+              <span class="text-[9px] font-bold font-mono tracking-wider text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/70 border border-blue-200/60 dark:border-blue-800/40 px-1.5 py-0.5 rounded-full uppercase leading-none">
                 GIS
               </span>
             </div>
@@ -493,10 +491,10 @@ onUnmounted(() => {
             <button
               type="button"
               aria-label="Buka pencarian kecamatan dan wilayah"
-              class="relative flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
+              class="relative flex items-center justify-center size-11 rounded-full transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
               :class="isScrolled
-                ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'
-                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'"
+                ? 'bg-white border border-slate-300 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'
+                : 'bg-white border border-slate-200 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'"
               @click="openSearch"
             >
               <UIcon name="i-lucide-search" class="size-5" />
@@ -512,10 +510,10 @@ onUnmounted(() => {
               type="button"
               :aria-label="isMobileMenuOpen ? 'Tutup menu' : 'Buka menu navigasi'"
               :aria-expanded="isMobileMenuOpen"
-              class="relative flex items-center justify-center size-11 rounded-2xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
+              class="relative flex items-center justify-center size-11 rounded-full transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer active:scale-95"
               :class="isScrolled
-                ? 'bg-white/88 backdrop-blur-xl border border-slate-300/80 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'
-                : 'bg-white/85 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'"
+                ? 'bg-white border border-slate-300 shadow-lg text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'
+                : 'bg-white border border-slate-200 shadow-md text-slate-700 hover:text-slate-900 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50 dark:text-slate-200 dark:hover:text-white'"
               @click="isMobileMenuOpen = !isMobileMenuOpen"
             >
               <UIcon
@@ -553,7 +551,7 @@ onUnmounted(() => {
         @click.self="closeSearch"
       >
         <div
-          class="w-full max-w-2xl bg-white/95 dark:bg-[#0b121e]/95 backdrop-blur-2xl border border-slate-200/90 dark:border-white/15 rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all mt-4 sm:mt-12"
+          class="w-full max-w-2xl bg-white dark:bg-[#0b121e] border border-slate-200 dark:border-white/15 rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all mt-4 sm:mt-12"
           @click.stop
         >
           <!-- Search Header Input -->
@@ -717,7 +715,7 @@ onUnmounted(() => {
 
         <button
           type="button"
-          class="size-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+          class="size-11 flex items-center justify-center rounded-full text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
           aria-label="Tutup menu"
           @click="isMobileMenuOpen = false"
         >
@@ -732,65 +730,67 @@ onUnmounted(() => {
       <button
         v-if="isHomePage"
         type="button"
-        class="w-full px-3.5 py-2.5 min-h-[44px] flex items-center gap-2.5 rounded-xl text-xs sm:text-sm font-medium bg-slate-100/90 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:border-blue-400/50 transition-all text-left cursor-pointer"
+        class="w-full px-4 py-2.5 min-h-[44px] flex items-center gap-2.5 rounded-full text-xs sm:text-sm font-medium bg-slate-100 dark:bg-white/[0.06] text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white transition-all text-left cursor-pointer"
         @click="isMobileMenuOpen = false; openSearch()"
       >
         <UIcon name="i-lucide-search" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
         <span class="truncate">Cari 28 Kecamatan Bojonegoro...</span>
-        <span class="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded bg-white dark:bg-white/10 text-slate-400 border border-slate-200 dark:border-white/10">Cari</span>
+        <span class="ml-auto text-[10px] font-mono px-2 py-0.5 rounded-full bg-white dark:bg-[#0f172a] text-slate-600 dark:text-slate-300 shadow-xs">Cari</span>
       </button>
 
-      <!-- Primary Navigation Links (Beranda, Geostory, Katalog Data, Peta) -->
-      <div class="space-y-1">
-        <p class="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">
+      <!-- Primary Navigation Links (Gaya Tab Menu Vertikal) -->
+      <div class="space-y-2">
+        <p class="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
           Navigasi Utama
         </p>
 
-        <!-- Nav Item Component / Links -->
-        <NuxtLink
-          v-for="item in mobileNavItems"
-          :key="item.to"
-          :to="item.to"
-          class="group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all cursor-pointer min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          :class="isPathActive(item.to, item.exact)
-            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 font-semibold ring-1 ring-blue-500/20'
-            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-white/5'"
-          @click="isMobileMenuOpen = false"
-        >
-          <div
-            class="size-9 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+        <div class="p-1.5 rounded-3xl bg-slate-100 dark:bg-white/[0.06] space-y-1">
+          <NuxtLink
+            v-for="item in mobileNavItems"
+            :key="item.to"
+            :to="item.to"
+            :aria-current="isPathActive(item.to, item.exact) ? 'page' : undefined"
+            class="group flex items-center gap-3 px-3 py-2.5 rounded-2xl transition-all cursor-pointer min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             :class="isPathActive(item.to, item.exact)
-              ? 'bg-blue-600 text-white shadow-xs shadow-blue-500/30'
-              : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'"
+              ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white font-bold shadow-xs'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/[0.04]'"
+            @click="isMobileMenuOpen = false"
           >
-            <UIcon :name="item.icon" class="size-4.5" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-semibold truncate">{{ item.label }}</span>
-              <UIcon
-                name="i-lucide-chevron-right"
-                class="size-4 text-slate-400 dark:text-slate-500 transition-transform group-hover:translate-x-0.5"
-                :class="isPathActive(item.to, item.exact) ? 'text-blue-600 dark:text-blue-400' : ''"
-              />
+            <div
+              class="size-9 rounded-full flex items-center justify-center shrink-0 transition-colors"
+              :class="isPathActive(item.to, item.exact)
+                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                : 'bg-white dark:bg-white/5 text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white'"
+            >
+              <UIcon :name="item.icon" class="size-4.5" />
             </div>
-            <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate">{{ item.desc }}</p>
-          </div>
-        </NuxtLink>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm truncate">{{ item.label }}</span>
+                <UIcon
+                  name="i-lucide-chevron-right"
+                  class="size-4 text-slate-400 dark:text-slate-500 transition-transform group-hover:translate-x-0.5 shrink-0"
+                  :class="isPathActive(item.to, item.exact) ? 'text-slate-900 dark:text-white' : ''"
+                />
+              </div>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 font-normal truncate">{{ item.desc }}</p>
+            </div>
+          </NuxtLink>
+        </div>
       </div>
 
       <!-- Theme Switcher Segment in Drawer -->
       <div class="mt-2 pt-3 border-t border-slate-100 dark:border-white/10">
-        <p class="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">
+        <p class="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
           Mode Tampilan (Tema)
         </p>
-        <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200/70 dark:border-white/10">
+        <div class="grid grid-cols-2 gap-1 p-1 rounded-full bg-slate-100 dark:bg-white/[0.06]">
           <button
             type="button"
-            class="flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold min-h-[44px] transition-all cursor-pointer"
+            class="flex items-center justify-center gap-2 py-2 px-3 rounded-full text-xs font-bold min-h-[44px] transition-all cursor-pointer"
             :class="colorMode.value === 'light'
-              ? 'bg-white text-slate-900 shadow-xs ring-1 ring-slate-900/5'
-              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
             @click="colorMode.preference = 'light'"
           >
             <UIcon name="i-lucide-sun" class="size-4 text-amber-500" />
@@ -798,10 +798,10 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            class="flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold min-h-[44px] transition-all cursor-pointer"
+            class="flex items-center justify-center gap-2 py-2 px-3 rounded-full text-xs font-bold min-h-[44px] transition-all cursor-pointer"
             :class="colorMode.value === 'dark'
-              ? 'bg-[#0b0f19] text-white shadow-xs ring-1 ring-white/15'
-              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+              ? 'bg-[#0f172a] text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
             @click="colorMode.preference = 'dark'"
           >
             <UIcon name="i-lucide-moon" class="size-4 text-blue-400" />
@@ -816,10 +816,10 @@ onUnmounted(() => {
       <div class="w-full">
         <!-- Logged in state -->
         <div v-if="auth.logged" class="space-y-3">
-          <div class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-100/70 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
+          <div class="flex items-center gap-3 p-2.5 rounded-2xl bg-slate-100/70 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
             <UAvatar
               icon="i-heroicons-user"
-              class="rounded-lg shrink-0"
+              class="rounded-full shrink-0"
               size="md"
               :src="$storage(auth.user.avatar)"
               :alt="auth.user.name"
@@ -838,7 +838,7 @@ onUnmounted(() => {
           <div class="grid grid-cols-2 gap-2">
             <NuxtLink
               to="/admin"
-              class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all min-h-[44px] cursor-pointer"
+              class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all min-h-[44px] cursor-pointer"
               @click="isMobileMenuOpen = false"
             >
               <UIcon name="i-heroicons-squares-2x2" class="size-4" />
@@ -846,7 +846,7 @@ onUnmounted(() => {
             </NuxtLink>
             <button
               type="button"
-              class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold bg-slate-200 hover:bg-slate-300/80 dark:bg-white/10 dark:hover:bg-white/20 text-slate-700 dark:text-slate-200 transition-all min-h-[44px] cursor-pointer"
+              class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-full text-xs font-semibold bg-slate-200 hover:bg-slate-300/80 dark:bg-white/10 dark:hover:bg-white/20 text-slate-700 dark:text-slate-200 transition-all min-h-[44px] cursor-pointer"
               @click="auth.logout(); isMobileMenuOpen = false"
             >
               <UIcon name="i-heroicons-arrow-left-on-rectangle" class="size-4" />
@@ -859,7 +859,7 @@ onUnmounted(() => {
         <div v-else class="space-y-2">
           <NuxtLink
             to="/auth/login"
-            class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white shadow-sm shadow-blue-600/25 transition-all min-h-[44px] cursor-pointer"
+            class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-full text-sm font-semibold bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white shadow-sm shadow-blue-600/25 transition-all min-h-[44px] cursor-pointer"
             @click="isMobileMenuOpen = false"
           >
             <UIcon name="i-lucide-log-in" class="size-4.5" />

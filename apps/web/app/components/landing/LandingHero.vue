@@ -695,9 +695,14 @@ async function initHeroMap() {
 
     buildOverlayFeatures();
 
-    // Nonaktifkan mouseWheelZoom agar scroll halaman beranda tidak terjebak di dalam kanvas peta
+    // Nonaktifkan mouseWheelZoom dan pan/pinch di layar sentuh agar scroll halaman beranda di Android tidak terjebak di kanvas peta
+    const isTouchDevice =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)')?.matches || navigator.maxTouchPoints > 0);
     const interactions = defaultInteractions({
       mouseWheelZoom: false,
+      dragPan: !isTouchDevice,
+      pinchZoom: !isTouchDevice,
       onFocusOnly: false,
     });
 
@@ -954,7 +959,7 @@ onBeforeUnmount(() => {
                 <span>Saran lokasi terhubung</span>
                 <button
                   type="button"
-                  class="min-h-[36px] px-2 text-[#2563EB] dark:text-blue-400 hover:underline cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+                  class="min-h-[44px] sm:min-h-[36px] px-2.5 text-[#2563EB] dark:text-blue-400 hover:underline cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                   @click="isSearchFocused = false"
                 >
                   Tutup
@@ -1113,7 +1118,7 @@ onBeforeUnmount(() => {
               <div
                 v-show="!isMapFallback"
                 ref="heroMapContainer"
-                class="relative z-10 w-full h-full"
+                class="relative z-10 w-full h-full touch-pan-y [&_.ol-viewport]:!touch-pan-y"
                 role="region"
                 :aria-label="`Peta interaktif Kecamatan ${activeInspectorKecamatan.name}, Kabupaten Bojonegoro`"
               />

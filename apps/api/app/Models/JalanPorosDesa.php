@@ -27,7 +27,16 @@ class JalanPorosDesa extends Model
 
     public $timestamps = true;
 
+    public const HIERARKI_POROS_DESA = 'poros_desa';
+    public const HIERARKI_LINGKUNGAN = 'lingkungan';
+    public const HIERARKI_USAHA_TANI = 'usaha_tani';
+    public const HIERARKI_KABUPATEN_USULAN = 'kabupaten_usulan';
+
+    public const SUMBER_SK_PEMDA = 'sk_pemda';
+    public const SUMBER_PROMOSI_PROPOSAL = 'promosi_proposal';
+
     protected $fillable = [
+        'id',
         'kode_ruas',
         'nama_ruas',
         'desa',
@@ -39,6 +48,11 @@ class JalanPorosDesa extends Model
         'status_awal',
         'status_eksisting',
         'sumber_data',
+        'hierarki_jalan',
+        'sumber_proposal_id',
+        'sumber_lokasi_id',
+        'validated_by',
+        'validated_at',
         'geom',
         'id_desa',
         'id_kecamatan',
@@ -50,6 +64,7 @@ class JalanPorosDesa extends Model
         'lebar'        => 'float',
         'id_desa'      => 'integer',
         'id_kecamatan' => 'integer',
+        'validated_at' => 'datetime',
         'created_at'   => 'datetime',
         'updated_at'   => 'datetime',
     ];
@@ -83,6 +98,38 @@ class JalanPorosDesa extends Model
     public function desaModel()
     {
         return $this->belongsTo(BatasWilayahDesa::class, 'id_desa');
+    }
+
+    /**
+     * Relasi ke segmen fisik infrastruktur yang menginduk pada ruas ini.
+     */
+    public function infrastrukturSegmen()
+    {
+        return $this->hasMany(InfrastrukturSegmen::class, 'parent_id', 'id');
+    }
+
+    /**
+     * Relasi ke proposal sumber apabila ruas ini dipromosikan dari usulan BKKD.
+     */
+    public function sumberProposal()
+    {
+        return $this->belongsTo(BkkdProposal::class, 'sumber_proposal_id', 'id');
+    }
+
+    /**
+     * Relasi ke lokasi proposal sumber apabila ruas ini dipromosikan dari usulan BKKD.
+     */
+    public function sumberLokasi()
+    {
+        return $this->belongsTo(BkkdProposalLokasi::class, 'sumber_lokasi_id', 'id');
+    }
+
+    /**
+     * Relasi ke verifikator yang mengesahkan ruas ini ke master jalan poros & desa.
+     */
+    public function validator()
+    {
+        return $this->belongsTo(User::class, 'validated_by', 'uuid');
     }
 
     /**
@@ -126,6 +173,10 @@ class JalanPorosDesa extends Model
             'jalan_porosdesa.status_awal',
             'jalan_porosdesa.status_eksisting',
             'jalan_porosdesa.sumber_data',
+            'jalan_porosdesa.hierarki_jalan',
+            'jalan_porosdesa.sumber_proposal_id',
+            'jalan_porosdesa.sumber_lokasi_id',
+            'jalan_porosdesa.validated_at',
             'jalan_porosdesa.id_desa',
             'jalan_porosdesa.id_kecamatan',
             'jalan_porosdesa.created_at',
@@ -154,6 +205,10 @@ class JalanPorosDesa extends Model
             'jalan_porosdesa.status_awal',
             'jalan_porosdesa.status_eksisting',
             'jalan_porosdesa.sumber_data',
+            'jalan_porosdesa.hierarki_jalan',
+            'jalan_porosdesa.sumber_proposal_id',
+            'jalan_porosdesa.sumber_lokasi_id',
+            'jalan_porosdesa.validated_at',
             'jalan_porosdesa.id_desa',
             'jalan_porosdesa.id_kecamatan',
             DB::raw(SpatialHelper::lengthColumn('jalan_porosdesa.geom')),
@@ -251,10 +306,14 @@ class JalanPorosDesa extends Model
                 'perkerasan'       => $this->perkerasan,
                 'kondisi'          => $this->kondisi,
                 'status_awal'      => $this->status_awal,
-                'status_eksisting' => $this->status_eksisting,
-                'sumber_data'      => $this->sumber_data,
-                'id_desa'          => $this->id_desa,
-                'id_kecamatan'     => $this->id_kecamatan,
+                'status_eksisting'   => $this->status_eksisting,
+                'sumber_data'        => $this->sumber_data,
+                'hierarki_jalan'     => $this->hierarki_jalan ?? self::HIERARKI_POROS_DESA,
+                'sumber_proposal_id' => $this->sumber_proposal_id,
+                'sumber_lokasi_id'   => $this->sumber_lokasi_id,
+                'validated_at'       => $this->validated_at?->toISOString(),
+                'id_desa'            => $this->id_desa,
+                'id_kecamatan'       => $this->id_kecamatan,
                 'centroid'         => !empty($this->centroid) ? json_decode($this->centroid) : null,
                 'created_at'       => $this->created_at?->toISOString(),
                 'updated_at'       => $this->updated_at?->toISOString(),

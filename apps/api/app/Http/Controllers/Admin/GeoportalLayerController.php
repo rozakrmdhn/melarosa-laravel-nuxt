@@ -27,22 +27,42 @@ class GeoportalLayerController extends Controller
      */
     public function syncHistory(Request $request): JsonResponse
     {
-        $limit = min((int) $request->query('limit', 15), 50);
+        $limit = min(max((int) $request->query('limit', 15), 1), 50);
+        $source = (string) $request->query('source', 'all');
 
-        $logs = GeoportalSyncLog::with('user:id,name,email')
+        $query = GeoportalSyncLog::with('user:id,name,email');
+        $successQuery = GeoportalSyncLog::where('status', 'success');
+        $totalQuery = GeoportalSyncLog::query();
+
+        if ($source === 'martin') {
+            $query->where('triggered_by', 'like', 'martin_%');
+            $successQuery->where('triggered_by', 'like', 'martin_%');
+            $totalQuery->where('triggered_by', 'like', 'martin_%');
+        } elseif ($source === 'geoportal') {
+            $query->where('triggered_by', 'not like', 'martin_%');
+            $successQuery->where('triggered_by', 'not like', 'martin_%');
+            $totalQuery->where('triggered_by', 'not like', 'martin_%');
+        }
+
+        $logs = $query
             ->latest()
             ->limit($limit)
-            ->get();
+            ->get()
+            ->map(function (GeoportalSyncLog $log) {
+                $item = $log->toArray();
+                $item['source_service'] = str_starts_with((string) $log->triggered_by, 'martin_')
+                    ? 'martin'
+                    : 'geoportal';
+                return $item;
+            });
 
-        $lastSuccess = GeoportalSyncLog::where('status', 'success')
-            ->latest()
-            ->first();
+        $lastSuccess = $successQuery->latest()->first();
 
         return response()->json([
             'ok' => true,
             'data' => $logs,
             'last_success_at' => $lastSuccess?->created_at?->toISOString(),
-            'total_runs' => GeoportalSyncLog::count(),
+            'total_runs' => $totalQuery->count(),
         ]);
     }
 }

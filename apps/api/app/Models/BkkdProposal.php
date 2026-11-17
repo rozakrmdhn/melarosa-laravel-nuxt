@@ -20,34 +20,26 @@ class BkkdProposal extends Model
 
     protected $table = 'bkkd_proposal';
 
+    public const TAGGING_RKPD = 'RKPD';
+    public const TAGGING_PRKPD = 'PRKPD';
+
     protected $fillable = [
         'nomor_registrasi',
         'tahun_anggaran',
-        'tahap_anggaran',
+        'tagging_usulan',
         'id_kecamatan',
         'id_desa',
         'id_bidang',
-        'id_proposal_induk',
-        'nomor_surat_desa',
-        'tanggal_surat_desa',
-        'tanggal_diterima',
         'judul_kegiatan',
         'uraian_kegiatan',
         'lokasi_kegiatan',
-        'panjang',
-        'lebar',
-        'tinggi',
-        'volume',
-        'satuan',
         'nilai_usulan',
-        'status',
-        'catatan',
-        'alasan_pergantian_papbd',
-        'nilai_disetujui_tapd',
-        'catatan_tapd',
-        'tanggal_penetapan_tapd',
-        'ditetapkan_oleh',
-        'geom',
+        'jumlah_lokasi',
+        'total_panjang_gis',
+        'status_analisa_spasial',
+        'catatan_konfirmasi_desa',
+        'dikonfirmasi_oleh',
+        'dikonfirmasi_pada',
         'versi',
         'created_by',
         'updated_by',
@@ -57,16 +49,11 @@ class BkkdProposal extends Model
         'tahun_anggaran' => 'integer',
         'id_kecamatan' => 'integer',
         'id_desa' => 'integer',
-        'panjang' => 'decimal:2',
-        'lebar' => 'decimal:2',
-        'tinggi' => 'decimal:2',
-        'volume' => 'decimal:2',
         'nilai_usulan' => 'decimal:2',
-        'nilai_disetujui_tapd' => 'decimal:2',
+        'jumlah_lokasi' => 'integer',
+        'total_panjang_gis' => 'decimal:2',
         'versi' => 'integer',
-        'tanggal_surat_desa' => 'date',
-        'tanggal_diterima' => 'date',
-        'tanggal_penetapan_tapd' => 'date',
+        'dikonfirmasi_pada' => 'datetime',
     ];
 
     public function kecamatan(): BelongsTo
@@ -84,34 +71,19 @@ class BkkdProposal extends Model
         return $this->belongsTo(RefBkkdBidang::class, 'id_bidang', 'id');
     }
 
-    public function proposalInduk(): BelongsTo
+    public function lokasi(): HasMany
     {
-        return $this->belongsTo(BkkdProposal::class, 'id_proposal_induk', 'id');
-    }
-
-    public function proposalPengganti(): HasMany
-    {
-        return $this->hasMany(BkkdProposal::class, 'id_proposal_induk', 'id');
-    }
-
-    public function lampiran(): HasMany
-    {
-        return $this->hasMany(BkkdProposalLampiran::class, 'id_proposal', 'id');
-    }
-
-    public function verifikasi(): HasMany
-    {
-        return $this->hasMany(BkkdVerifikasi::class, 'id_proposal', 'id')->orderByDesc('created_at');
-    }
-
-    public function verifikasiAktif(): HasOne
-    {
-        return $this->hasOne(BkkdVerifikasi::class, 'id_proposal', 'id')->where('is_aktif', true);
+        return $this->hasMany(BkkdProposalLokasi::class, 'id_proposal', 'id')->orderBy('urutan');
     }
 
     public function riwayat(): HasMany
     {
         return $this->hasMany(BkkdProposalRiwayat::class, 'id_proposal', 'id')->orderByDesc('versi');
+    }
+
+    public function konfirmator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'dikonfirmasi_oleh', 'uuid');
     }
 
     public function creator(): BelongsTo
@@ -122,11 +94,6 @@ class BkkdProposal extends Model
     public function updater(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by', 'uuid');
-    }
-
-    public function penetap(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'ditetapkan_oleh', 'uuid');
     }
 
     public function scopeForUser(Builder $query, ?User $user = null): Builder

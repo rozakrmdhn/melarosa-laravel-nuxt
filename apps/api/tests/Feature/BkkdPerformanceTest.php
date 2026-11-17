@@ -58,12 +58,9 @@ class BkkdPerformanceTest extends TestCase
             'id_kecamatan' => 1,
             'id_desa' => 101,
             'id_bidang' => $bidang->id,
-            'nomor_surat_desa' => '123/TEST/2026',
-            'tanggal_surat_desa' => '2026-01-01',
-            'tanggal_diterima' => '2026-01-02',
             'judul_kegiatan' => 'Pembangunan Jalan Poros',
             'nilai_usulan' => 150000000,
-            'status' => 'draft',
+            'status_analisa_spasial' => 'aman',
             'created_by' => $admin->uuid,
         ]);
 
@@ -73,12 +70,9 @@ class BkkdPerformanceTest extends TestCase
             'id_kecamatan' => 1,
             'id_desa' => 101,
             'id_bidang' => $bidang->id,
-            'nomor_surat_desa' => '124/TEST/2026',
-            'tanggal_surat_desa' => '2026-01-01',
-            'tanggal_diterima' => '2026-01-02',
             'judul_kegiatan' => 'Pembangunan Jembatan',
             'nilai_usulan' => 250000000,
-            'status' => 'diajukan_opd',
+            'status_analisa_spasial' => 'lanjutan_ruas',
             'created_by' => $admin->uuid,
         ]);
 
@@ -90,11 +84,11 @@ class BkkdPerformanceTest extends TestCase
             'summary' => [
                 'total_proposal' => 2,
                 'total_nilai_usulan' => 400000000,
-                'jumlah_draft' => 1,
-                'jumlah_diajukan' => 1,
-                'jumlah_layak' => 0,
-                'jumlah_tidak_layak' => 0,
-                'jumlah_ditetapkan' => 0,
+                'jumlah_aman' => 1,
+                'jumlah_lanjutan_ruas' => 1,
+                'jumlah_konfirmasi_belum_tuntas' => 0,
+                'jumlah_duplikasi_tuntas' => 0,
+                'jumlah_belum_dianalisa' => 0,
             ],
         ]);
     }
@@ -131,12 +125,8 @@ class BkkdPerformanceTest extends TestCase
             'id_kecamatan' => 1,
             'id_desa' => 101,
             'id_bidang' => $bidang->id,
-            'nomor_surat_desa' => '123/TEST/2026',
-            'tanggal_surat_desa' => '2026-01-01',
-            'tanggal_diterima' => '2026-01-02',
             'judul_kegiatan' => 'Pembangunan Jalan Poros',
             'nilai_usulan' => 150000000,
-            'status' => 'draft',
             'created_by' => $admin->uuid,
         ]);
 

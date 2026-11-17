@@ -376,11 +376,11 @@ const spatialExtent = computed(() => {
 
 <template>
   <div v-if="props.layer" class="space-y-4 pt-1">
-    <!-- Segmented Navigation Pill Tabs (Radius 100% Sesuai DESIGN.md) -->
-    <div class="flex items-center justify-between gap-1.5 p-1 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 overflow-x-auto no-scrollbar">
+    <!-- Segmented Navigation Pill Tabs (Tanpa Horizontal Scrollbar) -->
+    <div class="flex items-center gap-1 p-1 rounded-full bg-slate-100/90 dark:bg-white/5 border border-slate-200/80 dark:border-white/10">
       <button
         type="button"
-        class="flex-1 py-1.5 px-2.5 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap min-h-[44px] flex items-center justify-center gap-1"
+        class="flex-1 py-1.5 px-2 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap min-h-[38px] flex items-center justify-center gap-1"
         :class="activeTab === 'overview'
           ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
@@ -391,7 +391,7 @@ const spatialExtent = computed(() => {
 
       <button
         type="button"
-        class="flex-1 py-1.5 px-2.5 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap min-h-[44px] flex items-center justify-center gap-1"
+        class="flex-1 py-1.5 px-2 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap min-h-[38px] flex items-center justify-center gap-1"
         :class="activeTab === 'attributes'
           ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
@@ -400,7 +400,7 @@ const spatialExtent = computed(() => {
         <span>Atribut</span>
         <span
           v-if="attributesData?.attributes_count"
-          class="px-1.5 py-0.2 rounded-full text-xs font-mono tabular-nums"
+          class="px-1.5 py-0.2 rounded-full text-[11px] font-mono tabular-nums"
           :class="activeTab === 'attributes' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-slate-200/80 dark:bg-white/10 text-slate-600 dark:text-slate-400'"
         >
           {{ attributesData.attributes_count }}
@@ -409,7 +409,7 @@ const spatialExtent = computed(() => {
 
       <button
         type="button"
-        class="flex-1 py-1.5 px-2.5 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap min-h-[44px] flex items-center justify-center gap-1"
+        class="flex-1 py-1.5 px-2 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap min-h-[38px] flex items-center justify-center gap-1"
         :class="activeTab === 'csw'
           ? 'bg-white dark:bg-[#070b14] text-blue-600 dark:text-blue-400 font-bold shadow-xs'
           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'"
@@ -421,7 +421,7 @@ const spatialExtent = computed(() => {
       <!-- Tombol Segarkan Metadata Cepat -->
       <button
         type="button"
-        class="relative after:absolute after:-inset-1.5 after:content-[''] size-8 rounded-full flex items-center justify-center text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+        class="relative after:absolute after:-inset-1.5 after:content-[''] size-8 rounded-full flex items-center justify-center text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0 mr-0.5"
         title="Muat ulang data metadata dari server Geoportal"
         :disabled="loadingMeta || loadingAttrs"
         @click="loadData(true)"
@@ -436,89 +436,93 @@ const spatialExtent = computed(() => {
 
     <!-- ═══ TAB 1: RINGKASAN & SPESIFIKASI OGC ═══ -->
     <div v-if="activeTab === 'overview'" class="space-y-3">
-      <!-- Kategori & Wali Data -->
-      <div class="grid grid-cols-1 gap-2.5">
-        <div class="p-3 rounded-xl border border-slate-200/80 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] space-y-1">
-          <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Kategori / Urusan</span>
-          <div class="flex items-center gap-1.5 font-semibold text-xs text-slate-900 dark:text-white">
-            <UIcon name="i-lucide-folder-git-2" class="size-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span>{{ props.layer.category || 'Tematik Umum' }}</span>
+      <!-- Grup 1: Informasi Utama Dataset (Pembungkus Abu-abu Lembut Membulat) -->
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
+        <div class="px-3.5 py-3 flex items-center gap-3">
+          <span class="size-9 rounded-xl bg-white dark:bg-[#0f172a] shadow-2xs flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <UIcon name="i-lucide-folder-git-2" class="size-4" />
+          </span>
+          <div class="min-w-0 flex-1">
+            <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400 block">Kategori / Urusan</span>
+            <span class="text-xs font-bold text-slate-900 dark:text-white truncate block">
+              {{ props.layer.category || 'Tematik Umum' }}
+            </span>
           </div>
         </div>
 
-        <div class="p-3 rounded-xl border border-slate-200/80 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] space-y-1">
-          <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Wali Data / OPD</span>
-          <div class="flex items-center gap-1.5 font-semibold text-xs text-slate-900 dark:text-white">
-            <UIcon name="i-lucide-landmark" class="size-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span class="truncate" :title="props.layer.opd_name || props.layer.attribution || ''">
+        <div class="px-3.5 py-3 flex items-center gap-3">
+          <span class="size-9 rounded-xl bg-white dark:bg-[#0f172a] shadow-2xs flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <UIcon name="i-lucide-landmark" class="size-4" />
+          </span>
+          <div class="min-w-0 flex-1">
+            <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400 block">Wali Data / OPD</span>
+            <span class="text-xs font-bold text-slate-900 dark:text-white truncate block" :title="props.layer.opd_name || props.layer.attribution || ''">
               {{ props.layer.opd_name || props.layer.attribution || 'Pemerintah Kabupaten Bojonegoro' }}
             </span>
           </div>
         </div>
+
+        <div class="px-3.5 py-3 space-y-1">
+          <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <UIcon name="i-lucide-file-text" class="size-3.5" />
+            <span>Abstrak / Deskripsi Dataset</span>
+          </span>
+          <p class="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+            {{ props.layer.description || dcRecord?.abstract || 'Dataset tematik resmi simpul JIGN Kabupaten Bojonegoro.' }}
+          </p>
+        </div>
       </div>
 
-      <!-- Abstrak / Deskripsi Dataset Lengkap -->
-      <div class="p-3.5 rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-1.5">
-        <div class="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold text-xs">
-          <UIcon name="i-lucide-file-text" class="size-4 text-slate-500" />
-          <span>Abstrak / Deskripsi Dataset</span>
+      <!-- Grup 2: Spesifikasi Layanan OGC (Pembungkus Abu-abu Lembut Membulat) -->
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
+        <div class="px-3.5 py-2.5 flex items-center gap-2 text-slate-800 dark:text-slate-200 font-bold text-xs">
+          <UIcon name="i-lucide-server" class="size-4 text-slate-500 shrink-0" />
+          <span>Spesifikasi Layanan</span>
         </div>
-        <p class="text-slate-600 dark:text-slate-300 leading-relaxed text-xs">
-          {{ props.layer.description || dcRecord?.abstract || 'Dataset tematik resmi simpul JIGN Kabupaten Bojonegoro.' }}
-        </p>
-      </div>
 
-      <!-- Spesifikasi Layanan OGC -->
-      <div class="p-3.5 rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-2.5">
-        <div class="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold text-xs">
-          <UIcon name="i-lucide-server" class="size-4 text-slate-500" />
-          <span>Spesifikasi Layanan OGC Service</span>
+        <div class="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-500 dark:text-slate-400">Protokol</span>
+          <span class="font-bold text-blue-600 dark:text-blue-400 uppercase text-right">
+            {{ props.layer.protocol }}
+          </span>
         </div>
-        <div class="space-y-2 text-xs">
-          <div class="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-1.5">
-            <span class="text-slate-500">Protokol:</span>
-            <span class="font-bold text-blue-600 dark:text-blue-400 uppercase">
-              {{ props.layer.protocol }} (WMS 1.1.1 & WFS 1.1.0)
-            </span>
-          </div>
 
-          <div class="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-1.5">
-            <span class="text-slate-500">Nama Layer Teknis:</span>
-            <span class="text-slate-900 dark:text-slate-100 font-mono font-semibold truncate max-w-[200px]" :title="props.layer.layer_name">
-              {{ props.layer.layer_name }}
-            </span>
-          </div>
+        <div class="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-500 dark:text-slate-400 shrink-0">Nama Layer</span>
+          <span class="text-slate-900 dark:text-slate-100 font-mono font-semibold truncate max-w-[190px]" :title="props.layer.layer_name">
+            {{ props.layer.layer_name }}
+          </span>
+        </div>
 
-          <div v-if="props.layer.geoportal_id" class="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-1.5">
-            <span class="text-slate-500">CSW Identifier:</span>
-            <span class="text-slate-700 dark:text-slate-300 font-mono truncate max-w-[190px]" :title="props.layer.geoportal_id">
-              {{ props.layer.geoportal_id }}
-            </span>
-          </div>
+        <div v-if="props.layer.geoportal_id" class="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-500 dark:text-slate-400 shrink-0">CSW ID</span>
+          <span class="text-slate-700 dark:text-slate-300 font-mono truncate max-w-[190px]" :title="props.layer.geoportal_id">
+            {{ props.layer.geoportal_id }}
+          </span>
+        </div>
 
-          <div class="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-white/5 pb-1.5">
-            <span class="text-slate-500 shrink-0">WMS Endpoint:</span>
-            <span class="text-slate-600 dark:text-slate-400 text-right font-mono truncate max-w-[200px]" :title="props.layer.url">
-              {{ props.layer.url }}
-            </span>
-          </div>
+        <div class="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-500 dark:text-slate-400 shrink-0">Endpoint</span>
+          <span class="text-slate-600 dark:text-slate-400 text-right font-mono truncate max-w-[190px]" :title="props.layer.url">
+            {{ props.layer.url }}
+          </span>
+        </div>
 
-          <div v-if="props.layer.last_synced_at" class="flex items-center justify-between pt-0.5">
-            <span class="text-slate-500">Terakhir Disinkronkan:</span>
-            <span class="text-slate-700 dark:text-slate-300">
-              {{ new Date(props.layer.last_synced_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) }}
-            </span>
-          </div>
+        <div v-if="props.layer.last_synced_at" class="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-500 dark:text-slate-400">Disinkronkan</span>
+          <span class="text-slate-700 dark:text-slate-300 tabular-nums">
+            {{ new Date(props.layer.last_synced_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) }}
+          </span>
         </div>
       </div>
 
       <!-- Simbol Legenda Resmi (GetLegendGraphic) -->
-      <div v-if="props.layer.legend_url" class="p-3.5 rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-2">
-        <div class="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold text-xs">
+      <div v-if="props.layer.legend_url" class="p-3.5 rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] space-y-2">
+        <div class="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 font-bold text-xs">
           <UIcon name="i-lucide-list" class="size-4 text-slate-500" />
-          <span>Simbol Legenda Resmi (GetLegendGraphic)</span>
+          <span>Simbol Legenda Resmi</span>
         </div>
-        <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200/80 dark:border-white/5 inline-block">
+        <div class="p-2.5 rounded-xl bg-white dark:bg-[#0f172a] inline-block">
           <img
             :src="props.layer.legend_url"
             alt="Legenda Resmi Geoportal Bojonegoro"

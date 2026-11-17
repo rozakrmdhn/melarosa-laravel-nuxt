@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { StatusBkkdProposal, HasilVerifikasiBkkd } from '~/types/bkkd';
+import type { StatusAnalisaSpasialBkkd } from '~/types/bkkd';
 
 const props = defineProps<{
-  status?: StatusBkkdProposal | HasilVerifikasiBkkd | string;
+  status?: StatusAnalisaSpasialBkkd | string;
   size?: 'xs' | 'sm' | 'md';
 }>();
 
@@ -28,6 +28,18 @@ const config = computed(() => {
       return { label: 'Digantikan di P-APBD', color: 'warning' as const, icon: 'i-lucide-arrow-right-left' };
     case 'dibatalkan':
       return { label: 'Dibatalkan', color: 'error' as const, icon: 'i-lucide-ban' };
+    case 'konfirmasi_belum_tuntas':
+      return { label: 'Perlu Konfirmasi Desa (Belum Tuntas)', color: 'warning' as const, icon: 'i-lucide-alert-triangle' };
+    case 'duplikasi_tuntas':
+      return { label: 'Indikasi Duplikasi (Tuntas 100%)', color: 'error' as const, icon: 'i-lucide-alert-octagon' };
+    case 'kewenangan_kabupaten':
+      return { label: 'Aset Kabupaten (Bukan Aset Desa)', color: 'error' as const, icon: 'i-lucide-shield-alert' };
+    case 'lanjutan_ruas':
+      return { label: 'Lanjutan Ruas', color: 'info' as const, icon: 'i-lucide-corner-down-right' };
+    case 'aman':
+      return { label: 'Aman (Lokasi Baru)', color: 'success' as const, icon: 'i-lucide-check-circle' };
+    case 'belum_dianalisa':
+      return { label: 'Belum Dianalisis', color: 'neutral' as const, icon: 'i-lucide-map-pin' };
     default:
       return { label: props.status || 'Tidak Diketahui', color: 'neutral' as const, icon: 'i-lucide-help-circle' };
   }

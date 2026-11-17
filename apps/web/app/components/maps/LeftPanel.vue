@@ -2,17 +2,21 @@
 import type { BasemapKey } from "~/components/maps/MapCanvas.vue";
 import type { ActiveLayerItem, MainTab } from "~/types/map-layers";
 import { KECAMATAN_ENTRIES, type KecamatanEntry } from "~/constants/kecamatan";
-import GeoportalLayerSection from "./GeoportalLayerSection.vue";
 import { useGeoportalLayers, type GeoportalLayerItem } from "~/composables/useGeoportalLayers";
 import type { IdentifiedFeature } from "~/components/maps/IdentifyFeatures.vue";
+import type { RekapRuasItem } from "~/types/rekap-jalan";
 import SearchListView from "./left-panel/SearchListView.vue";
 import SearchItemAboutView from "./left-panel/SearchItemAboutView.vue";
-import ActiveLayersView from "./left-panel/ActiveLayersView.vue";
+import JelajahHomeView from "./left-panel/JelajahHomeView.vue";
+import InfrastrukturExplorerView from "./left-panel/InfrastrukturExplorerView.vue";
+import OtherLayersView from "./left-panel/OtherLayersView.vue";
 import LayerDetailView from "./left-panel/LayerDetailView.vue";
 import IdentifyView from "./left-panel/IdentifyView.vue";
 import GeoparkListView from "./left-panel/GeoparkListView.vue";
 import GeoparkDetailView from "./left-panel/GeoparkDetailView.vue";
 import { useGeoparkSites, type GeoparkSite, type GeoparkCategoryFilter } from "~/composables/useGeoparkSites";
+import { useMapHistory, type RecentMapItem } from "~/composables/useMapHistory";
+import { normalizeWilayahKey } from "~/composables/useMapRekapOverview";
 import {
   parseCoordinateString,
   formatDMS,
@@ -20,20 +24,23 @@ import {
   type ParsedCoordinate,
 } from "~/utils/gis-helpers";
 
-const { setActivePillarFilter } = useGeoparkSites();
+const { setActivePillarFilter, sites: geoparkSites } = useGeoparkSites();
+const { recordRecent } = useMapHistory();
 
 const props = withDefaults(
   defineProps<{
     isMobileDrawer?: boolean;
     activeLayers?: ActiveLayerItem[];
     currentBasemap?: BasemapKey;
-    activeTab?: "layers" | "geoportal" | "dataset" | "geopark" | "geosite";
+    activeTab?: "layers" | "infrastruktur" | "geoportal" | "dataset" | "geopark" | "geosite";
     selectedKecamatanFilter?: string | null;
+    selectedDesaFilter?: string | null;
     clickedCoordinate?: [number, number] | null;
     locationLabel?: string | null;
     identifiedFeatures?: IdentifiedFeature[];
     isIdentifying?: boolean;
     inspectorOpen?: boolean;
+    geoparkOverlayVisible?: boolean;
   }>(),
   {
     isMobileDrawer: false,
@@ -41,11 +48,13 @@ const props = withDefaults(
     currentBasemap: "esri",
     activeTab: "layers",
     selectedKecamatanFilter: null,
+    selectedDesaFilter: null,
     clickedCoordinate: null,
     locationLabel: null,
     identifiedFeatures: () => [],
     isIdentifying: false,
     inspectorOpen: false,
+    geoparkOverlayVisible: false,
   }
 );
 
@@ -59,7 +68,7 @@ const emit = defineEmits<{
     bbox?: [number, number, number, number];
     isKecamatan?: boolean;
   }): void;
-  (e: "filter-wilayah", kecamatan: string | null): void;
+  (e: "filter-wilayah", kecamatan: string | null, customBbox?: [number, number, number, number] | null, desa?: string | null): void;
   (e: "reorder-layers", layers: ActiveLayerItem[]): void;
   (e: "zoom-to-layer", layer: ActiveLayerItem): void;
   (e: "toggle-layer-visibility", layerId: string): void;
@@ -71,7 +80,6 @@ const emit = defineEmits<{
   (e: "close-inspector"): void;
   (e: "clear-pin"): void;
   (e: "select-feature", feature: IdentifiedFeature): void;
-  (e: "share"): void;
   (e: "search-focus"): void;
   (e: "search-close"): void;
   (e: "tab-change", tab: MainTab): void;
@@ -84,25 +92,34 @@ const emit = defineEmits<{
     formatted: string;
     zoom?: number;
   }): void;
+  (e: "toggle-roads-visibility"): void;
+  (e: "toggle-geopark-overlay"): void;
+  (e: "locate-user"): void;
+  (e: "select-road", payload: {
+    ruas: RekapRuasItem;
+    desaName: string;
+    kecamatanName: string;
+  }): void;
 }>();
 
-const localActiveTab = ref<MainTab>(
-  props.activeTab === "geopark" || props.activeTab === "geosite"
-    ? "geopark"
-    : props.activeTab === "geoportal" || props.activeTab === "dataset"
-      ? "dataset"
-      : "layers"
-);
+function normalizeIncomingTab(val?: string): MainTab {
+  if (val === "geopark" || val === "geosite") return "geopark";
+  if (val === "infrastruktur") return "infrastruktur";
+  if (val === "geoportal" || val === "dataset") return "dataset";
+  return "layers";
+}
+
+const localActiveTab = ref<MainTab>(normalizeIncomingTab(props.activeTab));
 
 watch(
   () => props.activeTab,
   (val) => {
-    const target: MainTab =
-      val === "geopark" || val === "geosite"
-        ? "geopark"
-        : val === "geoportal" || val === "dataset"
-          ? "dataset"
-          : "layers";
+    const target = normalizeIncomingTab(val);
+    if (props.inspectorOpen && target === "layers") {
+      localActiveTab.value = "layers";
+      petaSubView.value = "identify";
+      return;
+    }
     resetSubViews(target);
   }
 );
@@ -110,16 +127,17 @@ watch(
 const currentActiveTab = computed<MainTab>(() => {
   if (props.inspectorOpen) return "layers";
   if (props.isMobileDrawer) {
-    if (props.activeTab === "geopark" || props.activeTab === "geosite") return "geopark";
-    if (props.activeTab === "geoportal" || props.activeTab === "dataset") return "dataset";
-    return "layers";
+    return normalizeIncomingTab(props.activeTab);
   }
   return localActiveTab.value;
 });
 
-export type PetaSubView = "layers" | "layer-detail" | "identify";
-const petaSubView = ref<PetaSubView>("layers");
+export type PetaSubView = "home" | "other-layers" | "layer-detail" | "identify";
+const petaSubView = ref<PetaSubView>("home");
 const selectedLayerId = ref<string | null>(null);
+
+const infraSortPriority = ref(false);
+const infraInitialCategory = ref<"jalan" | "jembatan" | "kantor">("jalan");
 
 export type GeoparkSubView = "list" | "detail";
 const geoparkSubView = ref<GeoparkSubView>("list");
@@ -154,7 +172,7 @@ watch(
       localActiveTab.value = "layers";
       petaSubView.value = "identify";
     } else if (petaSubView.value === "identify") {
-      petaSubView.value = "layers";
+      petaSubView.value = "home";
     }
   },
   { immediate: true }
@@ -171,13 +189,18 @@ function handleGeoportalToggle(payload: { layer: GeoportalLayerItem; active: boo
   }
 }
 
-function handleGeoportalOpacity(payload: { layerId: string; opacity: number }) {
-  emit("update-layer-opacity", payload);
-}
-
-
-
 function handleKecamatanClick(k: KecamatanEntry) {
+  recordRecent({
+    id: `kec-${k.name.toLowerCase()}`,
+    kind: "kecamatan",
+    label: `Kec. ${k.name}`,
+    sublabel: k.zona,
+    kecamatanName: k.name,
+    coordinate: k.coordinate,
+    zoom: k.zoom,
+    bbox: k.bbox,
+  });
+
   const isCurrentlySelected = props.selectedKecamatanFilter?.trim().toLowerCase() === k.name.toLowerCase();
   if (isCurrentlySelected) {
     emit("filter-wilayah", null);
@@ -201,8 +224,6 @@ function handleResetWilayahFilter() {
 export type { GeoparkSite };
 export type { KecamatanEntry };
 export type LandmarkEntry = GeoparkSite;
-
-const { sites: geoparkSites } = useGeoparkSites();
 
 export interface DatasetResultItem {
   id: string;
@@ -230,6 +251,14 @@ const filteredKecamatanResults = computed(() => {
   });
 });
 
+function toFriendlySearchTitle(name: string, layerName?: string | null): string {
+  const key = String(layerName || name || "").toLowerCase();
+  if (key.includes("infrastruktur_segmen")) return "Kondisi Jalan Dibangun";
+  if (key.includes("jalan_porosdesa")) return "Jaringan Jalan Desa";
+  if (key.includes("bataswilayah_kabupaten")) return "Batas Wilayah Bojonegoro";
+  return name;
+}
+
 const filteredDatasetResults = computed<DatasetResultItem[]>(() => {
   const q = universalSearchQuery.value.trim().toLowerCase();
   const combined: DatasetResultItem[] = [];
@@ -238,11 +267,11 @@ const filteredDatasetResults = computed<DatasetResultItem[]>(() => {
   for (const al of props.activeLayers) {
     if (seenIds.has(al.id)) continue;
     seenIds.add(al.id);
-    const title = al.title || al.name || "";
-    const instansi = al.instansi || al.attribution || al.agency || "Dinas Pemkab Bojonegoro";
-    const protocol = al.protocol || "MVT / WMS";
+    const title = toFriendlySearchTitle(al.title || al.name || "", al.layer_name);
+    const instansi = al.instansi || al.attribution || al.agency || "Pemkab Bojonegoro";
+    const protocol = al.protocol || "Peta";
     const desc = al.description || "";
-    const category = al.category || "";
+    const category = al.category || "Peta Utama";
     const slug = al.layer_name
       ? String(al.layer_name).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
       : (al.name || al.title || al.id).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -259,7 +288,7 @@ const filteredDatasetResults = computed<DatasetResultItem[]>(() => {
         id: al.id,
         slug,
         title,
-        subtitle: `${instansi} · ${protocol}`,
+        subtitle: instansi,
         protocol,
         isActive: true,
         category,
@@ -274,10 +303,10 @@ const filteredDatasetResults = computed<DatasetResultItem[]>(() => {
     if (seenIds.has(gl.id)) continue;
     seenIds.add(gl.id);
     const title = gl.name || gl.layer_name || "";
-    const instansi = gl.opd_name || gl.attribution || "Geoportal JIGN Bojonegoro";
-    const protocol = gl.protocol || "WMS";
+    const instansi = gl.opd_name || gl.attribution || "Pemkab Bojonegoro";
+    const protocol = gl.protocol || "Peta";
     const desc = gl.description || "";
-    const category = gl.category || "";
+    const category = gl.category || "Peta Pendukung";
     const slug = gl.layer_name
       ? String(gl.layer_name).toLowerCase().replace(/[^a-z0-9_:-]+/g, "-").replace(/^-+|-+$/g, "")
       : (gl.name || gl.id).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -294,7 +323,7 @@ const filteredDatasetResults = computed<DatasetResultItem[]>(() => {
         id: gl.id,
         slug,
         title,
-        subtitle: `${instansi} · ${protocol}`,
+        subtitle: instansi,
         protocol,
         isActive: false,
         category,
@@ -304,10 +333,7 @@ const filteredDatasetResults = computed<DatasetResultItem[]>(() => {
     }
   }
 
-  if (!q) {
-    return combined.slice(0, 5);
-  }
-  return combined.slice(0, 8);
+  return !q ? combined.slice(0, 4) : combined.slice(0, 8);
 });
 
 const filteredGeoparkResults = computed(() => {
@@ -341,33 +367,16 @@ const totalSearchResultsCount = computed(() => {
   );
 });
 
-const detailSubPageTitle = computed(() => {
-  if (!selectedSearchItem.value) return "Tentang";
-  switch (selectedSearchItem.value.type) {
-    case "kecamatan":
-      return "Tentang Wilayah";
-    case "dataset":
-      return "Tentang Dataset";
-    case "geopark":
-    case "landmark":
-      return "Tentang Geosite";
-    case "coordinate":
-      return "Tentang Titik Koordinat";
-    default:
-      return "Tentang";
-  }
-});
-
 const previousTabBeforeSearch = ref<MainTab>("layers");
 
 const searchPlaceholder = computed(() => {
   if (currentActiveTab.value === "geopark") {
-    return "Cari nama geosite, fosil, api abadi, koordinat...";
+    return "Cari wisata geopark, budaya, atau kecamatannya...";
   }
-  if (currentActiveTab.value === "dataset") {
-    return "Cari dataset tematik, OPD, layer, koordinat...";
+  if (currentActiveTab.value === "infrastruktur") {
+    return "Cari kecamatan, desa, atau ruas jalan...";
   }
-  return "Cari wilayah, koordinat desimal/derajat, layer...";
+  return "Cari kecamatan, jalan desa, atau wisata...";
 });
 
 function handleSearchFocus() {
@@ -392,35 +401,44 @@ function resetSubViews(targetTab?: MainTab) {
     emit("search-close");
   }
 
-  petaSubView.value = "layers";
+  petaSubView.value = targetTab === "dataset" ? "other-layers" : "home";
   selectedLayerId.value = null;
 
   geoparkSubView.value = "list";
   selectedGeoparkSite.value = null;
 
   if (props.inspectorOpen) {
-    emit("close-inspector");
     emit("clear-pin");
   }
 
   if (targetTab) {
-    localActiveTab.value = targetTab;
+    localActiveTab.value = targetTab === "dataset" ? "layers" : targetTab;
   }
 }
 
 function handleTabClick(tab: MainTab) {
+  if (tab === "infrastruktur") {
+    infraSortPriority.value = false;
+    infraInitialCategory.value = "jalan";
+  }
   resetSubViews(tab);
   emit("tab-change", tab);
 }
 
-function handleSelectLayer(id: string) {
-  selectedLayerId.value = id;
-  petaSubView.value = "layer-detail";
-  emit("open-layer-detail", id);
+function handleGoToTabFromHome(
+  tab: MainTab,
+  opts?: { sortPriority?: boolean; category?: "jalan" | "jembatan" | "kantor" }
+) {
+  if (tab === "infrastruktur") {
+    infraSortPriority.value = Boolean(opts?.sortPriority);
+    infraInitialCategory.value = opts?.category || "jalan";
+  }
+  resetSubViews(tab);
+  emit("tab-change", tab);
 }
 
 function handleCloseLayerDetail() {
-  petaSubView.value = "layers";
+  petaSubView.value = "home";
   selectedLayerId.value = null;
   emit("close-layer-detail");
 }
@@ -428,11 +446,6 @@ function handleCloseLayerDetail() {
 function handleGoToMap() {
   resetSubViews("layers");
   emit("tab-change", "layers");
-}
-
-function handleGoToDataset() {
-  resetSubViews("dataset");
-  emit("tab-change", "dataset");
 }
 
 function handleGoToGeopark(category?: GeoparkCategoryFilter) {
@@ -456,7 +469,7 @@ function handleCloseSearch() {
   }
   localActiveTab.value = previousTabBeforeSearch.value || "layers";
   if (localActiveTab.value === "layers") {
-    petaSubView.value = "layers";
+    petaSubView.value = "home";
   }
   emit("search-close");
   if (typeof window !== "undefined") {
@@ -487,6 +500,16 @@ function handleSelectDatasetFromSearch(item: DatasetResultItem) {
 }
 
 function handleSelectGeoparkFromSearch(site: GeoparkSite) {
+  recordRecent({
+    id: `gp-${site.id}`,
+    kind: "wisata",
+    label: site.name,
+    sublabel: site.category,
+    coordinate: site.coordinate,
+    zoom: site.zoom,
+    siteSlug: site.slug,
+  });
+
   if (site.hasCoordinate) {
     emit("select-kecamatan", {
       name: site.name,
@@ -496,7 +519,6 @@ function handleSelectGeoparkFromSearch(site: GeoparkSite) {
   }
   selectedSearchItem.value = { type: "geopark", data: site };
   searchSubView.value = "detail";
-  emit("open-geopark-detail", site);
 }
 
 function handleSelectCoordinateFromSearch(coord: ParsedCoordinate) {
@@ -559,9 +581,20 @@ function handleOpenGeoparkTabFromAbout(site: GeoparkSite) {
   }
   localActiveTab.value = "geopark";
   handleOpenGeoparkDetail(site);
+  emit("open-geopark-detail", site);
 }
 
 function handleOpenGeoparkDetail(site: GeoparkSite) {
+  recordRecent({
+    id: `gp-${site.id}`,
+    kind: "wisata",
+    label: site.name,
+    sublabel: site.category,
+    coordinate: site.coordinate,
+    zoom: site.zoom,
+    siteSlug: site.slug,
+  });
+
   selectedGeoparkSite.value = site;
   geoparkSubView.value = "detail";
   if (site.hasCoordinate) {
@@ -629,19 +662,112 @@ function handleZoomToGeoparkInDetail(site: GeoparkSite) {
   }
 }
 
-function handleClearSearch() {
-  handleCloseSearch();
-}
-
 function handleCloseInspector() {
   emit("close-inspector");
-  petaSubView.value = "layers";
+  petaSubView.value = "home";
 }
 
-function handleClearPin() {
-  emit("clear-pin");
-  emit("close-inspector");
-  petaSubView.value = "layers";
+function handleSelectRoadFromExplorer(payload: {
+  ruas: RekapRuasItem;
+  desaName: string;
+  kecamatanName: string;
+}) {
+  recordRecent({
+    id: `ruas-${payload.ruas.id}`,
+    kind: "ruas",
+    label: payload.ruas.nama_ruas,
+    sublabel: `${payload.desaName}, Kec. ${payload.kecamatanName}`,
+    kecamatanName: payload.kecamatanName,
+    desaName: payload.desaName,
+    ruasId: payload.ruas.id,
+    kodeRuas: payload.ruas.kode_ruas,
+    ruasSnapshot: { ...payload.ruas },
+  });
+  emit("select-road", payload);
+}
+
+function handleSelectKecamatanFromExplorer(payload: {
+  name: string;
+  coordinate: [number, number];
+  zoom?: number;
+  bbox?: [number, number, number, number];
+  isKecamatan?: boolean;
+}) {
+  const cleanName = payload.name.replace(/^Kecamatan\s+/i, "").trim();
+  recordRecent({
+    id: `kec-${cleanName.toLowerCase()}`,
+    kind: "kecamatan",
+    label: `Kec. ${cleanName}`,
+    sublabel: "Wilayah Kecamatan",
+    kecamatanName: cleanName,
+    coordinate: payload.coordinate,
+    zoom: payload.zoom,
+    bbox: payload.bbox,
+  });
+  emit("select-kecamatan", payload);
+}
+
+function handleOpenRecentChip(item: RecentMapItem) {
+  if (item.kind === "ruas" && (item.ruasId !== undefined || item.ruasSnapshot)) {
+    const snap = (item.ruasSnapshot || {}) as Partial<RekapRuasItem>;
+    const ruasPayload: RekapRuasItem = {
+      id: item.ruasId ?? snap.id ?? item.id.replace(/^ruas-/, ""),
+      kode_ruas: item.kodeRuas ?? snap.kode_ruas,
+      nama_ruas: snap.nama_ruas || item.label,
+      panjang_master: Number(snap.panjang_master ?? snap.panjang ?? 0),
+      panjang_dibangun: Number(snap.panjang_dibangun ?? 0),
+      panjang_tersisa: Number(snap.panjang_tersisa ?? 0),
+      progress: Number(snap.progress ?? 0),
+      jumlah_segmen: Number(snap.jumlah_segmen ?? 0),
+      ...snap,
+    };
+    emit("select-road", {
+      ruas: ruasPayload,
+      desaName: item.desaName || "",
+      kecamatanName: item.kecamatanName || "",
+    });
+    return;
+  }
+
+  if (item.kind === "wisata") {
+    const matchedSite = geoparkSites.value.find(
+      (s) =>
+        `gp-${s.id}` === item.id ||
+        (item.siteSlug && s.slug === item.siteSlug) ||
+        normalizeWilayahKey(s.name) === normalizeWilayahKey(item.label)
+    );
+    if (matchedSite) {
+      handleGoToGeopark();
+      handleOpenGeoparkDetail(matchedSite);
+      return;
+    }
+  }
+
+  if (item.kecamatanName) {
+    const matchedEntry = KECAMATAN_ENTRIES.find(
+      (k) => normalizeWilayahKey(k.name) === normalizeWilayahKey(item.kecamatanName)
+    );
+    if (matchedEntry) {
+      emit("filter-wilayah", matchedEntry.name);
+      emit("select-kecamatan", {
+        name: `Kecamatan ${matchedEntry.name}`,
+        coordinate: matchedEntry.coordinate,
+        zoom: matchedEntry.zoom,
+        bbox: matchedEntry.bbox,
+        isKecamatan: true,
+      });
+      return;
+    }
+  }
+
+  if (item.coordinate) {
+    emit("select-kecamatan", {
+      name: item.label,
+      coordinate: item.coordinate,
+      zoom: item.zoom || 14,
+      bbox: item.bbox,
+    });
+  }
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -668,19 +794,13 @@ onUnmounted(() => {
   }
 });
 
-const filteredActiveLayers = computed(() => {
-  const q = universalSearchQuery.value.trim().toLowerCase();
-  if (!q) return props.activeLayers;
-  return props.activeLayers.filter((l) => {
-    const title = (l.title || l.name || "").toLowerCase();
-    const instansi = (l.instansi || l.attribution || l.agency || l.protocol || "").toLowerCase();
-    return title.includes(q) || instansi.includes(q);
-  });
-});
-
 defineExpose({
   resetSubViews,
   handleCloseSearch,
+  openOtherLayers: () => {
+    resetSubViews("layers");
+    petaSubView.value = "other-layers";
+  },
   openGeoparkDetail: (site: GeoparkSite) => {
     selectedGeoparkSite.value = site;
     geoparkSubView.value = "detail";
@@ -695,7 +815,9 @@ defineExpose({
   },
   closeLayerDetail: () => {
     selectedLayerId.value = null;
-    petaSubView.value = "layers";
+    if (petaSubView.value === "layer-detail") {
+      petaSubView.value = props.inspectorOpen ? "identify" : "home";
+    }
   },
 });
 </script>
@@ -707,74 +829,77 @@ defineExpose({
       isMobileDrawer ? 'w-full h-full bg-transparent' : 'w-full h-full bg-white dark:bg-[#09111e]'
     ]"
   >
-    <!-- Header: Peta Interaktif & Tombol Bagikan Peta Desktop -->
+    <!-- Header Desktop (Judul + Avatar Ionicons) -->
     <div
       v-if="!isMobileDrawer"
-      class="px-4 sm:px-5 pt-6 sm:pt-6 pb-2 shrink-0 flex items-center justify-between gap-3"
+      class="px-4 sm:px-5 pt-5 pb-2.5 shrink-0 flex items-center justify-between gap-2.5"
     >
-      <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
-        Peta Interaktif
-      </h1>
-      <!-- Tombol Aksi Tunggal Bagikan Peta Desktop -->
-      <button
-        type="button"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 dark:hover:border-blue-800 transition-all cursor-pointer shadow-2xs active:scale-95"
-        title="Bagikan Tautan Peta Interaktif dengan Pratinjau Thumbnail OG"
-        aria-label="Bagikan peta"
-        @click="emit('share')"
-      >
-        <UIcon name="i-lucide-share-2" class="size-3.5" />
-        <span>Bagikan</span>
-      </button>
+      <div class="flex items-center gap-2 min-w-0">
+        <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100 truncate">
+          Peta Bojonegoro
+        </h1>
+      </div>
+
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          class="size-11 rounded-full bg-blue-100/90 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-center transition-transform hover:scale-105 cursor-pointer active:scale-95"
+          title="Pusatkan peta Bojonegoro"
+          aria-label="Pusatkan peta Bojonegoro"
+          @click="handleResetWilayahFilter(); handleTabClick('layers')"
+        >
+          <UIcon name="i-ion-map" class="size-5" />
+        </button>
+      </div>
     </div>
 
-    <!-- Tab Menu: Peta / Dataset / Geopark (Segmented Control Pill 100% Radius - Teks Proporsional) -->
+    <!-- Top Segmented Pill Tabs: Jelajah | Infrastruktur | Wisata -->
     <div
       v-if="!isMobileDrawer"
-      class="px-4 sm:px-5 pt-1.5 pb-2 shrink-0"
+      class="px-4 sm:px-5 pt-1 pb-2 shrink-0"
     >
       <div
         role="tablist"
-        aria-label="Navigasi Panel Layer"
-        class="grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-slate-800/60 rounded-full text-sm font-bold tracking-tight"
+        aria-label="Navigasi Peta Utama"
+        class="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-white/[0.06] rounded-full text-sm font-bold tracking-tight"
       >
         <button
           type="button"
           role="tab"
           :aria-selected="currentActiveTab === 'layers'"
-          class="py-2 px-2 sm:px-3 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-sm font-bold tracking-tight"
+          class="py-2 px-2 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-xs sm:text-sm font-bold tracking-tight"
           :class="currentActiveTab === 'layers'
-            ? 'bg-white dark:bg-[#0c1424] text-blue-600 dark:text-blue-400 shadow-xs'
+            ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-xs'
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
           @click="handleTabClick('layers')"
         >
-          Peta
+          Jelajah
         </button>
 
         <button
           type="button"
           role="tab"
-          :aria-selected="currentActiveTab === 'dataset'"
-          class="py-2 px-2 sm:px-3 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-sm font-bold tracking-tight"
-          :class="currentActiveTab === 'dataset'
-            ? 'bg-white dark:bg-[#0c1424] text-blue-600 dark:text-blue-400 shadow-xs'
+          :aria-selected="currentActiveTab === 'infrastruktur'"
+          class="py-2 px-2 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-xs sm:text-sm font-bold tracking-tight"
+          :class="currentActiveTab === 'infrastruktur'
+            ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-xs'
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-          @click="handleTabClick('dataset')"
+          @click="handleTabClick('infrastruktur')"
         >
-          Dataset
+          Infrastruktur
         </button>
 
         <button
           type="button"
           role="tab"
           :aria-selected="currentActiveTab === 'geopark'"
-          class="py-2 px-2 sm:px-3 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-sm font-bold tracking-tight"
+          class="py-2 px-2 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-xs sm:text-sm font-bold tracking-tight"
           :class="currentActiveTab === 'geopark'
-            ? 'bg-white dark:bg-[#0c1424] text-blue-600 dark:text-blue-400 shadow-xs'
+            ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-xs'
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
           @click="handleTabClick('geopark')"
         >
-          Geosite
+          Wisata
         </button>
       </div>
     </div>
@@ -784,44 +909,99 @@ defineExpose({
       ref="searchWrapperRef"
       class="flex-1 flex flex-col min-h-0"
     >
-      <!-- Top Bar: Universal Search Input (selaras di semua tab: Peta, Dataset, Geopark; tersembunyi hanya saat mode detail) -->
+      <!-- Pill Search Input (dengan tombol Kembali ke Jelajah di kiri saat mode pencarian aktif) -->
       <div
-        v-if="!(isSearchOpen && searchSubView === 'detail') && petaSubView !== 'layer-detail' && petaSubView !== 'identify' && geoparkSubView !== 'detail'"
+        v-if="!(isSearchOpen && searchSubView === 'detail') && petaSubView !== 'layer-detail' && petaSubView !== 'identify' && petaSubView !== 'other-layers' && geoparkSubView !== 'detail'"
         class="px-4 sm:px-5 pt-1 pb-2.5 shrink-0"
       >
-        <div class="relative">
-          <UIcon
-            name="i-lucide-search"
-            class="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 pointer-events-none transition-colors"
-            :class="isSearchOpen ? 'text-blue-500' : 'text-slate-500'"
-          />
-          <input
-            ref="searchInputRef"
-            v-model="universalSearchQuery"
-            type="text"
-            :placeholder="searchPlaceholder"
-            class="w-full bg-slate-100/90 dark:bg-white/[0.05] border border-slate-200/90 dark:border-white/10 rounded-full pl-9 sm:pl-10 pr-9 py-2 text-base sm:text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all min-h-[42px] sm:min-h-[44px]"
-            @focus="handleSearchFocus"
-            @click="handleSearchFocus"
-            @input="handleSearchFocus"
-            @keydown.enter="handleSearchSubmit"
-          />
+        <div class="flex items-center gap-2">
           <button
-            v-if="isSearchOpen || universalSearchQuery"
+            v-if="isSearchOpen"
             type="button"
-            class="absolute right-2 top-1/2 -translate-y-1/2 size-7 rounded-full after:absolute after:-inset-2 after:content-[''] bg-slate-200/90 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95"
-            aria-label="Tutup pencarian dan kembali ke halaman utama peta"
-            title="Tutup pencarian dan kembali ke halaman utama peta"
+            class="size-11 min-w-[44px] min-h-[44px] rounded-full border border-slate-200/80 dark:border-white/10 bg-slate-100/95 dark:bg-white/[0.06] hover:bg-slate-200/80 dark:hover:bg-white/10 flex items-center justify-center text-slate-700 dark:text-slate-200 transition-all cursor-pointer shrink-0 active:scale-95"
+            aria-label="Kembali ke Jelajah"
+            title="Kembali ke Jelajah"
             @click.stop="handleCloseSearch"
           >
-            <UIcon name="i-lucide-x" class="size-3.5" />
+            <UIcon name="i-ion-arrow-back" class="size-4.5" />
           </button>
+
+          <div class="relative flex-1 min-w-0">
+            <UIcon
+              name="i-ion-search-outline"
+              class="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 pointer-events-none transition-colors"
+              :class="isSearchOpen ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500'"
+            />
+            <input
+              ref="searchInputRef"
+              v-model="universalSearchQuery"
+              type="text"
+              :placeholder="searchPlaceholder"
+              class="w-full bg-slate-100/95 dark:bg-white/[0.06] border border-transparent rounded-full pl-10 pr-10 py-2 text-base sm:text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:bg-white dark:focus:bg-[#0f172a] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all min-h-[44px]"
+              @focus="handleSearchFocus"
+              @click="handleSearchFocus"
+              @input="handleSearchFocus"
+              @keydown.enter="handleSearchSubmit"
+            />
+            <button
+              v-if="universalSearchQuery"
+              type="button"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 size-8 rounded-full after:absolute after:-inset-1.5 after:content-[''] bg-slate-200/90 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer active:scale-95"
+              aria-label="Hapus kata kunci pencarian"
+              title="Hapus kata kunci"
+              @click.stop="universalSearchQuery = ''; searchInputRef?.focus()"
+            >
+              <UIcon name="i-ion-close" class="size-4" />
+            </button>
+          </div>
         </div>
+
+        <!-- Active Wilayah Filter Chip di bawah form pencarian -->
+        <Transition
+          enter-active-class="transition duration-200 ease-out"
+          enter-from-class="opacity-0 -translate-y-1"
+          enter-to-class="opacity-100 translate-y-0"
+          leave-active-class="transition duration-150 ease-in"
+          leave-from-class="opacity-100 translate-y-0"
+          leave-to-class="opacity-0 -translate-y-1"
+        >
+          <div
+            v-if="!isSearchOpen && (props.selectedKecamatanFilter || props.selectedDesaFilter)"
+            class="mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-full bg-sky-50/90 dark:bg-sky-950/35 border border-sky-200/80 dark:border-sky-800/50"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="relative flex size-2 shrink-0">
+                <span class="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                <span class="relative inline-flex rounded-full size-2 bg-sky-600 dark:bg-sky-400" />
+              </span>
+              <span class="text-[11px] font-semibold text-slate-800 dark:text-slate-100 truncate">
+                Filter:
+                {{
+                  [
+                    props.selectedDesaFilter ? `Desa ${props.selectedDesaFilter}` : null,
+                    props.selectedKecamatanFilter ? `Kec. ${props.selectedKecamatanFilter}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")
+                }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/90 dark:bg-slate-900/80 hover:bg-sky-600 hover:text-white dark:hover:bg-sky-600 text-sky-700 dark:text-sky-300 border border-sky-200/80 dark:border-sky-800/60 text-[11px] font-bold transition-all active:scale-95 shrink-0 cursor-pointer"
+              title="Reset filter wilayah"
+              @click="emit('filter-wilayah', null, undefined, null)"
+            >
+              <UIcon name="i-lucide-x" class="size-3" />
+              <span>Reset</span>
+            </button>
+          </div>
+        </Transition>
       </div>
 
-      <!-- Body Content Area (Router Sub-View Shell) -->
-      <div :class="['min-h-0 flex-1 flex flex-col', isMobileDrawer ? '' : 'overflow-y-auto']">
-        <!-- Router Case 1: Search List View -->
+      <!-- Body Content Area -->
+      <div class="min-h-0 flex-1 flex flex-col">
+        <!-- 1. Pencarian: Daftar Hasil -->
         <SearchListView
           v-if="isSearchOpen && searchSubView === 'list'"
           key="search-recommendations-list"
@@ -838,7 +1018,7 @@ defineExpose({
           @close-search="handleCloseSearch"
         />
 
-        <!-- Router Case 2: Search Item Detail View -->
+        <!-- 2. Pencarian: Detail Item -->
         <SearchItemAboutView
           v-else-if="isSearchOpen && searchSubView === 'detail' && selectedSearchItem"
           key="search-item-detail"
@@ -846,6 +1026,7 @@ defineExpose({
           :selected-kecamatan-filter="props.selectedKecamatanFilter"
           :active-layers="props.activeLayers"
           @close="handleBackToSearchList"
+          @back-to-jelajah="handleCloseSearch"
           @zoom-kecamatan="handleZoomToKecamatanInDetail"
           @zoom-dataset="handleZoomToDatasetInDetail"
           @toggle-dataset="handleToggleDatasetInDetail"
@@ -854,32 +1035,34 @@ defineExpose({
           @open-geopark-tab="handleOpenGeoparkTabFromAbout"
         />
 
-        <!-- Router Case 3: Tab Peta (Layers / Layer-Detail / Identify) -->
+        <!-- 3. Tab Jelajah (Beranda Interaktif + Klik Peta + Peta Lainnya) -->
         <div
-          v-else-if="currentActiveTab === 'layers'"
-          key="tab-layers"
+          v-else-if="currentActiveTab === 'layers' || currentActiveTab === 'dataset'"
+          key="tab-jelajah"
           class="flex-1 flex flex-col min-h-0"
         >
-          <!-- Sub-View 3A: Active Layers List -->
-          <ActiveLayersView
-            v-if="petaSubView === 'layers'"
-            key="sv-layers"
-            :active-layers="props.activeLayers"
-            :selected-kecamatan-filter="props.selectedKecamatanFilter"
-            :universal-search-query="universalSearchQuery"
-            :filtered-active-layers="filteredActiveLayers"
-            @select-layer="handleSelectLayer"
-            @toggle-layer-visibility="(id) => emit('toggle-layer-visibility', id)"
-            @reorder-layers="(list) => emit('reorder-layers', list)"
-            @update-filter="(payload) => emit('update-layer-filter', payload)"
-            @reset-wilayah="handleResetWilayahFilter"
-            @go-to-geoportal="handleGoToDataset"
-            @go-to-geopark="handleGoToGeopark"
-            @clear-search="handleClearSearch"
-            @share="emit('share')"
+          <IdentifyView
+            v-if="petaSubView === 'identify'"
+            key="sv-identify"
+            :clicked-coordinate="props.clickedCoordinate"
+            :location-label="props.locationLabel"
+            :identified-features="props.identifiedFeatures"
+            :is-identifying="props.isIdentifying"
+            @close="handleCloseInspector"
+            @select-feature="(f) => emit('select-feature', f)"
           />
 
-          <!-- Sub-View 3B: Layer Detail & Settings -->
+          <OtherLayersView
+            v-else-if="petaSubView === 'other-layers' || currentActiveTab === 'dataset'"
+            key="sv-other-layers"
+            :active-layers="props.activeLayers"
+            @back="handleGoToMap"
+            @toggle-layer-visibility="(id) => emit('toggle-layer-visibility', id)"
+            @update-layer-opacity="(payload) => emit('update-layer-opacity', payload)"
+            @toggle-geoportal="(payload) => handleGeoportalToggle({ layer: payload.layer, active: payload.active })"
+            @reorder-layers="(layers) => emit('reorder-layers', layers)"
+          />
+
           <LayerDetailView
             v-else-if="petaSubView === 'layer-detail'"
             key="sv-detail"
@@ -895,45 +1078,44 @@ defineExpose({
             @remove-layer="(id) => { emit('remove-layer', id); handleCloseLayerDetail(); }"
           />
 
-          <!-- Sub-View 3C: Fitur & Koordinat Identify Inspector (Hero Header & Arsitektur Selaras Detail About) -->
-          <IdentifyView
-            v-else-if="petaSubView === 'identify'"
-            key="sv-identify"
-            :clicked-coordinate="props.clickedCoordinate"
-            :location-label="props.locationLabel"
-            :identified-features="props.identifiedFeatures"
-            :is-identifying="props.isIdentifying"
-            @close="handleCloseInspector"
-            @clear-pin="handleClearPin"
-            @select-feature="(f) => emit('select-feature', f)"
-            @share="emit('share')"
-          />
-        </div>
-
-        <!-- Router Case 4: Tab Dataset (Katalog Layer Simpul Geoportal JIGN) -->
-        <div
-          v-else-if="currentActiveTab === 'dataset'"
-          key="tab-dataset"
-          class="flex-1 overflow-y-auto px-4 sm:px-5 py-3"
-        >
-          <GeoportalLayerSection
+          <JelajahHomeView
+            v-else
+            key="sv-home"
             :active-layers="props.activeLayers"
-            @toggle-layer="handleGeoportalToggle"
-            @update-opacity="handleGeoportalOpacity"
+            :selected-kecamatan-filter="props.selectedKecamatanFilter"
+            :selected-desa-filter="props.selectedDesaFilter"
+            :geopark-overlay-visible="props.geoparkOverlayVisible"
+            @toggle-roads-visibility="emit('toggle-roads-visibility')"
+            @toggle-geopark-overlay="emit('toggle-geopark-overlay')"
+            @locate-user="emit('locate-user')"
+            @zoom-to-home="emit('zoom-to-home')"
+            @go-to-tab="handleGoToTabFromHome"
+            @open-other-layers="petaSubView = 'other-layers'"
+            @select-kecamatan="handleSelectKecamatanFromExplorer"
+            @filter-wilayah="(kec, bbox, desa) => emit('filter-wilayah', kec, bbox, desa)"
+            @select-geopark="handleOpenGeoparkDetail"
+            @open-recent="handleOpenRecentChip"
           />
-
-          <!-- Atribusi Mobile Drawer (Sisi Bawah Konten) -->
-          <div
-            v-if="isMobileDrawer"
-            class="px-4 sm:px-5 py-4 mt-6 border-t border-slate-200/60 dark:border-white/5 text-xs sm:text-xs leading-relaxed text-slate-500 dark:text-slate-400 text-center select-text"
-          >
-            <p>
-              Data peta © kontributor <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" class="underline hover:text-slate-600 dark:hover:text-slate-300">OpenStreetMap</a> · BAPPEDA Kab. Bojonegoro
-            </p>
-          </div>
         </div>
 
-        <!-- Router Case 5: Tab Geopark (Katalog Resmi Geopark Bojonegoro) -->
+        <!-- 4. Tab Infrastruktur (Telusur Jalan Desa, Jembatan Rencana, Kantor Desa Rencana) -->
+        <div
+          v-else-if="currentActiveTab === 'infrastruktur'"
+          key="tab-infrastruktur"
+          class="flex-1 flex flex-col min-h-0"
+        >
+          <InfrastrukturExplorerView
+            :selected-kecamatan-filter="props.selectedKecamatanFilter"
+            :selected-desa-filter="props.selectedDesaFilter"
+            :initial-sort-priority="infraSortPriority"
+            :initial-category="infraInitialCategory"
+            @select-kecamatan="handleSelectKecamatanFromExplorer"
+            @filter-wilayah="(kec, bbox, desa) => emit('filter-wilayah', kec, bbox, desa)"
+            @select-road="handleSelectRoadFromExplorer"
+          />
+        </div>
+
+        <!-- 5. Tab Wisata (Geopark Bojonegoro) -->
         <div
           v-else-if="currentActiveTab === 'geopark'"
           key="tab-geopark"
@@ -959,23 +1141,26 @@ defineExpose({
       </div>
     </div>
 
-    <!-- Footer Bottom: Panel Kiri (Desktop: Sisi Bawah Panel Permanen) -->
+    <!-- Minimal Footer Attribution (Desktop) -->
     <div
       v-if="!isMobileDrawer"
-      class="border-t border-slate-200/90 dark:border-white/8 bg-slate-50/80 dark:bg-[#070c16]/80 px-4 sm:px-5 py-2.5 sm:py-3 shrink-0 flex flex-col gap-2.5 text-xs select-none"
+      class="border-t border-slate-100 dark:border-white/8 bg-slate-50/70 dark:bg-[#070c16]/80 px-4 sm:px-5 py-2.5 shrink-0 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 select-text"
     >
-      <!-- Baris 1: Standar Atribusi & Hak Cipta GIS Melarosa -->
-      <div class="border-slate-200/60 dark:border-white/5 text-xs sm:text-xs leading-relaxed text-slate-500 dark:text-slate-400 select-text">
-        <p class="leading-normal">
-          Satu peta © by <a href="#" target="_blank" rel="noopener noreferrer" class="underline hover:text-slate-800 dark:hover:text-slate-200 font-medium transition-colors">Melarosa</a> · BAPPEDA Kab. Bojonegoro
-        </p>
-      </div>
+      <p>
+        Data peta © kontributor
+        <a
+          href="https://www.openstreetmap.org/copyright"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="underline hover:text-slate-700 dark:hover:text-slate-200"
+        >OpenStreetMap</a>
+        · Melarosa Kab. Bojonegoro
+      </p>
     </div>
   </div>
 </template>
 
 <style scoped>
-
 ::-webkit-scrollbar {
   width: 4px;
 }
@@ -983,10 +1168,10 @@ defineExpose({
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.4);
+  background: rgba(156, 163, 175, 0.35);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.6);
+  background: rgba(156, 163, 175, 0.55);
 }
 </style>

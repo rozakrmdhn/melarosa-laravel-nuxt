@@ -3,16 +3,15 @@ import "ol/ol.css";
 import MapControls from "./MapControls.vue";
 import MapScaleCoordinateBar from "./MapScaleCoordinateBar.vue";
 import type { ActiveLayerItem, BasemapKey } from "~/types/map-layers";
+import { createDynamicMvtStyleFn } from "~/utils/mvt-styler";
+import {
+  attachExtentAwareMvtLoader,
+  resolveLayerAllowedExtent3857,
+  type MvtLayerController,
+} from "~/utils/mvt-loader";
 import { $http } from "~/utils/helpers";
 import type { IdentifiedFeature } from "./IdentifyFeatures.vue";
 import type { GeoparkSite } from "~/composables/useGeoparkSites";
-import {
-  isCanvasTainted,
-  cropCanvasTo16_9,
-  generateFallbackMapCanvas,
-  type MapThumbnailOptions,
-  type MapThumbnailMeta,
-} from "~/composables/useMapThumbnail";
 
 export type { BasemapKey };
 
@@ -30,12 +29,15 @@ const props = withDefaults(
     initialCenter?: [number, number] | null;
     initialBbox?: [number, number, number, number] | null;
     initialZoom?: number | null;
+    defaultBbox?: [number, number, number, number] | null;
+    leftPanelOpen?: boolean;
     activeLayers?: ActiveLayerItem[];
     mobileDrawerOpen?: boolean;
     mobileSheetSnap?: "min" | "peek" | "full";
     geoparkSites?: GeoparkSite[];
     selectedGeoparkSite?: GeoparkSite | null;
     activeTab?: string;
+    deferLabelsOnMove?: boolean;
   }>(),
   {
     currentBasemap: "esri",
@@ -44,12 +46,15 @@ const props = withDefaults(
     initialCenter: null,
     initialBbox: null,
     initialZoom: null,
+    defaultBbox: () => [111.42351, -7.46964, 112.16569, -6.981707],
+    leftPanelOpen: true,
     activeLayers: () => [],
     mobileDrawerOpen: false,
     mobileSheetSnap: "min",
     geoparkSites: () => [],
     selectedGeoparkSite: null,
     activeTab: "layers",
+    deferLabelsOnMove: true,
   }
 );
 
@@ -63,7 +68,6 @@ const emit = defineEmits<{
   (e: "update:viewport", viewport: MapViewportPayload): void;
   (e: "loaded"): void;
   (e: "dismiss-popup"): void;
-  (e: "share"): void;
   (e: "select-geopark", site: GeoparkSite): void;
 }>();
 
@@ -78,9 +82,20 @@ function handleScaleTargetMounted(el: HTMLElement) {
   }
 }
 
-// Bojonegoro coordinates: [longitude, latitude] in EPSG:4326
-const BOJONEGORO_CENTER: [number, number] = [111.88, -7.15];
+// Bojonegoro coordinates: [longitude, latitude] in EPSG:4326 (centroid wilayah Kabupaten Bojonegoro)
+const BOJONEGORO_DEFAULT_BBOX: [number, number, number, number] = [111.42351, -7.46964, 112.16569, -6.981707];
+const BOJONEGORO_CENTER: [number, number] = [111.7946, -7.2257];
 const DEFAULT_ZOOM = 11;
+
+interface PendingInitialExtentFit {
+  kind: "bbox" | "coord";
+  bbox?: [number, number, number, number];
+  coord?: [number, number];
+  maxZoom: number;
+  snapOverride?: "min" | "peek" | "full";
+}
+
+let pendingInitialExtent: PendingInitialExtentFit | null = null;
 
 // ─── Live Cursor Coordinates & Map Scale Status Bar ──────────────────────────
 const livePointerCoords = ref<{ lng: number; lat: number } | null>(null);
@@ -232,7 +247,7 @@ function extractNamobj(properties: Record<string, any> | undefined): string | nu
   }
 
   // 2. Cek properti nama spesifik spasial lainnya
-  const prioritizedKeys = ["NAMA_RUAS", "WADMKD", "WADMKC", "WADMKK", "REMARK"];
+  const prioritizedKeys = ["NAMA_RUAS", "WADMKD", "NAMA_KECAMATAN", "WADMKC", "KECAMATAN", "WADMKK", "REMARK"];
   for (const pKey of prioritizedKeys) {
     for (const [k, v] of Object.entries(properties)) {
       if (k.toUpperCase() === pKey && v) {
@@ -242,10 +257,10 @@ function extractNamobj(properties: Record<string, any> | undefined): string | nu
     }
   }
 
-  // 3. Fallback ke properti yang mengandung NAM atau TITLE
+  // 3. Fallback ke properti yang mengandung NAM atau TITLE (kecuali jabatan)
   for (const [k, v] of Object.entries(properties)) {
     const upper = k.toUpperCase();
-    if ((upper.includes("NAM") || upper.includes("TITLE")) && v) {
+    if (!upper.includes("JABATAN") && (upper.includes("NAM") || upper.includes("TITLE")) && v) {
       const s = String(v).trim();
       if (s && s !== "-") return s;
     }
@@ -259,8 +274,130 @@ let tileLayer: any = null;
 let olModules: any = null;
 const wmsLayersMap = new Map<string, any>();
 const mvtLayersMap = new Map<string, any>();
+const mvtControllersMap = new Map<string, MvtLayerController>();
+const isDeferLabelsActive = ref(props.deferLabelsOnMove);
+let mvtAbortTimer: ReturnType<typeof setTimeout> | null = null;
+let mvtPruneTimer: ReturnType<typeof setTimeout> | null = null;
+let mvtLabelRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+let viewportPointerUpCleanup: (() => void) | null = null;
+let hoverCheckFrame: number | null = null;
+let lastHoverCheckTime = 0;
 let isDismissing = false;
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(
+  () => props.deferLabelsOnMove,
+  (next) => {
+    setDeferLabelsOnMove(next);
+  }
+);
+
+function setDeferLabelsOnMove(forceState?: boolean) {
+  const next = typeof forceState === "boolean" ? forceState : !isDeferLabelsActive.value;
+  isDeferLabelsActive.value = next;
+  if (!next && mapInstance) {
+    for (const ctrl of mvtControllersMap.values()) {
+      if (ctrl.hasDeferredLabels()) {
+        mapInstance.render();
+        break;
+      }
+    }
+  }
+  return isDeferLabelsActive.value;
+}
+
+function hasAnyDeferredMvtLabels(): boolean {
+  for (const ctrl of mvtControllersMap.values()) {
+    if (ctrl.hasDeferredLabels()) return true;
+  }
+  return false;
+}
+
+function cancelLabelRestoreTimer() {
+  if (mvtLabelRestoreTimer) {
+    clearTimeout(mvtLabelRestoreTimer);
+    mvtLabelRestoreTimer = null;
+  }
+}
+
+function scheduleRestoreDeferredMvtLabels(delayMs = 16) {
+  cancelLabelRestoreTimer();
+  if (!mapInstance || !hasAnyDeferredMvtLabels()) return;
+
+  const view = mapInstance.getView?.();
+  if (view?.getInteracting?.() || view?.getAnimating?.()) return;
+
+  mvtLabelRestoreTimer = setTimeout(() => {
+    mvtLabelRestoreTimer = null;
+    if (!mapInstance || !hasAnyDeferredMvtLabels()) return;
+    const currentView = mapInstance.getView?.();
+    if (currentView?.getInteracting?.() || currentView?.getAnimating?.()) return;
+    mapInstance.render();
+  }, delayMs);
+}
+
+function scheduleAbortOutOfExtentMvt() {
+  if (mvtAbortTimer || mvtControllersMap.size === 0) return;
+  let hasPending = false;
+  for (const ctrl of mvtControllersMap.values()) {
+    if (ctrl.getPendingCount() > 0) {
+      hasPending = true;
+      break;
+    }
+  }
+  if (!hasPending) return;
+
+  mvtAbortTimer = setTimeout(() => {
+    mvtAbortTimer = null;
+    for (const ctrl of mvtControllersMap.values()) {
+      ctrl.abortOutOfExtentRequests();
+    }
+  }, 80);
+}
+
+function cancelScheduledPruneMvtCaches() {
+  if (mvtPruneTimer) {
+    clearTimeout(mvtPruneTimer);
+    mvtPruneTimer = null;
+  }
+}
+
+function schedulePruneMvtCaches(delayMs = 250) {
+  cancelScheduledPruneMvtCaches();
+  if (mvtControllersMap.size === 0) return;
+  mvtPruneTimer = setTimeout(() => {
+    mvtPruneTimer = null;
+    for (const ctrl of mvtControllersMap.values()) {
+      ctrl.pruneCache();
+    }
+  }, delayMs);
+}
+
+function cancelMvtTimers() {
+  if (mvtAbortTimer) {
+    clearTimeout(mvtAbortTimer);
+    mvtAbortTimer = null;
+  }
+  cancelScheduledPruneMvtCaches();
+  cancelLabelRestoreTimer();
+  if (hoverCheckFrame !== null && typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(hoverCheckFrame);
+    hoverCheckFrame = null;
+  }
+}
+
+function disposeAllMvtControllers() {
+  cancelMvtTimers();
+  if (viewportPointerUpCleanup) {
+    viewportPointerUpCleanup();
+    viewportPointerUpCleanup = null;
+  }
+  for (const ctrl of mvtControllersMap.values()) {
+    ctrl.dispose();
+  }
+  mvtControllersMap.clear();
+  mvtLayersMap.clear();
+}
 
 // Cartographic Graticule (Grid Kartografi & Koordinat Tepi Peta)
 const showCartoGrid = ref(false);
@@ -438,7 +575,7 @@ function getConditionColors(properties?: Record<string, any>, isDark = false) {
   };
 }
 
-function createModernTransitStyle(geometryType?: string, properties?: Record<string, any>) {
+function createModernTransitStyle(geometryType?: string, properties?: Record<string, any>, isMvt = false) {
   if (!olModules) return null;
   const { OlStyle, Stroke, Fill, CircleStyle } = olModules;
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
@@ -455,7 +592,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           lineCap: "round",
           lineJoin: "round",
         }),
-        zIndex: 1010,
+        zIndex: 1,
       }),
       // 2. Kontras Halo Casing (Pemisah tegas berlatar gelap/putih)
       new OlStyle({
@@ -465,7 +602,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           lineCap: "round",
           lineJoin: "round",
         }),
-        zIndex: 1011,
+        zIndex: 2,
       }),
       // 3. Core Route Solid (Warna kondisi solid tanpa pola putus-putus)
       new OlStyle({
@@ -475,7 +612,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           lineCap: "round",
           lineJoin: "round",
         }),
-        zIndex: 1012,
+        zIndex: 3,
       }),
       // 4. Center Illumination Core (Garis solid poros tengah untuk kedalaman 3D gloss)
       new OlStyle({
@@ -485,45 +622,49 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           lineCap: "round",
           lineJoin: "round",
         }),
-        zIndex: 1013,
+        zIndex: 4,
       }),
     ];
   }
 
   if (type.includes("polygon")) {
+    // Pada layer MVT awal (sebelum geometri utuh tiba), poligon terpotong oleh batas ubin tile.
+    // Jangan gambar stroke saat isMvt=true agar tidak muncul garis vertikal/horizontal batas tile.
+    if (isMvt) {
+      return [
+        new OlStyle({
+          fill: new Fill({
+            color: "rgba(255, 255, 255, 0.08)",
+          }),
+          zIndex: 1,
+        }),
+      ];
+    }
+
+    // Geometri utuh dari backend: garis putih dengan halo hitam dan fill transparan
     return [
-      // 1. Halo Casing & Ambient Fill Lembut
+      // 1. Halo Hitam & Fill Transparan
       new OlStyle({
         stroke: new Stroke({
-          color: isDark ? "rgba(7, 11, 20, 0.95)" : "rgba(255, 255, 255, 0.95)",
+          color: "rgba(0, 0, 0, 0.9)",
           width: 6,
           lineCap: "round",
           lineJoin: "round",
         }),
         fill: new Fill({
-          color: theme.fill,
+          color: "rgba(0, 0, 0, 0)",
         }),
-        zIndex: 1010,
+        zIndex: 1,
       }),
-      // 2. Underlay Shadow Glow Perimeter
+      // 2. Garis Inti Warna Putih
       new OlStyle({
         stroke: new Stroke({
-          color: theme.glow,
-          width: 8,
+          color: "#ffffff",
+          width: 2.75,
           lineCap: "round",
           lineJoin: "round",
         }),
-        zIndex: 1011,
-      }),
-      // 3. Vibrant Solid Perimeter (Warna kondisi solid tanpa pola putus-putus)
-      new OlStyle({
-        stroke: new Stroke({
-          color: theme.core,
-          width: 3.5,
-          lineCap: "round",
-          lineJoin: "round",
-        }),
-        zIndex: 1012,
+        zIndex: 2,
       }),
     ];
   }
@@ -542,7 +683,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           color: isDark ? "rgba(37, 99, 235, 0.12)" : "rgba(37, 99, 235, 0.08)",
         }),
       }),
-      zIndex: 1010,
+      zIndex: 1,
     }),
     // 2. Lingkaran Garis Radius Luar Solid (Outer Radius Line Berdasarkan Warna Tema)
     new OlStyle({
@@ -553,7 +694,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           width: 2.25,
         }),
       }),
-      zIndex: 1011,
+      zIndex: 2,
     }),
     // 3. Ring Pembatas Intermediet (Mid Range Halo Ring)
     new OlStyle({
@@ -567,7 +708,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
           color: theme.glow,
         }),
       }),
-      zIndex: 1012,
+      zIndex: 3,
     }),
     // 4. Center Focal Point Dot (Titik Pusat Presisi Tanpa Menutupi Ikon WMS)
     new OlStyle({
@@ -576,7 +717,7 @@ function createModernTransitStyle(geometryType?: string, properties?: Record<str
         fill: new Fill({ color: theme.core }),
         stroke: new Stroke({ color: "#ffffff", width: 1.5 }),
       }),
-      zIndex: 1013,
+      zIndex: 4,
     }),
   ];
 }
@@ -603,22 +744,17 @@ function getFeatureIdentifiers(f: any): string[] {
     ids.push(String(rawId).trim());
   }
 
-  const idProps = [
-    "id",
-    "id_segmen",
-    "ID",
-    "gid",
-    "GID",
-    "fid",
-    "FID",
-    "objectid",
-    "OBJECTID",
-    "kode_ruas",
-    "KODE_RUAS",
-    "no_ruas",
-    "NO_RUAS",
-  ];
-  for (const p of idProps) {
+  const uniqueProps = ["id", "id_segmen", "ID", "gid", "GID", "fid", "FID", "objectid", "OBJECTID"];
+  for (const p of uniqueProps) {
+    if (props[p] !== undefined && props[p] !== null && String(props[p]).trim() !== "") {
+      ids.push(String(props[p]).trim());
+    }
+  }
+  if (ids.length > 0) return ids;
+
+  // Fallback hanya jika tidak ada primary key unik
+  const fallbackProps = ["kode_ruas", "KODE_RUAS", "no_ruas", "NO_RUAS"];
+  for (const p of fallbackProps) {
     if (props[p] !== undefined && props[p] !== null && String(props[p]).trim() !== "") {
       ids.push(String(props[p]).trim());
     }
@@ -818,11 +954,382 @@ function stitchFeatureGeometries(fragments: any[], modules: any): any {
   return fragments[0].getGeometry?.() || null;
 }
 
+async function fetchFullFeatureGeometry(feat: IdentifiedFeature, highlightFeature: any) {
+  if (!feat || !feat.layerId || !olModules?.GeoJSON) return;
+  if ((feat as any)._hasFullBackendGeometry) return;
+
+  const matchedLayer = props.activeLayers?.find((l) => l.id === feat.layerId || l.layer_name === feat.layerId);
+  const isInternalMvtLayer = Boolean(
+    mvtLayersMap.has(feat.layerId) ||
+    matchedLayer?.protocol?.toUpperCase() === "MVT" ||
+    matchedLayer?.source_type === "martin" ||
+    matchedLayer?.source_type === "internal" ||
+    matchedLayer?.url?.includes("/martin/")
+  );
+
+  // Skip backend internal table lookup for external/Geoportal WMS layers
+  if (!isInternalMvtLayer) return;
+
+  const rawId =
+    feat.properties?.id ??
+    feat.properties?.gid ??
+    feat.properties?.objectid ??
+    feat.properties?.OBJECTID ??
+    feat.properties?.fid ??
+    feat.properties?.id_segmen ??
+    feat.properties?.id_kecamatan ??
+    feat.properties?.id_desa;
+  const featureId = rawId !== undefined && rawId !== null ? String(rawId) : (feat.id?.includes(".") ? feat.id.split(".").pop() : feat.id);
+  const namobj = extractNamobj(feat.properties);
+
+  if (!featureId && !namobj) return;
+
+  const layerRef = matchedLayer?.id || feat.layerId;
+  const layerNameHint = matchedLayer?.martinSource || matchedLayer?.layer_name || undefined;
+
+  try {
+    const res: any = await $http(`layers/${encodeURIComponent(layerRef)}/feature-geometry`, {
+      query: {
+        layer_name: layerNameHint,
+        feature_id: featureId && !featureId.startsWith("0.") ? featureId : undefined,
+        namobj: namobj || undefined,
+      },
+    });
+
+    if (res && res.ok && res.geometry) {
+      if (activeSelectedFeature.value && (activeSelectedFeature.value.id === feat.id || activeSelectedFeature.value.layerId === feat.layerId)) {
+        const geoJsonFormat = new olModules.GeoJSON();
+        const fullGeom = geoJsonFormat.readGeometry(res.geometry, {
+          dataProjection: "EPSG:4326",
+          featureProjection: "EPSG:3857",
+        });
+
+        if (fullGeom && selectionVectorSource && olModules.Feature) {
+          (activeSelectedFeature.value as any)._hasFullBackendGeometry = true;
+          const resolvedGeomType = res.geometry.type || (typeof fullGeom.getType === "function" ? fullGeom.getType() : "");
+          const fullStyles = createModernTransitStyle(resolvedGeomType, feat.properties, false);
+          const freshHighlight = new olModules.Feature({ geometry: fullGeom });
+          if (fullStyles) {
+            freshHighlight.setStyle(fullStyles);
+          }
+          selectionVectorSource.clear();
+          selectionVectorSource.addFeature(freshHighlight);
+        }
+      }
+    }
+  } catch (err) {
+    // Fallback: geometri instan lokal tetap aktif tanpa gangguan
+  }
+}
+
+function findFeatureGeometryInMvt(criteria: {
+  id?: string | number;
+  kodeRuas?: string | number;
+  namaRuas?: string;
+  desaName?: string;
+  kecamatanName?: string;
+}): {
+  geojsonGeometry: any;
+  extent?: [number, number, number, number];
+  coordinate?: [number, number];
+  layerId: string;
+} | null {
+  if (!mapInstance || !olModules?.GeoJSON) return null;
+
+  const targetId = criteria.id !== undefined && criteria.id !== null ? String(criteria.id).trim().toLowerCase() : "";
+  const targetKode = criteria.kodeRuas !== undefined && criteria.kodeRuas !== null ? String(criteria.kodeRuas).trim().toLowerCase() : "";
+  const norm = (val?: string | number | null) =>
+    String(val ?? "")
+      .toLowerCase()
+      .replace(/^(kecamatan|kec\.?|desa|kelurahan)\s+/i, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  const targetName = norm(criteria.namaRuas);
+  const targetDesa = norm(criteria.desaName);
+  const targetKec = norm(criteria.kecamatanName);
+
+  const layerEntries = Array.from(mvtLayersMap.entries()).sort(([idA], [idB]) => {
+    const la = props.activeLayers?.find((l) => l.id === idA);
+    const lb = props.activeLayers?.find((l) => l.id === idB);
+    const sa = String(la?.martinSource || la?.layer_name || "").toLowerCase();
+    const sb = String(lb?.martinSource || lb?.layer_name || "").toLowerCase();
+    if (sa === "jalan_porosdesa" && sb !== "jalan_porosdesa") return -1;
+    if (sb === "jalan_porosdesa" && sa !== "jalan_porosdesa") return 1;
+    return 0;
+  });
+
+  for (const [layerId, olLayer] of layerEntries) {
+    const activeLayer = props.activeLayers?.find((l) => l.id === layerId);
+    const sourceHint = String(activeLayer?.martinSource || activeLayer?.layer_name || layerId).toLowerCase();
+    if (sourceHint.includes("bataswilayah")) continue;
+
+    const candidates: any[] = [];
+    const source = olLayer.getSource?.();
+
+    try {
+      if (typeof olLayer.getFeaturesInExtent === "function") {
+        const viewExt = mapInstance.getView().calculateExtent();
+        const inExt = olLayer.getFeaturesInExtent(viewExt);
+        if (Array.isArray(inExt)) candidates.push(...inExt);
+      }
+    } catch {}
+
+    if (source?.sourceTiles_) {
+      try {
+        for (const key of Object.keys(source.sourceTiles_)) {
+          const tileFeats = source.sourceTiles_[key]?.getFeatures?.();
+          if (Array.isArray(tileFeats)) candidates.push(...tileFeats);
+        }
+      } catch {}
+    }
+
+    let exactSeed: any = null;
+    let nameSeed: any = null;
+
+    for (const f of candidates) {
+      const fProps = typeof f.getProperties === "function" ? f.getProperties() : f.properties || {};
+      const fIds = getFeatureIdentifiers(f).map((x) => x.toLowerCase());
+
+      if (targetId && fIds.includes(targetId)) {
+        exactSeed = f;
+        break;
+      }
+      if (targetKode && fIds.includes(targetKode)) {
+        const fKec = norm(fProps.kecamatan || fProps.wadmkc || fProps.nama_kecamatan);
+        const fDesa = norm(fProps.desa || fProps.wadmkd || fProps.nama_desa);
+        if ((!targetKec || !fKec || fKec.includes(targetKec) || targetKec.includes(fKec)) &&
+            (!targetDesa || !fDesa || fDesa.includes(targetDesa) || targetDesa.includes(fDesa))) {
+          exactSeed = f;
+          break;
+        }
+      }
+      if (!nameSeed && targetName) {
+        const fName = norm(fProps.nama_ruas || fProps.namobj || fProps.nama_jalan || fProps.nama);
+        if (fName && (fName === targetName || fName.includes(targetName) || targetName.includes(fName))) {
+          const fKec = norm(fProps.kecamatan || fProps.wadmkc || fProps.nama_kecamatan);
+          const fDesa = norm(fProps.desa || fProps.wadmkd || fProps.nama_desa);
+          const kecOk = !targetKec || !fKec || fKec.includes(targetKec) || targetKec.includes(fKec);
+          const desaOk = !targetDesa || !fDesa || fDesa.includes(targetDesa) || targetDesa.includes(fDesa);
+          if (kecOk && desaOk) {
+            nameSeed = f;
+          }
+        }
+      }
+    }
+
+    const chosen = exactSeed || nameSeed;
+    if (!chosen) continue;
+
+    const fragments = collectAllMvtFeatureFragments(olLayer, chosen);
+    let olGeom: any = null;
+    if (fragments.length > 1) {
+      olGeom = stitchFeatureGeometries(fragments, olModules);
+    } else if (olModules.toGeometry) {
+      try {
+        olGeom = olModules.toGeometry(chosen);
+      } catch {}
+    }
+    if (!olGeom) olGeom = chosen.getGeometry?.();
+    if (!olGeom) continue;
+
+    try {
+      const geoJsonFormat = new olModules.GeoJSON();
+      const geojsonGeometry = geoJsonFormat.writeGeometryObject(olGeom, {
+        dataProjection: "EPSG:4326",
+        featureProjection: "EPSG:3857",
+      });
+      const ext3857 = olGeom.getExtent?.();
+      let extent: [number, number, number, number] | undefined;
+      let coordinate: [number, number] | undefined;
+
+      if (ext3857 && ext3857.length === 4 && Number.isFinite(ext3857[0])) {
+        const ext4326 = olModules.transformExtent(ext3857, "EPSG:3857", "EPSG:4326");
+        extent = [
+          Number(ext4326[0].toFixed(6)),
+          Number(ext4326[1].toFixed(6)),
+          Number(ext4326[2].toFixed(6)),
+          Number(ext4326[3].toFixed(6)),
+        ];
+        coordinate = [
+          Number(((extent[0] + extent[2]) / 2).toFixed(6)),
+          Number(((extent[1] + extent[3]) / 2).toFixed(6)),
+        ];
+      }
+
+      return { geojsonGeometry, extent, coordinate, layerId };
+    } catch {}
+  }
+
+  return null;
+}
+
+function findDesaExtentInMvt(
+  desaName: string,
+  kecamatanName?: string | null
+): [number, number, number, number] | null {
+  if (!mapInstance || !olModules?.transformExtent) return null;
+
+  const norm = (val?: string | number | null) =>
+    String(val ?? "")
+      .toLowerCase()
+      .replace(/^(kecamatan|kec\.?|desa|kelurahan)\s+/i, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  const targetDesa = norm(desaName);
+  const targetKec = norm(kecamatanName);
+  if (!targetDesa) return null;
+
+  const layerEntries = Array.from(mvtLayersMap.entries()).sort(([idA], [idB]) => {
+    const la = props.activeLayers?.find((l) => l.id === idA);
+    const lb = props.activeLayers?.find((l) => l.id === idB);
+    const sa = String(la?.martinSource || la?.layer_name || "").toLowerCase();
+    const sb = String(lb?.martinSource || lb?.layer_name || "").toLowerCase();
+    const aIsBatasDesa = sa.includes("bataswilayah_desa") ? 0 : 1;
+    const bIsBatasDesa = sb.includes("bataswilayah_desa") ? 0 : 1;
+    return aIsBatasDesa - bIsBatasDesa;
+  });
+
+  for (const [layerId, olLayer] of layerEntries) {
+    const activeLayer = props.activeLayers?.find((l) => l.id === layerId);
+    const sourceHint = String(activeLayer?.martinSource || activeLayer?.layer_name || layerId).toLowerCase();
+    if (sourceHint.includes("bataswilayah_kecamatan") || sourceHint.includes("bataswilayah_kabupaten")) continue;
+
+    const candidates: any[] = [];
+    const source = olLayer.getSource?.();
+
+    try {
+      if (typeof olLayer.getFeaturesInExtent === "function") {
+        const viewExt = mapInstance.getView().calculateExtent();
+        const inExt = olLayer.getFeaturesInExtent(viewExt);
+        if (Array.isArray(inExt)) candidates.push(...inExt);
+      }
+    } catch {}
+
+    if (source?.sourceTiles_) {
+      try {
+        for (const key of Object.keys(source.sourceTiles_)) {
+          const tileFeats = source.sourceTiles_[key]?.getFeatures?.();
+          if (Array.isArray(tileFeats)) candidates.push(...tileFeats);
+        }
+      } catch {}
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let matchedCount = 0;
+
+    for (const f of candidates) {
+      const p = f.getProperties?.() || {};
+      const fDesa = norm(p.desa ?? p.wadmkd ?? p.nama_desa ?? (sourceHint.includes("bataswilayah_desa") ? p.namobj : ""));
+      if (!fDesa || fDesa !== targetDesa) continue;
+
+      if (targetKec) {
+        const fKec = norm(p.kecamatan ?? p.wadmkc ?? p.nama_kecamatan);
+        if (fKec && fKec !== targetKec) continue;
+      }
+
+      let olGeom: any = null;
+      if (olModules.toGeometry) {
+        try {
+          olGeom = olModules.toGeometry(f);
+        } catch {}
+      }
+      if (!olGeom) olGeom = f.getGeometry?.();
+      const ext3857 = olGeom?.getExtent?.();
+      if (ext3857 && ext3857.length === 4 && Number.isFinite(ext3857[0])) {
+        minX = Math.min(minX, ext3857[0]);
+        minY = Math.min(minY, ext3857[1]);
+        maxX = Math.max(maxX, ext3857[2]);
+        maxY = Math.max(maxY, ext3857[3]);
+        matchedCount++;
+      }
+    }
+
+    if (matchedCount > 0 && Number.isFinite(minX)) {
+      const ext4326 = olModules.transformExtent([minX, minY, maxX, maxY], "EPSG:3857", "EPSG:4326");
+      return [
+        Number(ext4326[0].toFixed(6)),
+        Number(ext4326[1].toFixed(6)),
+        Number(ext4326[2].toFixed(6)),
+        Number(ext4326[3].toFixed(6)),
+      ];
+    }
+  }
+
+  return null;
+}
+
+function getStackRankForLayer(layerId?: string | null, fallback = 2): number {
+  const list = props.activeLayers || [];
+  if (layerId && list.length > 0) {
+    const idx = list.findIndex((l) => l.id === layerId || l.layer_name === layerId);
+    if (idx >= 0) {
+      return list.length - idx;
+    }
+  }
+  return fallback;
+}
+
+function syncMvtSelectedFeatureState(feat: IdentifiedFeature | null) {
+  const fallbackId = feat?.id && !String(feat.id).startsWith("0.") ? feat.id : null;
+  const rawId = feat
+    ? (feat.properties?.id ??
+      feat.properties?.gid ??
+      feat.properties?.objectid ??
+      feat.properties?.OBJECTID ??
+      feat.properties?.fid ??
+      feat.properties?.id_kecamatan ??
+      feat.properties?.id_desa ??
+      fallbackId)
+    : null;
+  const selName = feat
+    ? (feat.properties?.nama_kecamatan ??
+      feat.properties?.wadmkc ??
+      feat.properties?.nama_desa ??
+      feat.properties?.wadmkd ??
+      feat.properties?.namobj ??
+      feat.properties?.nama ??
+      null)
+    : null;
+
+  for (const [layerId, olLayer] of mvtLayersMap.entries()) {
+    const isTarget = Boolean(feat && feat.layerId === layerId);
+    const nextId = isTarget && rawId !== undefined && rawId !== null ? String(rawId) : null;
+    const nextName = isTarget && selName ? String(selName) : null;
+    if (olLayer.get("selectedFeatureId") !== nextId || olLayer.get("selectedFeatureName") !== nextName) {
+      olLayer.set("selectedFeatureId", nextId);
+      olLayer.set("selectedFeatureName", nextName);
+      olLayer.changed();
+    }
+  }
+}
+
 function renderSelectedFeature(feat: IdentifiedFeature | null) {
   activeSelectedFeature.value = feat;
+  syncMvtSelectedFeatureState(feat);
   if (!selectionVectorSource || !olModules) return;
   selectionVectorSource.clear();
   if (!feat) return;
+
+  const isMvtPoly =
+    Boolean(feat.layerId && mvtLayersMap.has(feat.layerId)) &&
+    (feat.geometryType || "").toLowerCase().includes("polygon");
+  // Poligon MVT di-highlight langsung oleh VectorTileLayer (clip per-tile rapi tanpa garis grid internal)
+  if (isMvtPoly) return;
+
+  // Posisikan z-index layer highlight secara dinamis berdasarkan posisi tumpukan GIS asalnya (+2)
+  const fallbackOrder = typeof feat.layerIndex === "number" ? feat.layerIndex : 2;
+  const layerOrder = getStackRankForLayer(feat.layerId, fallbackOrder);
+  const isPoint = (feat.geometryType || "").toLowerCase().includes("point");
+  const targetZIndex = isPoint ? 500 : (10 + layerOrder * 10 + 2);
+
+  if (selectionVectorLayer && typeof selectionVectorLayer.setZIndex === "function") {
+    selectionVectorLayer.setZIndex(targetZIndex);
+  }
 
   try {
     let olGeom: any = null;
@@ -858,11 +1365,19 @@ function renderSelectedFeature(feat: IdentifiedFeature | null) {
         geometry: olGeom,
       });
       const resolvedGeomType = feat.geometryType || (typeof olGeom.getType === "function" ? olGeom.getType() : "");
-      const styles = createModernTransitStyle(resolvedGeomType, feat.properties);
+      const isMvt = Boolean(
+        (feat.layerId && mvtLayersMap.has(feat.layerId)) ||
+        (feat.layerId && props.activeLayers?.some((l) => (l.id === feat.layerId || l.layer_name === feat.layerId) && (l.protocol === "MVT" || l.source_type === "martin"))) ||
+        Boolean(olGeom.getType?.() === "MultiPolygon")
+      );
+      const styles = createModernTransitStyle(resolvedGeomType, feat.properties, isMvt);
       if (styles) {
         highlightFeature.setStyle(styles);
       }
       selectionVectorSource.addFeature(highlightFeature);
+
+      // Opsi 2: Ambil geometri utuh (GeoJSON) dari database backend secara asinkron
+      fetchFullFeatureGeometry(feat, highlightFeature);
     }
   } catch (err) {
     console.warn("Gagal merender selected feature highlight:", err);
@@ -871,6 +1386,7 @@ function renderSelectedFeature(feat: IdentifiedFeature | null) {
 
 function refreshSelectedMvtFeature() {
   if (!activeSelectedFeature.value || !activeSelectedFeature.value.layerId || !olModules) return;
+  if ((activeSelectedFeature.value as any)._hasFullBackendGeometry) return;
   const olLayer = mvtLayersMap.get(activeSelectedFeature.value.layerId);
   if (!olLayer) return;
 
@@ -884,7 +1400,7 @@ function refreshSelectedMvtFeature() {
       });
       const resolvedGeomType =
         activeSelectedFeature.value.geometryType || (typeof stitched.getType === "function" ? stitched.getType() : "");
-      const styles = createModernTransitStyle(resolvedGeomType, activeSelectedFeature.value.properties);
+      const styles = createModernTransitStyle(resolvedGeomType, activeSelectedFeature.value.properties, true);
       if (styles) {
         highlightFeature.setStyle(styles);
       }
@@ -956,13 +1472,18 @@ function zoomOut() {
 }
 
 function resetView() {
+  pendingInitialExtent = null;
   if (!mapInstance || !olModules) return;
-  mapInstance.getView().animate({
-    center: olModules.fromLonLat(BOJONEGORO_CENTER),
-    zoom: DEFAULT_ZOOM,
-    rotation: 0,
-    duration: 500,
-  });
+  const view = mapInstance.getView();
+  if ((view.getRotation() || 0) !== 0) {
+    view.setRotation(0);
+  }
+  const targetBbox =
+    props.defaultBbox && props.defaultBbox.length === 4
+      ? props.defaultBbox
+      : BOJONEGORO_DEFAULT_BBOX;
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  fitBbox(targetBbox, 15, 500, isMobile ? "min" : undefined);
 }
 
 function resetNorth() {
@@ -976,6 +1497,7 @@ function resetNorth() {
 }
 
 function flyTo(coordinate: [number, number], zoom = 14, snapOverride?: "min" | "peek" | "full") {
+  pendingInitialExtent = null;
   if (!mapInstance || !olModules) return;
   fitCoordinateWithPadding(coordinate, zoom, 600, snapOverride);
 }
@@ -1284,7 +1806,15 @@ async function initMap() {
       VectorTileSource,
       MVT,
       OlText,
+      Text: OlText,
       OlStyle,
+      Style: OlStyle,
+      CircleStyle,
+      OlCircle: CircleStyle,
+      Circle: CircleStyle,
+      RegularShape,
+      OlIcon,
+      Icon: OlIcon,
       Fill,
       Stroke,
       Graticule,
@@ -1378,7 +1908,7 @@ async function initMap() {
 
     geoVectorLayer = new VectorLayer({
       source: geoVectorSource,
-      zIndex: 25,
+      zIndex: 500,
       visible: false,
     });
 
@@ -1386,7 +1916,7 @@ async function initMap() {
     selectionVectorSource = new VectorSource();
     selectionVectorLayer = new VectorLayer({
       source: selectionVectorSource,
-      zIndex: 1000,
+      zIndex: 50,
       visible: true,
     });
 
@@ -1543,15 +2073,8 @@ async function initMap() {
       interactions: defaultInteractionsList.extend([mouseWheelZoomInteraction]),
     });
 
-    // Sesuaikan extent jika initialBbox tersedia
-    if (props.initialBbox && props.initialBbox.length === 4) {
-      const extent3857 = olModules.transformExtent(props.initialBbox, "EPSG:4326", "EPSG:3857");
-      mapInstance.getView().fit(extent3857, {
-        size: mapInstance.getSize(),
-        padding: [10, 10, 10, 10],
-        maxZoom: props.initialZoom ? Math.round(props.initialZoom) : 18,
-      });
-    }
+    // Sinkronkan extent awal langsung saat mount agar peta rata tengah terhadap panel UI
+    applyInitialExtentOnInit();
 
     syncPinMarker();
     syncGeoparkMarkers();
@@ -1559,24 +2082,53 @@ async function initMap() {
     // Inisialisasi posisi center dan zoom status bar awal
     updateMapCenterAndZoom();
 
-    // Listener pergerakan dan zoom peta untuk sinkronisasi URL parameter
+    mapInstance.on("movestart", () => {
+      pendingInitialExtent = null;
+      cancelScheduledPruneMvtCaches();
+      cancelLabelRestoreTimer();
+    });
+
+    // Listener pergerakan dan zoom peta untuk sinkronisasi URL parameter, cache MVT & pemulihan label
     mapInstance.on("moveend", () => {
       emitViewportUpdate();
       updateMapCenterAndZoom();
+      schedulePruneMvtCaches(250);
+      scheduleRestoreDeferredMvtLabels(16);
+    });
+
+    const viewportEl = mapInstance.getViewport?.();
+    if (viewportEl && typeof viewportEl.addEventListener === "function") {
+      const handleInteractionRelease = () => scheduleRestoreDeferredMvtLabels(80);
+      viewportEl.addEventListener("pointerup", handleInteractionRelease, { passive: true });
+      viewportEl.addEventListener("touchend", handleInteractionRelease, { passive: true });
+      viewportEl.addEventListener("pointercancel", handleInteractionRelease, { passive: true });
+      viewportPointerUpCleanup = () => {
+        viewportEl.removeEventListener("pointerup", handleInteractionRelease);
+        viewportEl.removeEventListener("touchend", handleInteractionRelease);
+        viewportEl.removeEventListener("pointercancel", handleInteractionRelease);
+      };
+    }
+
+    const mapView = mapInstance.getView();
+
+    // Batalkan request tile MVT in-flight yang keluar dari viewport saat pan cepat
+    mapView.on("change:center", () => {
+      scheduleAbortOutOfExtentMvt();
     });
 
     // Sinkronkan skala rasio peta secara langsung saat user melakukan zoom / pinch
-    mapInstance.getView().on("change:resolution", () => {
+    mapView.on("change:resolution", () => {
       updateMapCenterAndZoom();
+      scheduleAbortOutOfExtentMvt();
     });
 
     // Sinkronkan rotasi peta untuk indikator arah mata angin & kompas reset
-    mapInstance.getView().on("change:rotation", () => {
-      const rad = mapInstance.getView()?.getRotation() || 0;
+    mapView.on("change:rotation", () => {
+      const rad = mapView?.getRotation() || 0;
       currentRotation.value = (rad * 180) / Math.PI;
     });
 
-    // Pointer move listener for live mouse coordinates & feature hover detection
+    // Pointer move listener for live mouse coordinates & throttled feature hover detection
     mapInstance.on("pointermove", (evt: any) => {
       if (evt.dragging) return;
       const coords = olModules.toLonLat(evt.coordinate);
@@ -1592,7 +2144,23 @@ async function initMap() {
       }
 
       if (evt.pixel) {
-        updateCursorOnHover(evt.pixel);
+        const activeView = mapInstance?.getView?.();
+        if (activeView?.getAnimating?.() || activeView?.getInteracting?.()) return;
+
+        const pixel: [number, number] = [evt.pixel[0], evt.pixel[1]];
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        if (now - lastHoverCheckTime < 48 || hoverCheckFrame !== null) return;
+
+        if (typeof requestAnimationFrame === "function") {
+          hoverCheckFrame = requestAnimationFrame(() => {
+            hoverCheckFrame = null;
+            lastHoverCheckTime = typeof performance !== "undefined" ? performance.now() : Date.now();
+            updateCursorOnHover(pixel);
+          });
+        } else {
+          lastHoverCheckTime = now;
+          updateCursorOnHover(pixel);
+        }
       }
     });
 
@@ -1658,13 +2226,18 @@ function syncActiveWmsLayers() {
   }
   for (const [id, olLayer] of mvtLayersMap.entries()) {
     if (!currentLayerIds.has(id)) {
+      mvtControllersMap.get(id)?.dispose();
+      mvtControllersMap.delete(id);
       mapInstance.removeLayer(olLayer);
       mvtLayersMap.delete(id);
     }
   }
 
-  // 2. Tambahkan atau perbarui status layer
-  currentLayers.forEach((layer, index) => {
+  // 2. Tambahkan atau perbarui status layer dari bawah ke atas (standar tumpukan GIS: dasar digambar lebih dulu, paling atas di panel digambar paling depan)
+  [...currentLayers].reverse().forEach((layer, bottomUpIndex) => {
+    const stackRank = bottomUpIndex + 1;
+    const layerZIndex = 10 + stackRank * 10;
+
     const isMvt =
       layer.protocol?.toUpperCase() === "MVT" ||
       layer.source_type === "martin" ||
@@ -1691,129 +2264,78 @@ function syncActiveWmsLayers() {
 
       const isSegmen = !isKabupaten && (sourceName === "infrastruktur_segmen" || layer.id.includes("segmen"));
 
-      // Urutan z-index dinamis: Batas wilayah kabupaten selalu di lapisan dasar (z-index 4), jalan di atasnya (z-index 10+)
-      const layerZIndex = isKabupaten ? 4 : 10 + (currentLayers.length - index) * 2;
       const effectiveOpacity = typeof layer.opacity === "number" ? layer.opacity : 1;
 
-      // ─── 1. Standar Kartografi Batas Administrasi Kabupaten (BIG / Peta RBI Dati II) ───
-      const createKabupatenStyleFn = (_targetOlLayer: any) => {
-        return (_feature?: any) => {
-          const currentZoom = mapInstance?.getView()?.getZoom() || 0;
-          const isDark = document.documentElement.classList.contains("dark");
-
-          return [
-            // Casing / underlay halo batas kabupaten (efek kartografi batas wilayah teritorial)
-            new OlStyle({
-              stroke: new Stroke({
-                color: isDark ? "rgba(148, 163, 184, 0.25)" : "rgba(71, 85, 105, 0.22)",
-                width: currentZoom >= 13 ? 7.5 : currentZoom >= 11 ? 5.5 : 4,
-                lineCap: "round",
-                lineJoin: "round",
-              }),
-              fill: new Fill({
-                color: isDark ? "rgba(148, 163, 184, 0.03)" : "rgba(71, 85, 105, 0.015)",
-              }),
-            }),
-            // Garis utama batas kartografi kabupaten (Standar BIG: Dash-Dot-Dot-Dash warna abu-abu gelap)
-            new OlStyle({
-              stroke: new Stroke({
-                color: isDark ? "#94a3b8" : "#475569",
-                width: currentZoom >= 13 ? 2.5 : currentZoom >= 11 ? 2 : 1.75,
-                lineDash: [12, 4, 2, 4, 2, 4],
-                lineCap: "round",
-                lineJoin: "round",
-              }),
-              zIndex: 4,
-            }),
-          ];
-        };
+      // Fungsi styling MVT dinamis berbasis style_config dari basis data
+      const getLayerStyleFn = (targetOlLayer: any) => {
+        return createDynamicMvtStyleFn(layer.style_config, {
+          olModules,
+          mapInstance,
+          targetOlLayer,
+          layer,
+        });
       };
 
-      // ─── 2. Generator Gaya MVT Ruas & Segmen Jalan Berdasarkan Kondisi ───
-      const createMvtStyleFn = (targetOlLayer: any, isLayerSegmen: boolean) => {
-        return (feature: any) => {
-          // 1. Filter Wilayah (Kecamatan)
-          const targetKec = (targetOlLayer.get("filterKecamatan") || "").trim().toLowerCase();
-          if (targetKec && targetKec !== "all") {
-            const rawFeatKec = String(
-              feature.get("kecamatan") ||
-              feature.get("WADMKC") ||
-              feature.get("wadmkc") ||
-              feature.get("nama_kecamatan") ||
-              ""
-            ).trim().toLowerCase();
-
-            const cleanTarget = targetKec.replace(/^(kecamatan|kec\.)\s+/i, "").trim();
-            const cleanFeat = rawFeatKec.replace(/^(kecamatan|kec\.)\s+/i, "").trim();
-
-            if (!cleanFeat || (cleanFeat !== cleanTarget && !cleanFeat.includes(cleanTarget) && !cleanTarget.includes(cleanFeat))) {
-              return null;
-            }
-          }
-
-          // 2. Filter Status Kondisi
-          const targetStatus = (targetOlLayer.get("filterStatus") || "").trim().toLowerCase();
-          if (targetStatus && targetStatus !== "all") {
-            const featKondisi = String(feature.get("kondisi") || feature.get("status") || "").trim().toLowerCase();
-            if (!featKondisi.includes(targetStatus)) {
-              return null;
-            }
-          }
-
-          const kondisi = String(feature.get("kondisi") || "").toLowerCase();
-          let strokeColor = isLayerSegmen ? "#10b981" : "#2563eb";
-
-          if (kondisi.includes("rusak berat")) strokeColor = "#ef4444";
-          else if (kondisi.includes("rusak ringan")) strokeColor = "#f97316";
-          else if (kondisi.includes("sedang")) strokeColor = "#f59e0b";
-          else if (kondisi.includes("rusak")) strokeColor = "#f97316";
-          else if (kondisi.includes("baik")) strokeColor = "#10b981";
-
-          let textStyle: any = undefined;
-          const currentZoom = mapInstance?.getView()?.getZoom() || 0;
-          if (currentZoom >= 13.5) {
-            const labelText = String(feature.get(isLayerSegmen ? "namobj" : "nama_ruas") || feature.get("nama_ruas") || feature.get("namobj") || "");
-            if (labelText && labelText !== "-") {
-              textStyle = new OlText({
-                text: labelText,
-                font: "600 11px Inter, sans-serif",
-                fill: new Fill({ color: isLayerSegmen ? "#064e3b" : "#1e3a8a" }),
-                stroke: new Stroke({ color: "#ffffff", width: 3 }),
-                placement: "line",
-                overflow: false,
-              });
-            }
-          }
-
-          return new OlStyle({
-            stroke: new Stroke({
-              color: strokeColor,
-              width: currentZoom >= 14 ? (isLayerSegmen ? 4 : 2.5) : (isLayerSegmen ? 3 : 1.75),
-              lineCap: "round",
-              lineJoin: "round",
-            }),
-            text: textStyle,
-            zIndex: isLayerSegmen ? 100 : 10,
-          });
-        };
-      };
+      const allowedExtent3857 = resolveLayerAllowedExtent3857(layer, olModules?.transformExtent);
+      const rawMinZoom = Number(layer.style_config?.min_zoom);
+      const effectiveMinZoom = Number.isFinite(rawMinZoom) && rawMinZoom > 0 ? Math.max(0, rawMinZoom - 0.01) : undefined;
 
       if (mvtLayersMap.has(layer.id)) {
         const olLayer = mvtLayersMap.get(layer.id);
-        olLayer.setVisible(layer.visible ?? true);
+        const prevVisible = olLayer.getVisible() !== false;
+        const nextVisible = layer.visible ?? true;
+        olLayer.setVisible(nextVisible);
         olLayer.setOpacity(effectiveOpacity);
         olLayer.setZIndex(layerZIndex);
+        if (typeof olLayer.setMinZoom === "function") {
+          olLayer.setMinZoom(effectiveMinZoom ?? -Infinity);
+        }
 
-        if (isKabupaten) {
-          olLayer.setStyle(createKabupatenStyleFn(olLayer));
-        } else {
-          // Pantau jika filterKecamatan atau filterStatus berubah agar render ulang style
-          const prevKec = olLayer.get("filterKecamatan");
-          const prevStatus = olLayer.get("filterStatus");
-          if (prevKec !== layer.filterKecamatan || prevStatus !== layer.filterStatus) {
-            olLayer.set("filterKecamatan", layer.filterKecamatan);
-            olLayer.set("filterStatus", layer.filterStatus);
-            olLayer.setStyle(createMvtStyleFn(olLayer, isSegmen));
+        const controller = mvtControllersMap.get(layer.id);
+        const allowedExtentUpdate = controller
+          ? controller.setAllowedExtent3857(allowedExtent3857)
+          : { changed: false, widened: false, narrowed: false };
+        if (allowedExtentUpdate.changed) {
+          olLayer.setExtent(allowedExtent3857 ?? undefined);
+        }
+
+        // Pantau jika filter atau konfigurasi style berubah untuk render ulang instan
+        const prevKec = olLayer.get("filterKecamatan");
+        const prevDesa = olLayer.get("filterDesa");
+        const prevExtent = olLayer.get("filterExtent");
+        const prevStatus = olLayer.get("filterStatus");
+        const prevStyleSig = olLayer.get("styleConfigSig");
+        const currentStyleSig = JSON.stringify(layer.style_config ?? null);
+        const extentChanged = JSON.stringify(prevExtent) !== JSON.stringify(layer.filterExtent);
+
+        const filterOrStyleChanged =
+          prevKec !== layer.filterKecamatan ||
+          prevDesa !== layer.filterDesa ||
+          extentChanged ||
+          prevStatus !== layer.filterStatus ||
+          prevStyleSig !== currentStyleSig;
+
+        if (filterOrStyleChanged) {
+          olLayer.set("filterKecamatan", layer.filterKecamatan);
+          olLayer.set("filterDesa", layer.filterDesa);
+          olLayer.set("filterExtent", layer.filterExtent);
+          olLayer.set("filterStatus", layer.filterStatus);
+          olLayer.set("styleConfigSig", currentStyleSig);
+          const nextDeclutter = isKabupaten ? Boolean(layer.style_config?.label?.enabled) : true;
+          if (Boolean(olLayer.getDeclutter?.()) !== nextDeclutter && typeof olLayer.setDeclutter === "function") {
+            olLayer.setDeclutter(nextDeclutter);
+          }
+          olLayer.setStyle(getLayerStyleFn(olLayer));
+          olLayer.changed();
+        }
+
+        if (!nextVisible && prevVisible) {
+          controller?.abortAll();
+          controller?.pruneCache({ clearAll: true });
+        } else if (nextVisible && allowedExtentUpdate.changed) {
+          controller?.abortOutOfExtentRequests();
+          controller?.pruneCache({ dropEmptyOnly: allowedExtentUpdate.widened });
+          if (!filterOrStyleChanged) {
             olLayer.changed();
           }
         }
@@ -1824,7 +2346,30 @@ function syncActiveWmsLayers() {
             url: tileUrl,
             maxZoom: 20,
             minZoom: isKabupaten ? 5 : 7,
-            cacheSize: 512,
+          });
+
+          const shouldDeclutter = isKabupaten ? Boolean(layer.style_config?.label?.enabled) : true;
+
+          const olLayer = new VectorTileLayer({
+            source,
+            renderMode: "hybrid",
+            declutter: shouldDeclutter,
+            cacheSize: 32,
+            extent: allowedExtent3857 ?? undefined,
+            minZoom: effectiveMinZoom,
+            opacity: effectiveOpacity,
+            visible: layer.visible ?? true,
+            zIndex: layerZIndex,
+          });
+
+          const controller = attachExtentAwareMvtLoader({
+            mapInstance,
+            source,
+            olLayer,
+            layer,
+            getLayerRef: () => mvtLayersMap.get(layer.id),
+            allowedExtent3857,
+            shouldDeferLabels: () => isDeferLabelsActive.value,
           });
 
           source.on("tileloadend", () => {
@@ -1833,25 +2378,16 @@ function syncActiveWmsLayers() {
             }
           });
 
-          const olLayer = new VectorTileLayer({
-            source,
-            renderMode: "hybrid",
-            declutter: true,
-            opacity: effectiveOpacity,
-            visible: layer.visible ?? true,
-            zIndex: layerZIndex,
-          });
+          olLayer.set("filterKecamatan", layer.filterKecamatan);
+          olLayer.set("filterDesa", layer.filterDesa);
+          olLayer.set("filterExtent", layer.filterExtent);
+          olLayer.set("filterStatus", layer.filterStatus);
+          olLayer.set("styleConfigSig", JSON.stringify(layer.style_config ?? null));
+          olLayer.setStyle(getLayerStyleFn(olLayer));
 
-          if (isKabupaten) {
-            olLayer.setStyle(createKabupatenStyleFn(olLayer));
-          } else {
-            olLayer.set("filterKecamatan", layer.filterKecamatan);
-            olLayer.set("filterStatus", layer.filterStatus);
-            olLayer.setStyle(createMvtStyleFn(olLayer, isSegmen));
-          }
-
-          mapInstance.addLayer(olLayer);
+          mvtControllersMap.set(layer.id, controller);
           mvtLayersMap.set(layer.id, olLayer);
+          mapInstance.addLayer(olLayer);
         } catch (err) {
           console.error(`Gagal memuat layer Martin MVT [${layer.title}]:`, err);
         }
@@ -1864,7 +2400,6 @@ function syncActiveWmsLayers() {
     const effectiveWmsLayerName = layer.wmsLayerName || layer.layer_name;
 
     if (effectiveWmsUrl && effectiveWmsLayerName) {
-      const layerZIndex = 10 + (currentLayers.length - index) * 2;
       if (wmsLayersMap.has(layer.id)) {
         const olLayer = wmsLayersMap.get(layer.id);
         olLayer.setVisible(layer.visible);
@@ -1934,10 +2469,8 @@ async function performWmsIdentify(olCoord: any) {
 
   // 1. Cek fitur vektor langsung dari Martin MVT layer pada titik piksel klik
   const vectorIdentified: IdentifiedFeature[] = [];
-  const getActiveLayerOrder = (layerId: string) => {
-    const idx = currentLayers.findIndex((l) => l.id === layerId || l.layer_name === layerId);
-    return idx >= 0 ? idx : 999;
-  };
+  const seenVectorKeys = new Set<string>();
+  const getActiveLayerOrder = (layerId: string) => getStackRankForLayer(layerId, 0);
 
   try {
     const pixel = mapInstance.getPixelFromCoordinate(olCoord);
@@ -1958,8 +2491,14 @@ async function performWmsIdentify(olCoord: any) {
               }
               if (match && match.visible !== false) {
                 const rawProps = feature.getProperties() || {};
-                const featureId = String(feature.getId?.() || rawProps.id || "");
+                const featureId = String(feature.getId?.() || rawProps.id || rawProps.gid || rawProps.objectid || "");
                 if (featureId.toLowerCase().includes("bataswilayah_kabupaten")) return;
+
+                const dedupeKey = featureId
+                  ? `${id}::${featureId}`
+                  : `${id}::${rawProps.nama_ruas || rawProps.nama_desa || rawProps.nama_kecamatan || rawProps.namobj || ""}`;
+                if (dedupeKey !== `${id}::` && seenVectorKeys.has(dedupeKey)) return;
+                seenVectorKeys.add(dedupeKey);
 
                 const cleanProps: Record<string, any> = {};
                 for (const [k, v] of Object.entries(rawProps)) {
@@ -2014,6 +2553,21 @@ async function performWmsIdentify(olCoord: any) {
 
                 const layerOrder = getActiveLayerOrder(id);
                 const geomType = olGeomInstance?.getType?.() || feature.getType?.() || feature.getGeometry?.()?.getType?.() || "LineString";
+                const resolution = mapInstance.getView()?.getResolution?.() || 1;
+                let clickDistPx = 0;
+                if (!geomType.toLowerCase().includes("polygon")) {
+                  try {
+                    const seedGeom = olModules.toGeometry ? olModules.toGeometry(feature) : olGeomInstance;
+                    if (typeof seedGeom?.getClosestPoint === "function") {
+                      const closest = seedGeom.getClosestPoint(olCoord);
+                      if (Array.isArray(closest) && closest.length >= 2) {
+                        const dx = closest[0] - olCoord[0];
+                        const dy = closest[1] - olCoord[1];
+                        clickDistPx = Math.hypot(dx, dy) / resolution;
+                      }
+                    }
+                  } catch {}
+                }
 
                 vectorIdentified.push({
                   id: String(feature.getId?.() || cleanProps.id || Math.random()),
@@ -2028,7 +2582,8 @@ async function performWmsIdentify(olCoord: any) {
                   geojsonGeometry: geojsonGeom,
                   olGeometry: olGeomInstance,
                   layerIndex: layerOrder,
-                });
+                  _clickDistPx: clickDistPx,
+                } as any);
               }
               break;
             }
@@ -2044,21 +2599,29 @@ async function performWmsIdentify(olCoord: any) {
     console.warn("Gagal membaca fitur MVT at pixel:", err);
   }
 
+  // Prioritaskan garis/titik di atas poligon, lalu jarak terdekat ke titik klik, lalu urutan layer teratas
+  vectorIdentified.sort((a: any, b: any) => {
+    const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
+    const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
+    if (isPolyA && !isPolyB) return 1;
+    if (!isPolyA && isPolyB) return -1;
+
+    if (!isPolyA && !isPolyB) {
+      const distA = typeof a._clickDistPx === "number" ? a._clickDistPx : 0;
+      const distB = typeof b._clickDistPx === "number" ? b._clickDistPx : 0;
+      if (Math.abs(distA - distB) > 1.5) {
+        return distA - distB;
+      }
+    }
+
+    const orderA = a.layerIndex ?? 0;
+    const orderB = b.layerIndex ?? 0;
+    if (orderA !== orderB) return orderB - orderA;
+    return 0;
+  });
+
   // Jika tidak ada layer WMS yang aktif dan fitur vektor sudah ditemukan atau kosong
   if (visibleWmsLayers.length === 0) {
-    // Prioritaskan layer aktif teratas dan garis di atas poligon
-    vectorIdentified.sort((a, b) => {
-      const orderA = a.layerIndex ?? 999;
-      const orderB = b.layerIndex ?? 999;
-      if (orderA !== orderB) return orderA - orderB;
-
-      const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
-      const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
-      if (isPolyA && !isPolyB) return 1;
-      if (!isPolyA && isPolyB) return -1;
-      return 0;
-    });
-
     if (vectorIdentified.length > 0) {
       activeNamobj.value = extractNamobj(vectorIdentified[0].properties);
       renderSelectedFeature(vectorIdentified[0]);
@@ -2066,11 +2629,17 @@ async function performWmsIdentify(olCoord: any) {
       activeNamobj.value = null;
       renderSelectedFeature(null);
     }
-    await new Promise((resolve) => setTimeout(resolve, 150));
     isIdentifyingFeatures.value = false;
     emit("identifying-features", false);
     emit("identify-features", vectorIdentified);
     return;
+  }
+
+  // Jika sudah ada fitur MVT di pixel yang diklik, tampilkan instan terlebih dahulu sambil menunggu WMS jika ada
+  if (vectorIdentified.length > 0) {
+    activeNamobj.value = extractNamobj(vectorIdentified[0].properties);
+    renderSelectedFeature(vectorIdentified[0]);
+    emit("identify-features", vectorIdentified);
   }
 
   const view = mapInstance.getView();
@@ -2206,12 +2775,12 @@ async function performWmsIdentify(olCoord: any) {
   }
 
   // Prioritaskan secara mutlak:
-  // 1. Layer teratas di daftar layer aktif (layerIndex terendah / index 0 adalah top of stack)
+  // 1. Layer teratas di tumpukan peta (order tertinggi / zIndex terbesar)
   // 2. Tipe garis ruas/segmen (LineString) & titik (Point) di atas poligon wilayah
   identifiedList.sort((a, b) => {
-    const orderA = a.layerIndex ?? 999;
-    const orderB = b.layerIndex ?? 999;
-    if (orderA !== orderB) return orderA - orderB;
+    const orderA = a.layerIndex ?? 0;
+    const orderB = b.layerIndex ?? 0;
+    if (orderA !== orderB) return orderB - orderA;
 
     const isPolyA = (a.geometryType || "").toLowerCase().includes("polygon");
     const isPolyB = (b.geometryType || "").toLowerCase().includes("polygon");
@@ -2266,19 +2835,146 @@ function getDeviceMapPadding(snapOverride?: "min" | "peek" | "full"): [number, n
   if (typeof window === "undefined") return [60, 40, 60, 40];
   const isMobile = window.innerWidth < 768;
   if (isMobile) {
-    const snap = snapOverride || props.mobileSheetSnap || "peek";
     const h = window.innerHeight;
+    if (!props.mobileDrawerOpen && !snapOverride) {
+      return [80, 24, 56, 24];
+    }
+    const snap = snapOverride || props.mobileSheetSnap || "min";
     const bottomPadding = snap === "full"
       ? Math.round(h * 0.82)
       : snap === "peek"
         ? Math.round(h * 0.50) + 28
-        : 170;
+        : Math.min(204, Math.round(h * 0.34));
     return [80, 24, bottomPadding, 24];
   }
-  // Desktop & Tablet: kompensasi padding kiri untuk Floating Left Panel (350px tablet / 400px desktop) dan top padding untuk Floating Navbar (80px)
+  // Desktop & Tablet: kompensasi padding kiri untuk Floating Left Panel (350px tablet / 400px desktop) dan top padding untuk Floating Navbar
   const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
-  const leftPadding = isTablet ? 390 : 440;
-  return [96, 48, 48, leftPadding];
+  const hasLeftPanel = props.leftPanelOpen !== false;
+  const leftPadding = hasLeftPanel ? (isTablet ? 390 : 440) : 48;
+  const rightPadding = isTablet ? 40 : 48;
+  return [96, rightPadding, 56, leftPadding];
+}
+
+function resolveSafeFitPadding(
+  size: number[] | undefined,
+  padding: [number, number, number, number]
+): [number, number, number, number] | null {
+  if (!Array.isArray(size) || size.length < 2 || size[0] <= 0 || size[1] <= 0) {
+    return null;
+  }
+  const availW = size[0] - padding[1] - padding[3];
+  const availH = size[1] - padding[0] - padding[2];
+  if (availW > 40 && availH > 40) {
+    return padding;
+  }
+  const padX = Math.min(16, Math.floor(size[0] * 0.1));
+  const padY = Math.min(16, Math.floor(size[1] * 0.1));
+  if (size[0] - padX * 2 <= 10 || size[1] - padY * 2 <= 10) {
+    return null;
+  }
+  return [padY, padX, padY, padX];
+}
+
+function executeViewFit(
+  extent3857: number[],
+  options: {
+    maxZoom: number;
+    duration?: number;
+    snapOverride?: "min" | "peek" | "full";
+    minResolution?: number;
+  }
+): boolean {
+  if (!mapInstance) return false;
+  mapInstance.updateSize();
+  const size = mapInstance.getSize();
+  const safePadding = resolveSafeFitPadding(size, getDeviceMapPadding(options.snapOverride));
+  if (!safePadding) return false;
+
+  const fitOptions: Record<string, any> = {
+    size,
+    padding: safePadding,
+    maxZoom: options.maxZoom,
+  };
+  if (typeof options.minResolution === "number") {
+    fitOptions.minResolution = options.minResolution;
+  }
+  if (typeof options.duration === "number" && options.duration > 0) {
+    fitOptions.duration = options.duration;
+  }
+
+  mapInstance.getView().fit(extent3857, fitOptions);
+  return true;
+}
+
+function applyInitialExtentFit(config: PendingInitialExtentFit): boolean {
+  if (!mapInstance || !olModules) return false;
+
+  if (config.kind === "coord" && config.coord) {
+    const cleanCoord = normalizeCoordLonLat(config.coord);
+    const delta = 0.00005;
+    const microBbox: [number, number, number, number] = [
+      cleanCoord[0] - delta,
+      cleanCoord[1] - delta,
+      cleanCoord[0] + delta,
+      cleanCoord[1] + delta,
+    ];
+    const extent3857 = olModules.transformExtent(microBbox, "EPSG:4326", "EPSG:3857");
+    return executeViewFit(extent3857, {
+      maxZoom: config.maxZoom,
+      snapOverride: config.snapOverride,
+    });
+  }
+
+  if (config.bbox && config.bbox.length === 4) {
+    const normalized = normalizeBbox4326(config.bbox, olModules);
+    const extent3857 = olModules.transformExtent(normalized, "EPSG:4326", "EPSG:3857");
+    return executeViewFit(extent3857, {
+      maxZoom: config.maxZoom,
+      snapOverride: config.snapOverride,
+    });
+  }
+
+  return false;
+}
+
+function applyInitialExtentOnInit() {
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const snapOverride = isMobile ? "min" : undefined;
+
+  let config: PendingInitialExtentFit | null = null;
+  if (props.initialBbox && props.initialBbox.length === 4) {
+    config = {
+      kind: "bbox",
+      bbox: props.initialBbox,
+      maxZoom: props.initialZoom ? Math.round(props.initialZoom) : 18,
+      snapOverride,
+    };
+  } else if (!props.initialCenter && props.initialZoom !== null) {
+    config = {
+      kind: "coord",
+      coord: BOJONEGORO_CENTER,
+      maxZoom: props.initialZoom,
+      snapOverride,
+    };
+  } else if (!props.initialCenter && props.initialZoom === null) {
+    const fallbackBbox =
+      props.defaultBbox && props.defaultBbox.length === 4
+        ? props.defaultBbox
+        : BOJONEGORO_DEFAULT_BBOX;
+    config = {
+      kind: "bbox",
+      bbox: fallbackBbox,
+      maxZoom: 15,
+      snapOverride,
+    };
+  }
+
+  if (!config) return;
+  if (!applyInitialExtentFit(config)) {
+    pendingInitialExtent = config;
+  } else {
+    pendingInitialExtent = null;
+  }
 }
 
 function normalizeCoordLonLat(coord: [number, number]): [number, number] {
@@ -2338,9 +3034,9 @@ function fitCoordinateWithPadding(
   duration = 450,
   snapOverride?: "min" | "peek" | "full"
 ) {
+  pendingInitialExtent = null;
   if (!mapInstance || !olModules) return;
   const cleanCoord = normalizeCoordLonLat(coord);
-  const padding = getDeviceMapPadding(snapOverride);
   const view = mapInstance.getView();
 
   // Batasi fitbound maksimal pada skala 1:5.000
@@ -2359,12 +3055,37 @@ function fitCoordinateWithPadding(
   ];
   const extent3857 = olModules.transformExtent(microBbox, "EPSG:4326", "EPSG:3857");
 
-  view.fit(extent3857, {
-    size: mapInstance.getSize(),
-    padding,
-    duration,
-    minResolution: minRes5000,
+  executeViewFit(extent3857, {
     maxZoom: resolvedZoom,
+    duration,
+    snapOverride,
+    minResolution: minRes5000,
+  });
+}
+
+function executeBboxFitWithScaleCap(
+  normalized: [number, number, number, number],
+  maxZoom: number | undefined,
+  duration: number,
+  snapOverride?: "min" | "peek" | "full"
+) {
+  if (!mapInstance || !olModules) return;
+  const view = mapInstance.getView();
+  const centerCoord: [number, number] = [
+    (normalized[0] + normalized[2]) / 2,
+    (normalized[1] + normalized[3]) / 2,
+  ];
+  // Batasi fitbound maksimal pada skala 1:5.000
+  const minRes5000 = getResolutionForScale(5000, centerCoord);
+  const zoom5000 = view.getZoomForResolution(minRes5000) ?? 16.8;
+  const resolvedMaxZoom = typeof maxZoom === "number" ? Math.min(maxZoom, zoom5000) : zoom5000;
+  const extent3857 = olModules.transformExtent(normalized, "EPSG:4326", "EPSG:3857");
+
+  executeViewFit(extent3857, {
+    maxZoom: resolvedMaxZoom,
+    duration,
+    snapOverride,
+    minResolution: minRes5000,
   });
 }
 
@@ -2374,32 +3095,20 @@ function fitFeatureExtent(
   duration = 500,
   snapOverride?: "min" | "peek" | "full"
 ) {
+  pendingInitialExtent = null;
   if (!mapInstance || !olModules || !extent || extent.length !== 4) return;
   const normalized = normalizeBbox4326(extent, olModules);
   const [minX, minY, maxX, maxY] = normalized;
-  const centerCoord: [number, number] = [(minX + maxX) / 2, (minY + maxY) / 2];
-
-  // Batasi fitbound maksimal pada skala 1:5.000
-  const minRes5000 = getResolutionForScale(5000, centerCoord);
-  const view = mapInstance.getView();
-  const zoom5000 = view.getZoomForResolution(minRes5000) ?? 16.8;
-  const resolvedMaxZoom = typeof maxZoom === "number" ? Math.min(maxZoom, zoom5000) : zoom5000;
-
   if (Math.abs(maxX - minX) < 0.0001 && Math.abs(maxY - minY) < 0.0001) {
-    fitCoordinateWithPadding(centerCoord, resolvedMaxZoom, duration, snapOverride);
+    const centerCoord: [number, number] = [(minX + maxX) / 2, (minY + maxY) / 2];
+    const minRes5000 = getResolutionForScale(5000, centerCoord);
+    const zoom5000 = mapInstance.getView().getZoomForResolution(minRes5000) ?? 16.8;
+    const resolvedZoom = typeof maxZoom === "number" ? Math.min(maxZoom, zoom5000) : zoom5000;
+    fitCoordinateWithPadding(centerCoord, resolvedZoom, duration, snapOverride);
     return;
   }
 
-  const padding = getDeviceMapPadding(snapOverride);
-  const extent3857 = olModules.transformExtent(normalized, "EPSG:4326", "EPSG:3857");
-
-  view.fit(extent3857, {
-    size: mapInstance.getSize(),
-    padding,
-    duration,
-    minResolution: minRes5000,
-    maxZoom: resolvedMaxZoom,
-  });
+  executeBboxFitWithScaleCap(normalized, maxZoom, duration, snapOverride);
 }
 
 function fitBbox(
@@ -2408,23 +3117,10 @@ function fitBbox(
   duration = 0,
   snapOverride?: "min" | "peek" | "full"
 ) {
+  pendingInitialExtent = null;
   if (!mapInstance || !olModules || !bbox || bbox.length !== 4) return;
   const normalized = normalizeBbox4326(bbox, olModules);
-  const extent3857 = olModules.transformExtent(normalized, "EPSG:4326", "EPSG:3857");
-  const view = mapInstance.getView();
-  const centerCoord: [number, number] = [(normalized[0] + normalized[2]) / 2, (normalized[1] + normalized[3]) / 2];
-  const minRes5000 = getResolutionForScale(5000, centerCoord);
-  const zoom5000 = view.getZoomForResolution(minRes5000) ?? 16.8;
-  const resolvedMaxZoom = typeof targetZoom === "number" ? Math.min(targetZoom, zoom5000) : zoom5000;
-  const padding = getDeviceMapPadding(snapOverride);
-
-  view.fit(extent3857, {
-    size: mapInstance.getSize(),
-    padding,
-    duration,
-    minResolution: minRes5000,
-    maxZoom: resolvedMaxZoom,
-  });
+  executeBboxFitWithScaleCap(normalized, targetZoom, duration, snapOverride);
 }
 
 function getViewport(): MapViewportPayload | null {
@@ -2660,6 +3356,11 @@ onMounted(() => {
   const resizeObserver = new ResizeObserver(() => {
     if (mapInstance) {
       mapInstance.updateSize();
+      if (pendingInitialExtent && applyInitialExtentFit(pendingInitialExtent)) {
+        pendingInitialExtent = null;
+        updateMapCenterAndZoom();
+        emitViewportUpdate();
+      }
     }
   });
   if (mapContainer.value) {
@@ -2674,6 +3375,8 @@ onMounted(() => {
       themeMutationObserver = null;
     }
     if (mapInstance) {
+      disposeAllMvtControllers();
+      wmsLayersMap.clear();
       if (pinOverlay) {
         mapInstance.removeOverlay(pinOverlay);
         pinOverlay = null;
@@ -2698,6 +3401,7 @@ function toggleCartoGrid(forceState?: boolean) {
 }
 
 function setCenterAndZoom(center: [number, number], zoom?: number, animate = false) {
+  pendingInitialExtent = null;
   if (!mapInstance || !olModules) return;
   const cleanCoord = normalizeCoordLonLat(center);
   const view = mapInstance.getView();
@@ -2831,171 +3535,15 @@ function handleMapMouseLeave() {
 }
 
 onBeforeUnmount(() => {
+  pendingInitialExtent = null;
   if (dismissTimer) clearTimeout(dismissTimer);
+  disposeAllMvtControllers();
   stopLiveTracking();
   if (geoVectorSource) geoVectorSource.clear();
   geoAccuracyFeature = null;
   geoPointFeature = null;
   geoHeadingFeature = null;
 });
-
-function buildCurrentMapThumbnailMeta(): MapThumbnailMeta {
-  const vp = getViewport();
-  return {
-    center: vp?.center || props.clickedCoordinate || [111.89, -7.15],
-    zoom: vp?.zoom || props.initialZoom || 13.5,
-    extent: vp?.bbox || null,
-    basemap: props.currentBasemap,
-    activeLayers: props.activeLayers,
-    filterWilayah: props.activeLayers?.find((l) => l.filterKecamatan)?.filterKecamatan || null,
-    title: props.locationLabel || "Peta Spasial Kabupaten Bojonegoro",
-  };
-}
-
-async function getMapSnapshot(options?: { crop16_9?: boolean; width?: number; height?: number }): Promise<string | null> {
-  if (options?.crop16_9) {
-    return getMapThumbnail(options);
-  }
-  return new Promise((resolve) => {
-    if (!mapInstance || !mapContainer.value) return resolve(null);
-    try {
-      mapInstance.renderSync();
-      const size = mapInstance.getSize();
-      if (!size) return resolve(null);
-      const [width, height] = size;
-      const exportCanvas = document.createElement("canvas");
-      exportCanvas.width = width;
-      exportCanvas.height = height;
-      const ctx = exportCanvas.getContext("2d");
-      if (!ctx) return resolve(null);
-
-      const canvases = mapContainer.value.querySelectorAll(".ol-layer canvas, canvas.ol-layer");
-      let taintedCount = 0;
-      if (canvases.length > 0) {
-        canvases.forEach((c) => {
-          const canvasEl = c as HTMLCanvasElement;
-          if (canvasEl.width > 0 && canvasEl.height > 0) {
-            if (isCanvasTainted(canvasEl)) {
-              taintedCount++;
-              return;
-            }
-            const parent = canvasEl.parentNode as HTMLElement | null;
-            const opacity = parent?.style.opacity || canvasEl.style.opacity || "1";
-            ctx.globalAlpha = parseFloat(opacity) || 1;
-            const transform = canvasEl.style.transform;
-            if (transform) {
-              const matrixMatch = transform.match(/^matrix\(([^\(]*)\)$/);
-              if (matrixMatch) {
-                const m = matrixMatch[1].split(",").map(Number);
-                ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-              }
-            }
-            ctx.drawImage(canvasEl, 0, 0);
-          }
-        });
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-      }
-
-      if (taintedCount > 0 && taintedCount === canvases.length) {
-        const meta = buildCurrentMapThumbnailMeta();
-        return resolve(generateFallbackMapCanvas(meta, 640, 360, true));
-      }
-
-      resolve(exportCanvas.toDataURL("image/png"));
-    } catch (err) {
-      console.warn("Snapshot notice (cross-origin fallback):", err);
-      const meta = buildCurrentMapThumbnailMeta();
-      resolve(generateFallbackMapCanvas(meta, 640, 360, true));
-    }
-  });
-}
-
-async function getMapThumbnail(options: MapThumbnailOptions = {}): Promise<string | null> {
-  return new Promise((resolve) => {
-    if (!mapInstance || !mapContainer.value) return resolve(null);
-    try {
-      mapInstance.renderSync();
-      const size = mapInstance.getSize();
-      if (!size) return resolve(null);
-      const [width, height] = size;
-      const exportCanvas = document.createElement("canvas");
-      exportCanvas.width = width;
-      exportCanvas.height = height;
-      const ctx = exportCanvas.getContext("2d");
-      if (!ctx) return resolve(null);
-
-      if (props.currentBasemap === "none") {
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, width, height);
-      }
-
-      const canvases = mapContainer.value.querySelectorAll(".ol-layer canvas, canvas.ol-layer");
-      let taintedCount = 0;
-      if (canvases.length > 0) {
-        canvases.forEach((c) => {
-          const canvasEl = c as HTMLCanvasElement;
-          if (canvasEl.width > 0 && canvasEl.height > 0) {
-            if (isCanvasTainted(canvasEl)) {
-              taintedCount++;
-              return;
-            }
-            const parent = canvasEl.parentNode as HTMLElement | null;
-            const opacity = parent?.style.opacity || canvasEl.style.opacity || "1";
-            ctx.globalAlpha = parseFloat(opacity) || 1;
-            const transform = canvasEl.style.transform;
-            if (transform) {
-              const matrixMatch = transform.match(/^matrix\(([^\(]*)\)$/);
-              if (matrixMatch) {
-                const m = matrixMatch[1].split(",").map(Number);
-                ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-              }
-            }
-            ctx.drawImage(canvasEl, 0, 0);
-          }
-        });
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-      }
-
-      const meta = buildCurrentMapThumbnailMeta();
-      const targetW = options.width || 640;
-      const targetH = options.height || Math.round((targetW * 9) / 16);
-
-      if (taintedCount > 0 && taintedCount === canvases.length) {
-        const fallback = generateFallbackMapCanvas(
-          meta,
-          targetW,
-          targetH,
-          options.includeWatermark !== false
-        );
-        return resolve(fallback);
-      }
-
-      const resultDataUrl = cropCanvasTo16_9(
-        exportCanvas,
-        targetW,
-        targetH,
-        options.quality ?? 0.92,
-        options.format ?? "image/png",
-        options.includeWatermark !== false,
-        meta
-      );
-
-      resolve(resultDataUrl || null);
-    } catch (err) {
-      console.warn("Ekspor thumbnail peta dialihkan ke fallback kartografis:", err);
-      const meta = buildCurrentMapThumbnailMeta();
-      const targetW = options.width || 640;
-      const targetH = options.height || Math.round((targetW * 9) / 16);
-      const fallback = generateFallbackMapCanvas(
-        meta,
-        targetW,
-        targetH,
-        options.includeWatermark !== false
-      );
-      resolve(fallback);
-    }
-  });
-}
 
 defineExpose({
   zoomIn,
@@ -3009,13 +3557,14 @@ defineExpose({
   fitFeatureExtent,
   getDeviceMapPadding,
   renderSelectedFeature,
+  findFeatureGeometryInMvt,
+  findDesaExtentInMvt,
   setCenterAndZoom,
   getViewport,
   dismissPulse,
-  getMapSnapshot,
-  getMapThumbnail,
-  getThumbnailMeta: buildCurrentMapThumbnailMeta,
   toggleCartoGrid,
+  setDeferLabelsOnMove,
+  deferLabelsOnMove: () => isDeferLabelsActive.value,
   showCartoGrid: () => showCartoGrid.value,
   currentRotation: () => currentRotation.value,
   mapInstance: () => mapInstance,

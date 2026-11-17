@@ -6,6 +6,7 @@ import type {
   SymbologyLabelField,
 } from '~/types/dataset-editor';
 import { DEFAULT_SYMBOLOGY } from '~/types/dataset-editor';
+import { getKondisiLegendItems } from '~/types/infrastruktur';
 
 interface Props {
   layerId?: string;
@@ -98,6 +99,8 @@ const previewDashArray = computed(() => {
   if (activeSymbology.value.lineDash === 'dotted') return '2,5';
   return 'none';
 });
+
+const kondisiLegendItems = computed(() => getKondisiLegendItems(props.layerId));
 </script>
 
 <template>
@@ -260,10 +263,14 @@ const previewDashArray = computed(() => {
       <div v-else-if="activeSymbology.colorMode === 'kondisi'" class="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800 space-y-1.5">
         <span class="text-[11px] font-semibold text-gray-600 dark:text-gray-400 block">Legenda Kondisi:</span>
         <div class="grid grid-cols-2 gap-2 text-xs">
-          <div class="flex items-center gap-2"><span class="w-3.5 h-1.5 rounded-full bg-[#10b981] shrink-0" /><span class="text-gray-700 dark:text-gray-300">Baik</span></div>
-          <div class="flex items-center gap-2"><span class="w-3.5 h-1.5 rounded-full bg-[#f59e0b] shrink-0" /><span class="text-gray-700 dark:text-gray-300">Sedang</span></div>
-          <div class="flex items-center gap-2"><span class="w-3.5 h-1.5 rounded-full bg-[#f97316] shrink-0" /><span class="text-gray-700 dark:text-gray-300">Rusak Ringan</span></div>
-          <div class="flex items-center gap-2"><span class="w-3.5 h-1.5 rounded-full bg-[#ef4444] shrink-0" /><span class="text-gray-700 dark:text-gray-300">Rusak Berat</span></div>
+          <div
+            v-for="item in kondisiLegendItems"
+            :key="item.label"
+            class="flex items-center gap-2"
+          >
+            <span class="w-3.5 h-1.5 rounded-full shrink-0" :style="{ backgroundColor: item.color }" />
+            <span class="text-gray-700 dark:text-gray-300">{{ item.label }}</span>
+          </div>
         </div>
       </div>
 

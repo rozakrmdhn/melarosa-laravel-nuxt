@@ -27,7 +27,6 @@ const emit = defineEmits<{
   (e: "go-to-geopark", category?: GeoparkCategoryFilter): void;
   (e: "go-to-identify"): void;
   (e: "clear-search"): void;
-  (e: "share"): void;
 }>();
 
 const draggedLayerIndex = ref<number | null>(null);
@@ -178,13 +177,19 @@ function onGripTouchEnd(event?: TouchEvent) {
     </div>
 
     <!-- Subheader urutan layer -->
-    <div v-if="props.activeLayers.length > 0" class="flex items-center justify-between px-1">
+    <div v-if="props.activeLayers.length > 0" class="flex items-center justify-between gap-2 px-1">
       <div class="flex items-center gap-1.5">
-        <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Layer</span>
+        <span class="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Layer</span>
         <span class="px-1.5 py-0.2 rounded-full text-xs font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
           {{ props.activeLayers.length }}
         </span>
       </div>
+      <span
+        v-if="props.activeLayers.length > 1"
+        class="text-[11px] font-medium text-slate-600 dark:text-slate-400"
+      >
+        Urutan atas = paling depan
+      </span>
     </div>
 
     <!-- State belum ada layer aktif -->

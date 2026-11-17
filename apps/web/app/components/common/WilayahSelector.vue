@@ -2,15 +2,18 @@
 import { useAuthStore } from '~/stores/auth';
 import { useWilayahStore } from '~/stores/wilayah';
 
+const ALL_OPTION_ID = '__ALL__';
+
 interface Props {
   modelKecamatan?: number | null;
   modelDesa?: number | null;
   disabled?: boolean;
   showLabels?: boolean;
   required?: boolean;
-  layout?: 'row' | 'col';
+  layout?: 'row' | 'col' | 'inline';
   allOptionLabel?: string;
   allowAll?: boolean;
+  showClear?: boolean;
   size?: 'xs' | 'sm' | 'md';
 }
 
@@ -23,6 +26,7 @@ const props = withDefaults(defineProps<Props>(), {
   layout: 'row',
   allOptionLabel: 'Semua',
   allowAll: false,
+  showClear: true,
   size: 'sm',
 });
 
@@ -36,6 +40,7 @@ const emit = defineEmits<{
 
 const auth = useAuthStore();
 const wilayahStore = useWilayahStore();
+const { isAdmin } = usePermission();
 
 const rawKecamatanList = computed(() => wilayahStore.kecamatanList);
 const rawDesaList = computed(() => {
@@ -46,39 +51,57 @@ const rawDesaList = computed(() => {
 const loadingKecamatan = computed(() => wilayahStore.loadingKecamatan);
 const loadingDesa = computed(() => wilayahStore.isDesaLoading(props.modelKecamatan));
 
+const isUnrestrictedRole = computed(
+  () => isAdmin() || auth.hasRole('admin') || auth.hasRole('verifierBappeda'),
+);
+
 // Auto-lock logic berdasarkan role & wilayah pengguna
 const isKecamatanLocked = computed(() => {
   if (props.disabled) return true;
-  if (auth.hasRole('admin') || auth.hasRole('verifierBappeda')) return false;
+  if (isUnrestrictedRole.value) return false;
   return !!auth.user?.id_kecamatan;
 });
 
 const isDesaLocked = computed(() => {
   if (props.disabled) return true;
-  if (auth.hasRole('admin') || auth.hasRole('verifierBappeda')) return false;
+  if (isUnrestrictedRole.value) return false;
   return !!auth.user?.id_desa;
 });
 
 const kecamatanItems = computed(() => {
   const items = rawKecamatanList.value.map((k) => ({
-    id: k.id,
+    id: k.id as number | string,
     label: k.nama_kecamatan,
   }));
   if (props.allowAll) {
-    return [{ id: null as any, label: `${props.allOptionLabel} Kecamatan` }, ...items];
+    return [{ id: ALL_OPTION_ID as number | string, label: `${props.allOptionLabel} Kecamatan` }, ...items];
   }
   return items;
 });
 
 const desaItems = computed(() => {
   const items = rawDesaList.value.map((d) => ({
-    id: d.id,
+    id: d.id as number | string,
     label: d.nama_desa,
   }));
   if (props.allowAll) {
-    return [{ id: null as any, label: `${props.allOptionLabel} Desa` }, ...items];
+    return [{ id: ALL_OPTION_ID as number | string, label: `${props.allOptionLabel} Desa` }, ...items];
   }
   return items;
+});
+
+const selectedKecamatanValue = computed(() => {
+  if (props.modelKecamatan !== null && props.modelKecamatan !== undefined) {
+    return props.modelKecamatan;
+  }
+  return props.allowAll ? ALL_OPTION_ID : undefined;
+});
+
+const selectedDesaValue = computed(() => {
+  if (props.modelDesa !== null && props.modelDesa !== undefined) {
+    return props.modelDesa;
+  }
+  return props.allowAll ? ALL_OPTION_ID : undefined;
 });
 
 function resolveId(val: any): number | null {
@@ -86,7 +109,9 @@ function resolveId(val: any): number | null {
   if (typeof val === 'object') {
     val = val.id ?? val.value ?? null;
   }
-  if (val === null || val === undefined || val === '' || val === 'ALL') return null;
+  if (val === null || val === undefined || val === '' || val === 'ALL' || val === ALL_OPTION_ID) {
+    return null;
+  }
   const n = Number(val);
   return isNaN(n) ? null : n;
 }
@@ -113,7 +138,7 @@ function handleDesaSelect(val: any) {
 
 async function loadKecamatan() {
   await wilayahStore.getKecamatanList();
-  if (auth.user?.id_kecamatan && !props.modelKecamatan) {
+  if (!isUnrestrictedRole.value && auth.user?.id_kecamatan && !props.modelKecamatan) {
     emit('update:modelKecamatan', auth.user.id_kecamatan);
     emit('update:model-kecamatan', auth.user.id_kecamatan);
   }
@@ -122,7 +147,7 @@ async function loadKecamatan() {
 async function loadDesa(kecId?: number | null) {
   if (!kecId) return;
   await wilayahStore.getDesaList(kecId);
-  if (auth.user?.id_desa && !props.modelDesa) {
+  if (!isUnrestrictedRole.value && auth.user?.id_desa && !props.modelDesa) {
     emit('update:modelDesa', auth.user.id_desa);
     emit('update:model-desa', auth.user.id_desa);
   }
@@ -133,50 +158,192 @@ watch(
   (newKec) => {
     loadDesa(newKec);
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 onMounted(() => {
   loadKecamatan();
 });
+
+const isKecamatanActive = computed(
+  () => !isKecamatanLocked.value && props.modelKecamatan !== null && props.modelKecamatan !== undefined,
+);
+const isDesaActive = computed(
+  () => !isDesaLocked.value && props.modelDesa !== null && props.modelDesa !== undefined,
+);
+
+const dropdownContentProps = {
+  align: 'start' as const,
+  sideOffset: 4,
+};
+
+const formSelectUi = {
+  base: 'min-h-[44px] sm:min-h-[36px] justify-start text-left',
+  content: 'w-(--reka-combobox-trigger-width)',
+};
+
+const inlineSelectUi = {
+  base: 'justify-start text-left',
+  content: 'w-(--reka-combobox-trigger-width)',
+};
+
+const containerClass = computed(() => {
+  if (props.layout === 'inline') {
+    return 'flex items-center gap-1.5';
+  }
+  if (props.layout === 'row') {
+    return 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+  }
+  return 'flex flex-col gap-3';
+});
 </script>
 
 <template>
-  <div :class="layout === 'row' ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'flex flex-col gap-3'">
+  <div :class="containerClass">
     <!-- Selector Kecamatan -->
-    <UFormField :label="showLabels ? 'Kecamatan' : undefined" :required="required">
+    <UFormField
+      v-if="layout !== 'inline'"
+      :label="showLabels ? 'Kecamatan' : undefined"
+      :required="required"
+    >
+      <div class="flex items-center gap-1.5 min-w-0">
+        <USelectMenu
+          :model-value="selectedKecamatanValue"
+          :items="kecamatanItems"
+          value-key="id"
+          label-key="label"
+          :loading="loadingKecamatan"
+          :disabled="isKecamatanLocked"
+          :leading-icon="isKecamatanLocked ? 'i-lucide-lock' : 'i-lucide-map-pin'"
+          :highlight="isKecamatanActive"
+          :color="isKecamatanActive ? 'primary' : undefined"
+          :search-input="{ placeholder: 'Cari kecamatan...' }"
+          :size="size"
+          :content="dropdownContentProps"
+          :ui="formSelectUi"
+          placeholder="Pilih Kecamatan"
+          aria-label="Pilih Kecamatan"
+          class="w-full flex-1 min-w-0"
+          @update:model-value="handleKecamatanSelect"
+        />
+        <UButton
+          v-if="allowAll && showClear && isKecamatanActive"
+          icon="i-lucide-x"
+          color="neutral"
+          variant="soft"
+          :size="size"
+          aria-label="Reset filter kecamatan"
+          title="Reset ke semua kecamatan"
+          class="shrink-0 cursor-pointer min-h-[44px] min-w-[44px] sm:min-h-[36px] sm:min-w-[36px] flex items-center justify-center"
+          @click="handleKecamatanSelect(ALL_OPTION_ID)"
+        />
+      </div>
+    </UFormField>
+
+    <div v-else class="flex items-center gap-1">
       <USelectMenu
-        :model-value="modelKecamatan"
+        :model-value="selectedKecamatanValue"
         :items="kecamatanItems"
         value-key="id"
         label-key="label"
         :loading="loadingKecamatan"
         :disabled="isKecamatanLocked"
-        :trailing-icon="isKecamatanLocked ? 'i-lucide-lock' : undefined"
+        :leading-icon="isKecamatanLocked ? 'i-lucide-lock' : 'i-lucide-map-pin'"
+        :highlight="isKecamatanActive"
+        :color="isKecamatanActive ? 'primary' : undefined"
+        :search-input="{ placeholder: 'Cari kecamatan...' }"
         :size="size"
-        :ui="{ content: 'z-[100]' }"
-        placeholder="Pilih Kecamatan"
-        class="w-full"
+        :content="dropdownContentProps"
+        :ui="inlineSelectUi"
+        placeholder="Kecamatan"
+        aria-label="Filter Kecamatan"
+        class="w-[156px] lg:w-44 xl:w-48"
         @update:model-value="handleKecamatanSelect"
       />
-    </UFormField>
+      <UButton
+        v-if="allowAll && showClear && isKecamatanActive"
+        icon="i-lucide-x"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        aria-label="Reset filter kecamatan"
+        title="Reset ke semua kecamatan"
+        class="shrink-0 cursor-pointer"
+        @click="handleKecamatanSelect(ALL_OPTION_ID)"
+      />
+    </div>
 
     <!-- Selector Desa -->
-    <UFormField :label="showLabels ? 'Desa / Kelurahan' : undefined" :required="required">
+    <UFormField
+      v-if="layout !== 'inline'"
+      :label="showLabels ? 'Desa / Kelurahan' : undefined"
+      :required="required"
+    >
+      <div class="flex items-center gap-1.5 min-w-0">
+        <USelectMenu
+          :model-value="selectedDesaValue"
+          :items="desaItems"
+          value-key="id"
+          label-key="label"
+          :loading="loadingDesa"
+          :disabled="isDesaLocked || !modelKecamatan"
+          :leading-icon="isDesaLocked ? 'i-lucide-lock' : 'i-lucide-home'"
+          :highlight="isDesaActive"
+          :color="isDesaActive ? 'primary' : undefined"
+          :search-input="{ placeholder: 'Cari desa / kelurahan...' }"
+          :size="size"
+          :content="dropdownContentProps"
+          :ui="formSelectUi"
+          :placeholder="modelKecamatan ? 'Pilih Desa' : 'Pilih Kecamatan dulu'"
+          aria-label="Pilih Desa atau Kelurahan"
+          class="w-full flex-1 min-w-0"
+          @update:model-value="handleDesaSelect"
+        />
+        <UButton
+          v-if="allowAll && showClear && isDesaActive"
+          icon="i-lucide-x"
+          color="neutral"
+          variant="soft"
+          :size="size"
+          aria-label="Reset filter desa"
+          title="Reset ke semua desa"
+          class="shrink-0 cursor-pointer min-h-[44px] min-w-[44px] sm:min-h-[36px] sm:min-w-[36px] flex items-center justify-center"
+          @click="handleDesaSelect(ALL_OPTION_ID)"
+        />
+      </div>
+    </UFormField>
+
+    <div v-else class="flex items-center gap-1">
       <USelectMenu
-        :model-value="modelDesa"
+        :model-value="selectedDesaValue"
         :items="desaItems"
         value-key="id"
         label-key="label"
         :loading="loadingDesa"
         :disabled="isDesaLocked || !modelKecamatan"
-        :trailing-icon="isDesaLocked ? 'i-lucide-lock' : undefined"
+        :leading-icon="isDesaLocked ? 'i-lucide-lock' : 'i-lucide-home'"
+        :highlight="isDesaActive"
+        :color="isDesaActive ? 'primary' : undefined"
+        :search-input="{ placeholder: 'Cari desa...' }"
         :size="size"
-        :ui="{ content: 'z-[100]' }"
-        :placeholder="modelKecamatan ? 'Pilih Desa' : 'Pilih Kecamatan dulu'"
-        class="w-full"
+        :content="dropdownContentProps"
+        :ui="inlineSelectUi"
+        :placeholder="modelKecamatan ? 'Desa' : 'Semua Desa'"
+        aria-label="Filter Desa"
+        class="w-[156px] lg:w-44 xl:w-48"
         @update:model-value="handleDesaSelect"
       />
-    </UFormField>
+      <UButton
+        v-if="allowAll && showClear && isDesaActive"
+        icon="i-lucide-x"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        aria-label="Reset filter desa"
+        title="Reset ke semua desa"
+        class="shrink-0 cursor-pointer"
+        @click="handleDesaSelect(ALL_OPTION_ID)"
+      />
+    </div>
   </div>
 </template>

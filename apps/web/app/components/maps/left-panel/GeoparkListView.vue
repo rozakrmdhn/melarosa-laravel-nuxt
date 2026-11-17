@@ -87,7 +87,7 @@ function handleZoomToSite(site: GeoparkSite) {
     <div class="space-y-2.5">
       <div class="flex items-center justify-between px-1">
         <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-          Daftar Geosite
+          Destinasi Geopark Bojonegoro
         </h3>
         <div class="flex items-center gap-2">
           <!-- Tombol Segarkan Data Ringkas -->

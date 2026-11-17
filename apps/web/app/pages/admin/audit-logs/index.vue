@@ -1,4 +1,4 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 definePageMeta({
   middleware: ["auth", "permission"],
   permission: "audit-logs-view",
@@ -269,6 +269,11 @@ const moduleMetaMap: Record<string, ModuleMeta> = {
     icon: "i-lucide-shield",
     badgeClass: "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400 border-orange-200 dark:border-orange-800/40",
   },
+  backups: {
+    label: "Backup & Restore",
+    icon: "i-lucide-database-backup",
+    badgeClass: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/40",
+  },
 };
 
 function getModuleMeta(module: string): ModuleMeta {
@@ -314,6 +319,19 @@ function formatEventName(event: string): string {
   if (ev === "updated") return "Pembaruan (Update)";
   if (ev === "deleted") return "Penghapusan (Delete)";
   if (ev === "split") return "Pemotongan (Split)";
+
+  // Backup & Restore events
+  if (ev === "backup.queued") return "Backup Dijadwalkan";
+  if (ev === "backup.completed") return "Backup Selesai";
+  if (ev === "backup.failed") return "Backup Gagal";
+  if (ev === "backup.downloaded") return "Unduh Arsip Backup";
+  if (ev === "backup.deleted") return "Hapus Arsip Backup";
+  if (ev === "backup.uploaded") return "Unggah Backup Eksternal";
+  if (ev === "backup.schedule_updated") return "Perbarui Jadwal Backup";
+  if (ev === "backup.retention_cleanup") return "Pembersihan Retensi Backup";
+  if (ev === "backup.restore_queued") return "Restore Dijadwalkan";
+  if (ev === "backup.restored") return "Restore Selesai";
+  if (ev === "backup.restore_failed") return "Restore Gagal";
 
   return event;
 }

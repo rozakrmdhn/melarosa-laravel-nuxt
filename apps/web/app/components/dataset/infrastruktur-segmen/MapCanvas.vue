@@ -28,7 +28,12 @@ interface Props {
   symbology?: LayerSymbology;
   bbox?: [number, number, number, number] | null;
   clickedCoordinate?: [number, number] | null;
+  clickedCoordText?: string;
   activeLayerId?: string;
+  floatingModeToolbar?: boolean;
+  referenceLabel?: string | null;
+  interactionMode?: 'pan' | 'identify' | 'pick-reference';
+  selectedReferenceRoadId?: string | null;
 
   // Jalan Poros Desa Layer Props
   jalanPorosDesaVisible?: boolean;
@@ -64,6 +69,8 @@ const props = withDefaults(defineProps<Props>(), {
   symbology: () => ({ ...DEFAULT_SYMBOLOGY }),
   bbox: null,
   clickedCoordinate: null,
+  clickedCoordText: '',
+  floatingModeToolbar: true,
 
   jalanPorosDesaVisible: true,
   jalanPorosDesaOpacity: 0.85,
@@ -74,10 +81,15 @@ const props = withDefaults(defineProps<Props>(), {
   jalanPorosDesaDesaFilter: null,
   jalanPorosDesaKondisiFilter: null,
   jalanPorosDesaPerkerasanFilter: null,
+  referenceLabel: null,
+  interactionMode: 'identify',
+  selectedReferenceRoadId: null,
 });
 
 const emit = defineEmits<{
   (e: 'select', feature: any | null): void;
+  (e: 'pickReferenceRoad', payload: { id: string; namobj?: string; kode_ruas?: string | null }): void;
+  (e: 'toggleIdentify'): void;
   (e: 'log', level: 'INFO' | 'WARN' | 'ERROR', message: string): void;
   (e: 'update:basemap', val: BasemapType): void;
   (e: 'update:mouseCoords', coords: string): void;
@@ -101,6 +113,28 @@ const pulseEl = ref<HTMLDivElement | null>(null);
 const isPulseVisible = ref(false);
 
 const currentBasemap = ref<BasemapType>(props.basemap);
+
+const BASEMAP_OPTIONS: Array<{ value: BasemapType; label: string; icon: string }> = [
+  { value: 'osm', label: 'OSM', icon: 'i-lucide-map' },
+  { value: 'dark', label: 'Gelap', icon: 'i-lucide-moon' },
+  { value: 'satellite', label: 'Satelit', icon: 'i-lucide-globe' },
+  { value: 'topo', label: 'Topografi', icon: 'i-lucide-mountain' },
+  { value: 'none', label: 'Polos', icon: 'i-lucide-square' },
+];
+
+const activeBasemapMeta = computed(() => {
+  return BASEMAP_OPTIONS.find(b => b.value === currentBasemap.value) ?? BASEMAP_OPTIONS[0]!;
+});
+
+const basemapDropdownItems = computed(() => [
+  BASEMAP_OPTIONS.map(bm => ({
+    label: bm.label,
+    icon: bm.icon,
+    type: 'checkbox' as const,
+    checked: currentBasemap.value === bm.value,
+    onSelect: () => setBasemap(bm.value),
+  })),
+]);
 const isMapLoaded = ref(false);
 const isMvtLoading = ref(false);
 let activeTileCount = 0;
@@ -133,6 +167,11 @@ let splitSource: any = null;
 let splitLayer: any = null;
 let splitSnapInteraction: any = null;
 let splitClickListener: any = null;
+
+let refHighlightSource: any = null;
+let refHighlightLayer: any = null;
+let refSnapInteraction: any = null;
+let pendingRefFeature: { featureOrGeom: any; shouldZoom: boolean } | null = null;
 
 const isEditGeometryMode = ref(false);
 const editingSegmenData = ref<InfrastrukturSegmen | null>(null);
@@ -269,6 +308,10 @@ const drawnPointCount = ref(0);
 const drawnLengthMeters = ref(0);
 const drawnFeature = ref<any>(null);
 const redoStack = ref<any[]>([]);
+
+function roundLengthMeters(meters: number): number {
+  return Number.isFinite(meters) ? Math.round(meters * 100) / 100 : 0;
+}
 
 // ─── Snapping State ───────────────────────────────────────────────────────────
 let snapSource: any = null;
@@ -474,8 +517,20 @@ function getJalanPorosStyle(feature: any) {
 
   const featId = String(feature.get('id') || feature.getId() || '');
   const hoverId = hoveredFeature.value ? String(hoveredFeature.value.get('id') || hoveredFeature.value.getId() || '') : '';
-  const isHovered = Boolean(props.activeLayerId === 'jalan-poros-desa' && hoverId && hoverId === featId);
-  const isPinned = Boolean(props.activeLayerId === 'jalan-poros-desa' && isPopupPinned.value && tooltipData.value?.id === featId);
+  const isPickRefMode = props.interactionMode === 'pick-reference';
+  const canHoverJalanPoros = (props.interactionMode === 'identify' && props.activeLayerId === 'jalan-poros-desa') || isPickRefMode;
+  const isPickedRef = Boolean(isPickRefMode && props.selectedReferenceRoadId && String(props.selectedReferenceRoadId) === featId);
+  const isHovered = Boolean(canHoverJalanPoros && !isPickedRef && hoverId && hoverId === featId);
+  const hasRefHighlight = Boolean(refHighlightSource && refHighlightSource.getFeatures().length > 0);
+
+  if (isPickRefMode && isPickedRef && hasRefHighlight) {
+    return textStyle ? new Style({ text: textStyle, zIndex: 8 }) : undefined;
+  }
+
+  const isPinned = Boolean(
+    (props.interactionMode === 'identify' && props.activeLayerId === 'jalan-poros-desa' && isPopupPinned.value && tooltipData.value?.id === featId) ||
+    isPickedRef
+  );
 
   if (isPinned) {
     return new Style({
@@ -608,6 +663,67 @@ function getLabelText(feature: any, propsObj: any): string {
   return val ? String(val) : '';
 }
 
+interface CasedLineStyleSpec {
+  color: string;
+  width: number;
+  lineDash?: number[];
+  casingColor?: string;
+  casingWidth?: number;
+  glowColor?: string;
+  glowWidth?: number;
+  textStyle?: any;
+  baseZIndex: number;
+}
+
+function createCasedLineStyles(Style: any, Stroke: any, spec: CasedLineStyleSpec) {
+  const styles: any[] = [];
+  let z = spec.baseZIndex;
+
+  if (spec.glowColor && spec.glowWidth) {
+    styles.push(
+      new Style({
+        stroke: new Stroke({
+          color: spec.glowColor,
+          width: spec.glowWidth,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }),
+        zIndex: z++,
+      })
+    );
+  }
+
+  if (spec.casingColor && spec.casingWidth) {
+    styles.push(
+      new Style({
+        stroke: new Stroke({
+          color: spec.casingColor,
+          width: spec.casingWidth,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }),
+        zIndex: z++,
+      })
+    );
+  }
+
+  styles.push(
+    new Style({
+      stroke: new Stroke({
+        color: spec.color,
+        width: spec.width,
+        lineDash: spec.lineDash,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }),
+      text: spec.textStyle,
+      zIndex: z,
+    })
+  );
+
+  return styles;
+}
+
 function getFeatureStyle(feature: any) {
   if (!olModules) return null;
   const { Style, Stroke, Fill, Text } = olModules;
@@ -661,9 +777,9 @@ function getFeatureStyle(feature: any) {
     (props.selectedSegmenId && String(props.selectedSegmenId) === featId) ||
     (props.selectedSegmen?.id && String(props.selectedSegmen.id) === featId)
   );
-  const isPinned = Boolean(props.activeLayerId !== 'jalan-poros-desa' && isPopupPinned.value && tooltipData.value?.id === featId);
+  const isPinned = Boolean(props.interactionMode === 'identify' && props.activeLayerId !== 'jalan-poros-desa' && isPopupPinned.value && tooltipData.value?.id === featId);
   const hoverId = hoveredFeature.value ? String(hoveredFeature.value.get('id') || hoveredFeature.value.getId() || '') : '';
-  const isHovered = Boolean(props.activeLayerId !== 'jalan-poros-desa' && hoverId && hoverId === featId);
+  const isHovered = Boolean(props.interactionMode === 'identify' && props.activeLayerId !== 'jalan-poros-desa' && hoverId && hoverId === featId);
 
   const sym = props.symbology || DEFAULT_SYMBOLOGY;
   const isDark = colorMode.value === 'dark';
@@ -699,46 +815,50 @@ function getFeatureStyle(feature: any) {
   }
 
   if (isSelected || isPinned) {
-    return new Style({
-      stroke: new Stroke({
-        color: '#0284c7',
-        width: Math.max(strokeWidth + 2.5, 4.5),
-        lineDash: undefined,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }),
-      text: textStyle,
-      zIndex: 100,
+    return createCasedLineStyles(Style, Stroke, {
+      color: '#0284c7',
+      width: Math.max(strokeWidth + 3, 5.5),
+      casingColor: '#ffffff',
+      casingWidth: Math.max(strokeWidth + 6.5, 9),
+      glowColor: isDark ? 'rgba(56, 189, 248, 0.52)' : 'rgba(14, 165, 233, 0.45)',
+      glowWidth: Math.max(strokeWidth + 13, 16),
+      textStyle,
+      baseZIndex: 98,
     });
   }
 
   if (isHovered) {
-    return new Style({
-      stroke: new Stroke({
-        color: isDark ? '#38bdf8' : '#0284c7',
-        width: Math.max(strokeWidth + 1.5, 3.5),
-        lineDash: undefined,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }),
-      text: textStyle,
-      zIndex: 50,
+    return createCasedLineStyles(Style, Stroke, {
+      color: isDark ? '#38bdf8' : '#0284c7',
+      width: Math.max(strokeWidth + 2, 4.5),
+      casingColor: '#ffffff',
+      casingWidth: Math.max(strokeWidth + 4.5, 7),
+      glowColor: isDark ? 'rgba(56, 189, 248, 0.36)' : 'rgba(14, 165, 233, 0.30)',
+      glowWidth: Math.max(strokeWidth + 9.5, 12),
+      textStyle,
+      baseZIndex: 48,
     });
   }
 
-  const styleKey = `${baseColor}_${strokeWidth}_${sym.lineDash || 'solid'}_${labelText || ''}`;
+  // Pertegas casing dan lebar segmen saat ada koridor referensi jalan poros agar bagian terbangun langsung terbaca.
+  const hasRefHighlight = Boolean(refHighlightSource && refHighlightSource.getFeatures().length > 0);
+  const effectiveWidth = hasRefHighlight ? Math.max(strokeWidth + 1.5, 4) : strokeWidth;
+  const casingColor = hasRefHighlight
+    ? '#ffffff'
+    : (isDark ? 'rgba(9, 13, 22, 0.88)' : 'rgba(255, 255, 255, 0.92)');
+  const casingWidth = hasRefHighlight ? Math.max(strokeWidth + 4, 6.5) : strokeWidth + 2;
+
+  const styleKey = `${baseColor}_${strokeWidth}_${sym.lineDash || 'solid'}_${isDark ? 'd' : 'l'}_${hasRefHighlight ? 'ref' : 'std'}_${labelText || ''}`;
   let cached = featureStyleCache.get(styleKey);
   if (!cached) {
-    cached = new Style({
-      stroke: new Stroke({
-        color: baseColor,
-        width: strokeWidth,
-        lineDash,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }),
-      text: textStyle,
-      zIndex: 10,
+    cached = createCasedLineStyles(Style, Stroke, {
+      color: baseColor,
+      width: effectiveWidth,
+      lineDash,
+      casingColor,
+      casingWidth,
+      textStyle,
+      baseZIndex: 10,
     });
     featureStyleCache.set(styleKey, cached);
   }
@@ -806,6 +926,8 @@ function zoomToGeometry(geometry: any) {
 function zoomToFeature(feature: any) {
   if (!mapInstance || !olModules || !feature) return;
   try {
+    mapInstance.updateSize();
+    const size = mapInstance.getSize();
     // 1. Parse dari format geometry GeoJSON
     const geom = feature.geometry || (feature.geojson ? (typeof feature.geojson === 'string' ? JSON.parse(feature.geojson) : feature.geojson) : null);
     if (geom) {
@@ -818,7 +940,8 @@ function zoomToFeature(feature: any) {
       const extent = olGeom.getExtent();
       if (extent && !extent.some((n: number) => isNaN(n) || !isFinite(n))) {
         mapInstance.getView().fit(extent, {
-          padding: [80, 80, 80, 80],
+          ...(size && size[0] > 0 && size[1] > 0 ? { size } : {}),
+          padding: [90, 90, 90, 90],
           maxZoom: 17,
           duration: 600,
         });
@@ -841,6 +964,51 @@ function zoomToFeature(feature: any) {
     }
   } catch (err) {
     console.error('Gagal zoom ke fitur segmen:', err);
+  }
+}
+
+function setReferenceJalanPoros(featureOrGeom: any | null, shouldZoom = false) {
+  if (!mapInstance || !olModules || !refHighlightSource) {
+    pendingRefFeature = featureOrGeom ? { featureOrGeom, shouldZoom } : null;
+    return;
+  }
+
+  pendingRefFeature = null;
+  refHighlightSource.clear();
+
+  if (featureOrGeom) {
+    try {
+      const featurePayload = featureOrGeom.type === 'Feature'
+        ? featureOrGeom
+        : {
+            type: 'Feature',
+            geometry: featureOrGeom.geometry || (typeof featureOrGeom.geojson === 'string' ? JSON.parse(featureOrGeom.geojson) : featureOrGeom.geojson) || featureOrGeom,
+            properties: featureOrGeom.properties || {},
+          };
+
+      if (featurePayload.geometry) {
+        const format = new olModules.GeoJSON();
+        const olFeatures = format.readFeatures(featurePayload, {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857',
+        });
+        if (olFeatures.length > 0) {
+          refHighlightSource.addFeatures(olFeatures);
+          if (shouldZoom) {
+            zoomToFeature(featurePayload);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Gagal menampilkan highlight jalan poros referensi:', err);
+    }
+  }
+
+  jalanPorosVectorTileLayer?.changed();
+  vectorTileLayer?.changed();
+
+  if (isDrawing.value) {
+    updateSnapInteractions();
   }
 }
 
@@ -896,6 +1064,8 @@ function handleRedraw() {
 function startDrawing() {
   if (!mapInstance || !olModules) return;
   cancelDrawing(false);
+  if (isEditGeometryMode.value) cancelEditGeometry();
+  if (isSplitMode.value) cancelSplitMode();
 
   isDrawing.value = true;
   hasCompletedLine.value = false;
@@ -942,7 +1112,7 @@ function startDrawing() {
       if (coords && coords.length > 0) {
         drawnPointCount.value = Math.max(1, coords.length - 1);
         if (coords.length >= 2) {
-          drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+          drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
         }
       }
     };
@@ -954,7 +1124,7 @@ function startDrawing() {
     drawnFeature.value = evt.feature;
     const geom = evt.feature.getGeometry();
     if (geom) {
-      drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+      drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
       drawnPointCount.value = geom.getCoordinates()?.length || 0;
       if (activeGeomListener) {
         geom.un('change', activeGeomListener);
@@ -990,7 +1160,7 @@ function startDrawing() {
       if (Array.isArray(coords)) {
         drawnPointCount.value = coords.length;
         if (coords.length >= 2) {
-          drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+          drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
         }
       }
     };
@@ -1003,6 +1173,7 @@ function startDrawing() {
 
   snapSource = new olModules.VectorSource({ wrapX: false });
   updateSnapInteractions();
+  snapRoadCount.value = refHighlightSource?.getFeatures().length || 0;
   mapInstance.on('moveend', onMapMoveEndDuringDraw);
   loadSnapFeatures();
   emit('log', 'INFO', 'Mode gambar aktif. Klik pada peta untuk menggambar garis segmen.');
@@ -1026,7 +1197,7 @@ function handleUndo() {
       if (drawnFeature.value) {
         const geom = drawnFeature.value.getGeometry();
         if (geom && drawnPointCount.value >= 2) {
-          drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+          drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
         } else {
           drawnLengthMeters.value = 0;
         }
@@ -1045,7 +1216,7 @@ function handleUndo() {
       if (coords.length >= 2) {
         geom.setCoordinates(coords);
         drawnPointCount.value = coords.length;
-        drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+        drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
         hasCompletedLine.value = true;
       } else {
         geom.setCoordinates(coords);
@@ -1070,7 +1241,7 @@ function handleRedo() {
     if (drawnFeature.value) {
       const geom = drawnFeature.value.getGeometry();
       if (geom && drawnPointCount.value >= 2) {
-        drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+        drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
       }
     }
     return;
@@ -1083,7 +1254,7 @@ function handleRedo() {
       coords.push(nextPoint);
       geom.setCoordinates(coords);
       drawnPointCount.value = coords.length;
-      drawnLengthMeters.value = Math.round(sphere.getLength(geom));
+      drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
       if (coords.length >= 2) {
         hasCompletedLine.value = true;
       }
@@ -1116,6 +1287,10 @@ function cancelDrawing(emitCancel = true) {
   if (networkSnapInteraction && mapInstance) {
     mapInstance.removeInteraction(networkSnapInteraction);
     networkSnapInteraction = null;
+  }
+  if (refSnapInteraction && mapInstance) {
+    mapInstance.removeInteraction(refSnapInteraction);
+    refSnapInteraction = null;
   }
   if (snapSource) {
     snapSource.clear();
@@ -1163,6 +1338,10 @@ function updateSnapInteractions() {
     mapInstance.removeInteraction(networkSnapInteraction);
     networkSnapInteraction = null;
   }
+  if (refSnapInteraction) {
+    mapInstance.removeInteraction(refSnapInteraction);
+    refSnapInteraction = null;
+  }
 
   if (!isSnappingEnabled.value || !isDrawing.value) return;
 
@@ -1183,6 +1362,15 @@ function updateSnapInteractions() {
       pixelTolerance: 14,
     });
     mapInstance.addInteraction(networkSnapInteraction);
+  }
+  if (refHighlightSource) {
+    refSnapInteraction = new Snap({
+      source: refHighlightSource,
+      edge: true,
+      vertex: true,
+      pixelTolerance: 16,
+    });
+    mapInstance.addInteraction(refSnapInteraction);
   }
 }
 
@@ -1210,43 +1398,66 @@ async function loadSnapFeatures() {
     snapFetchAbort = new AbortController();
 
     isSnapLoading.value = true;
-    const res = await $http<any>('admin/infrastruktur-segmen', {
-      query: {
-        format: 'geojson',
-        bbox: bboxParam,
-      },
-      signal: snapFetchAbort.signal,
-    });
+    const [segmenRes, jalanRes] = await Promise.all([
+      $http<any>('admin/infrastruktur-segmen', {
+        query: {
+          format: 'geojson',
+          bbox: bboxParam,
+        },
+        signal: snapFetchAbort.signal,
+      }),
+      $http<any>('admin/jalan-poros-desa', {
+        query: {
+          format: 'geojson',
+          bbox: bboxParam,
+        },
+        signal: snapFetchAbort.signal,
+      }).catch(() => null),
+    ]);
 
-    if (res?.features && Array.isArray(res.features)) {
-      if (!snapSource) return;
-      snapSource.clear();
+    if (!snapSource) return;
+    snapSource.clear();
 
-      let featuresToSnap = res.features;
+    const combinedFeatures: any[] = [];
+    if (segmenRes?.features && Array.isArray(segmenRes.features)) {
+      let segmenFeatures = segmenRes.features;
       if (props.selectedSegmenId) {
-        featuresToSnap = featuresToSnap.filter(
+        segmenFeatures = segmenFeatures.filter(
           (f: any) =>
             String(f.id) !== String(props.selectedSegmenId) &&
             String(f.properties?.id) !== String(props.selectedSegmenId)
         );
       }
+      combinedFeatures.push(...segmenFeatures);
+    }
 
-      const format = new olModules.GeoJSON();
-      const olFeatures = format.readFeatures(
-        {
-          type: 'FeatureCollection',
-          features: featuresToSnap,
-        },
-        {
-          dataProjection: 'EPSG:4326',
-          featureProjection: 'EPSG:3857',
-        }
-      );
+    if (jalanRes?.features && Array.isArray(jalanRes.features)) {
+      combinedFeatures.push(...jalanRes.features);
+    }
 
+    const format = new olModules.GeoJSON();
+    const olFeatures = combinedFeatures.length > 0
+      ? format.readFeatures(
+          {
+            type: 'FeatureCollection',
+            features: combinedFeatures,
+          },
+          {
+            dataProjection: 'EPSG:4326',
+            featureProjection: 'EPSG:3857',
+          }
+        )
+      : [];
+
+    if (olFeatures.length > 0) {
       snapSource.addFeatures(olFeatures);
-      snapRoadCount.value = olFeatures.length;
-      updateSnapInteractions();
-      emit('log', 'INFO', `Snapping aktif ke ${olFeatures.length} segmen sekitar.`);
+    }
+
+    const refCount = refHighlightSource?.getFeatures().length || 0;
+    snapRoadCount.value = olFeatures.length + refCount;
+    updateSnapInteractions();
+    if (snapRoadCount.value > 0) {
+      emit('log', 'INFO', `Snapping aktif ke ${snapRoadCount.value} jaringan jalan sekitar.`);
     }
   } catch (err: any) {
     if (
@@ -1293,7 +1504,7 @@ function saveDrawnSegment() {
     dataProjection: 'EPSG:4326',
   });
 
-  const length = Math.round(olModules.sphere.getLength(geom));
+  const length = roundLengthMeters(olModules.sphere.getLength(geom));
 
   fitGeometryToCenter(geom, 400);
 
@@ -1337,7 +1548,7 @@ function startEditGeometry(segmen: InfrastrukturSegmen) {
     editedFeature.value = feat;
     editingSegmenData.value = segmen;
     isEditGeometryMode.value = true;
-    editedLengthMeters.value = Math.round(olModules.sphere.getLength(olGeom));
+    editedLengthMeters.value = roundLengthMeters(olModules.sphere.getLength(olGeom));
 
     editGeometrySource.addFeature(feat);
 
@@ -1365,7 +1576,7 @@ function startEditGeometry(segmen: InfrastrukturSegmen) {
     editGeomListener = () => {
       const g = feat.getGeometry();
       if (g) {
-        editedLengthMeters.value = Math.round(olModules.sphere.getLength(g));
+        editedLengthMeters.value = roundLengthMeters(olModules.sphere.getLength(g));
       }
     };
     olGeom.on('change', editGeomListener);
@@ -1417,7 +1628,7 @@ function saveEditedGeometry() {
     featureProjection: 'EPSG:3857',
     dataProjection: 'EPSG:4326',
   });
-  const length = Math.round(olModules.sphere.getLength(geom));
+  const length = roundLengthMeters(olModules.sphere.getLength(geom));
 
   emit('editGeometrySaved', {
     id: editingSegmenData.value.id,
@@ -1651,6 +1862,31 @@ async function initMap() {
       opacity: props.jalanPorosDesaOpacity,
     });
 
+    // 2.8 Highlight Layer untuk Referensi Jalan Poros Desa saat Digitasi (di bawah infrastruktur-segmen agar segmen terbangun tetap terlihat)
+    refHighlightSource = new VectorSource({ wrapX: false });
+    refHighlightLayer = new VectorLayer({
+      source: refHighlightSource,
+      zIndex: 9,
+      style: [
+        new stylePkg.Style({
+          stroke: new stylePkg.Stroke({
+            color: 'rgba(14, 165, 233, 0.35)',
+            width: 11,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }),
+        }),
+        new stylePkg.Style({
+          stroke: new stylePkg.Stroke({
+            color: '#0284c7',
+            width: 3,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }),
+        }),
+      ],
+    });
+
     // 3. Draw Vector Layer (Digitasi)
     drawSource = new VectorSource({ wrapX: false });
     drawLayer = new VectorLayer({
@@ -1766,7 +2002,7 @@ async function initMap() {
     // 6. Map Instance
     mapInstance = new Map({
       target: mapContainer.value,
-      layers: [baseTileLayer, jalanPorosVectorTileLayer, vectorTileLayer, drawLayer, editGeometryLayer, splitLayer],
+      layers: [baseTileLayer, jalanPorosVectorTileLayer, refHighlightLayer, vectorTileLayer, drawLayer, editGeometryLayer, splitLayer],
       view: new View({
         center: olModules.fromLonLat([111.88, -7.2]),
         zoom: 11,
@@ -1779,6 +2015,12 @@ async function initMap() {
       ],
       controls: [scaleLineControl],
     });
+
+    if (pendingRefFeature) {
+      const { featureOrGeom, shouldZoom } = pendingRefFeature;
+      pendingRefFeature = null;
+      setReferenceJalanPoros(featureOrGeom, shouldZoom);
+    }
 
     // ─── Pointer Move Interaction (Coords & Hover Tooltip) ────────────────────
     mapInstance.on('pointermove', (e: any) => {
@@ -1809,8 +2051,25 @@ async function initMap() {
       pointerRafId = requestAnimationFrame(() => {
         pointerRafId = null;
 
-        const targetLayer = getTargetVectorTileLayer();
-        const targetVisible = isTargetLayerVisible();
+        if (props.interactionMode === 'pan') {
+          const hadHover = Boolean(hoveredFeature.value);
+          if (mapContainer.value) mapContainer.value.style.cursor = '';
+          hoveredFeature.value = null;
+          if (!isPopupPinned.value) {
+            tooltipData.value = null;
+            if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+          }
+          if (hadHover) {
+            jalanPorosVectorTileLayer?.changed();
+            vectorTileLayer?.changed();
+          }
+          return;
+        }
+
+        const isPickRef = props.interactionMode === 'pick-reference';
+        const targetLayer = isPickRef ? jalanPorosVectorTileLayer : getTargetVectorTileLayer();
+        const targetVisible = isPickRef ? !!props.jalanPorosDesaVisible : isTargetLayerVisible();
+        const tooltipLayerKey = isPickRef ? 'jalan-poros-desa' : (props.activeLayerId || 'infrastruktur-segmen');
 
         let hit: any = null;
         if (targetVisible && targetLayer) {
@@ -1822,7 +2081,7 @@ async function initMap() {
             },
             {
               layerFilter: (l: any) => l === targetLayer,
-              hitTolerance: 8,
+              hitTolerance: isPickRef ? 10 : 8,
             }
           );
         }
@@ -1834,7 +2093,7 @@ async function initMap() {
           if (mapContainer.value) mapContainer.value.style.cursor = 'pointer';
           hoveredFeature.value = hit;
           if (!isPopupPinned.value) {
-            tooltipData.value = extractFeatureData(hit, props.activeLayerId || 'infrastruktur-segmen');
+            tooltipData.value = extractFeatureData(hit, tooltipLayerKey);
             showTooltipAt(e.coordinate);
           }
         } else {
@@ -1847,7 +2106,7 @@ async function initMap() {
         }
 
         if (currentHitId !== prevHoverId) {
-          if (props.activeLayerId === 'jalan-poros-desa') {
+          if (isPickRef || props.activeLayerId === 'jalan-poros-desa') {
             jalanPorosVectorTileLayer?.changed();
           } else {
             vectorTileLayer?.changed();
@@ -1876,6 +2135,45 @@ async function initMap() {
         if (lonLat && lonLat.length >= 2) {
           emit('mapClick', [lonLat[0], lonLat[1]]);
         }
+      }
+
+      if (props.interactionMode === 'pan') {
+        if (isPopupPinned.value) {
+          closePopup();
+        }
+        return;
+      }
+
+      if (props.interactionMode === 'pick-reference') {
+        if (props.jalanPorosDesaVisible && jalanPorosVectorTileLayer) {
+          const pixel = mapInstance.getEventPixel(e.originalEvent);
+          let clickedRoad: any = null;
+          mapInstance.forEachFeatureAtPixel(
+            pixel,
+            (f: any) => {
+              clickedRoad = f;
+              return true;
+            },
+            {
+              layerFilter: (l: any) => l === jalanPorosVectorTileLayer,
+              hitTolerance: 10,
+            }
+          );
+          if (clickedRoad) {
+            const propsObj = clickedRoad.getProperties?.() ?? {};
+            const featId = String(propsObj.id || clickedRoad.getId() || clickedRoad.get?.('id') || '');
+            if (featId) {
+              closePopup();
+              emit('pickReferenceRoad', {
+                id: featId,
+                namobj: propsObj.nama_ruas || propsObj.namobj,
+                kode_ruas: propsObj.kode_ruas ?? null,
+              });
+            }
+          }
+          jalanPorosVectorTileLayer.changed();
+        }
+        return;
       }
 
       const targetLayer = getTargetVectorTileLayer();
@@ -1942,7 +2240,7 @@ async function initMap() {
                 tipe_kode: propsObj.tipe_kode || '-',
                 kondisi: propsObj.kondisi || 'Baik',
                 status_kondisi: propsObj.status_kondisi || 'Eksisting',
-                panjang: pManual ?? pMeter ?? 0,
+                panjang: pManual,
                 panjang_meter_gis: finalPanjang,
                 lebar: propsObj.lebar != null && propsObj.lebar !== '' ? parseFloat(propsObj.lebar) : 3.5,
                 tahun_pembangunan: propsObj.tahun_pembangunan ? Number(propsObj.tahun_pembangunan) : null,
@@ -2029,6 +2327,31 @@ watch(
     if (vectorTileLayer) {
       vectorTileLayer.changed();
     }
+  }
+);
+
+watch(
+  () => props.interactionMode,
+  (mode) => {
+    hoveredFeature.value = null;
+    if (mapContainer.value && !isDrawing.value && !isEditGeometryMode.value && !isSplitMode.value) {
+      mapContainer.value.style.cursor = '';
+    }
+    if (mode !== 'identify') {
+      closePopup();
+    } else if (!isPopupPinned.value) {
+      tooltipData.value = null;
+      if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
+    }
+    vectorTileLayer?.changed();
+    jalanPorosVectorTileLayer?.changed();
+  }
+);
+
+watch(
+  () => props.selectedReferenceRoadId,
+  () => {
+    jalanPorosVectorTileLayer?.changed();
   }
 );
 
@@ -2177,6 +2500,7 @@ defineExpose({
   fitBounds,
   zoomToFeature,
   zoomToGeometry,
+  setReferenceJalanPoros,
   zoomIn,
   zoomOut,
   setBasemap,
@@ -2207,10 +2531,12 @@ defineExpose({
   cancelEditGeometry,
   saveEditedGeometry,
   isEditGeometryMode,
+  editingSegmenData,
   editedLengthMeters,
   startSplitMode,
   cancelSplitMode,
   isSplitMode,
+  splitSegmenData,
 });
 </script>
 
@@ -2236,21 +2562,48 @@ defineExpose({
       leave-to-class="opacity-0 -translate-y-2 scale-95"
     >
       <div
-        v-if="isEditGeometryMode"
-        class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-3.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md rounded-xl shadow-md border border-blue-500/40 text-xs text-gray-800 dark:text-gray-100"
+        v-if="isEditGeometryMode && floatingModeToolbar"
+        class="absolute top-2.5 left-2.5 z-30 flex flex-col gap-1.5 items-start"
       >
-        <div class="flex items-center gap-1.5 font-medium text-blue-600 dark:text-blue-400">
-          <UIcon name="i-lucide-pen-tool" class="size-4 animate-pulse shrink-0" />
-          <span class="max-w-[200px] truncate">Edit: <strong>{{ editingSegmenData?.namobj || 'Segmen' }}</strong></span>
-        </div>
+        <div class="flex flex-col gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-blue-500/50 dark:border-blue-500/40 rounded-lg shadow-md">
+          <!-- Save + Horizontal Context Pill -->
+          <div class="relative flex items-center">
+            <UButton
+              icon="i-lucide-check"
+              size="xs"
+              color="primary"
+              variant="solid"
+              aria-label="Simpan perubahan geometri"
+              title="Simpan Geometri"
+              class="relative cursor-pointer w-8 h-8 justify-center !p-0 after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
+              @click="saveEditedGeometry"
+            />
+            <div
+              class="absolute left-full ml-2 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white dark:bg-[#0b0f19] border border-blue-200 dark:border-blue-800 shadow-sm text-[11px] whitespace-nowrap max-w-[calc(100vw-6.5rem)]"
+            >
+              <UIcon name="i-lucide-pen-tool" class="size-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span class="font-medium text-gray-800 dark:text-gray-100 truncate max-w-[115px]">
+                {{ editingSegmenData?.namobj || 'Edit Segmen' }}
+              </span>
+              <span class="font-mono font-semibold tabular-nums text-blue-600 dark:text-blue-400 shrink-0">
+                {{ editedLengthMeters.toLocaleString('id-ID') }} m
+              </span>
+            </div>
+          </div>
 
-        <UBadge :label="`${editedLengthMeters.toLocaleString('id-ID')} m`" color="primary" variant="subtle" size="xs" class="font-mono" />
+          <div class="h-px bg-gray-200 dark:bg-gray-800 mx-0.5" />
 
-        <div class="w-px h-4 bg-gray-200 dark:bg-gray-800" />
-
-        <div class="flex items-center gap-1.5">
-          <UButton size="xs" color="neutral" variant="ghost" label="Batal" @click="cancelEditGeometry" />
-          <UButton size="xs" color="primary" icon="i-lucide-check" label="Simpan Geometri" @click="saveEditedGeometry" />
+          <!-- Cancel Edit Geometry -->
+          <UButton
+            icon="i-lucide-x"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            aria-label="Batalkan edit geometri"
+            title="Batal Edit Geometri"
+            class="relative cursor-pointer w-8 h-8 justify-center !p-0 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
+            @click="cancelEditGeometry"
+          />
         </div>
       </div>
     </Transition>
@@ -2265,42 +2618,82 @@ defineExpose({
       leave-to-class="opacity-0 -translate-y-2 scale-95"
     >
       <div
-        v-if="isSplitMode"
-        class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-3.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md rounded-xl shadow-md border border-amber-500/40 text-xs text-gray-800 dark:text-gray-100"
+        v-if="isSplitMode && floatingModeToolbar"
+        class="absolute top-2.5 left-2.5 z-30 flex flex-col gap-1.5 items-start"
       >
-        <div class="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
-          <UIcon name="i-lucide-scissors" class="size-4 animate-bounce shrink-0" />
-          <span class="max-w-[240px] truncate">Klik garis untuk potong: <strong>{{ splitSegmenData?.namobj || 'Segmen' }}</strong></span>
+        <div class="flex flex-col gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-amber-500/50 dark:border-amber-500/40 rounded-lg shadow-md">
+          <!-- Mode Icon + Horizontal Context Pill -->
+          <div class="relative flex items-center">
+            <div
+              class="w-8 h-8 rounded-md flex items-center justify-center bg-amber-500/15 text-amber-600 dark:text-amber-400"
+              title="Mode Potong Segmen Aktif"
+            >
+              <UIcon name="i-lucide-scissors" class="size-4" />
+            </div>
+            <div
+              class="absolute left-full ml-2 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white dark:bg-[#0b0f19] border border-amber-200 dark:border-amber-800 shadow-sm text-[11px] whitespace-nowrap max-w-[calc(100vw-6.5rem)]"
+            >
+              <span class="font-semibold text-amber-700 dark:text-amber-300 shrink-0">Potong:</span>
+              <span class="font-medium text-gray-800 dark:text-gray-100 truncate max-w-[115px]">
+                {{ splitSegmenData?.namobj || 'Segmen' }}
+              </span>
+            </div>
+          </div>
+
+          <div class="h-px bg-gray-200 dark:bg-gray-800 mx-0.5" />
+
+          <!-- Cancel Split -->
+          <UButton
+            icon="i-lucide-x"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            aria-label="Batalkan mode potong segmen"
+            title="Batal Split"
+            class="relative cursor-pointer w-8 h-8 justify-center !p-0 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
+            @click="cancelSplitMode"
+          />
         </div>
-
-        <div class="w-px h-4 bg-gray-200 dark:bg-gray-800" />
-
-        <UButton size="xs" color="neutral" variant="ghost" label="Batal Split" @click="cancelSplitMode" />
       </div>
     </Transition>
 
-    <!-- Floating MVT Loading Indicator Badge (Top Left) -->
-    <Transition
-      enter-active-class="transition-all duration-200 ease-out"
-      enter-from-class="opacity-0 -translate-y-1.5 scale-95"
-      enter-to-class="opacity-100 translate-y-0 scale-100"
-      leave-active-class="transition-all duration-150 ease-in"
-      leave-from-class="opacity-100 translate-y-0 scale-100"
-      leave-to-class="opacity-0 -translate-y-1.5 scale-95"
+    <!-- Floating Top-Left: Pick Referensi Pill & MVT Loading Indicator -->
+    <div
+      v-if="!floatingModeToolbar || (!isDrawing && !isEditGeometryMode && !isSplitMode)"
+      class="absolute top-2.5 left-2.5 right-14 lg:top-3 lg:left-3 lg:right-auto lg:max-w-[calc(100%-8rem)] z-20 flex flex-col items-start gap-1.5 pointer-events-none"
     >
       <div
-        v-if="(isMvtLoading || loading) && isMapLoaded && !isDrawing"
-        class="absolute top-3 left-3 z-20 flex items-center gap-2 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-blue-500/30 dark:border-blue-500/30 rounded-lg shadow-sm pointer-events-none"
+        v-if="interactionMode === 'pick-reference' && !isDrawing && !isEditGeometryMode && !isSplitMode && isMapLoaded"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-sky-500/40 dark:border-sky-500/40 rounded-lg shadow-sm text-sky-800 dark:text-sky-200"
       >
-        <UIcon
-          name="i-lucide-loader-2"
-          class="size-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0"
-        />
-        <span class="text-xs font-medium text-gray-700 dark:text-gray-200">
-          Memuat tile MVT...
+        <UIcon name="i-lucide-route" class="size-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+        <span class="text-[11px] font-medium leading-tight">
+          Klik ruas jalan poros di peta sebagai referensi
         </span>
       </div>
-    </Transition>
+
+      <Transition
+        enter-active-class="transition-all duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-1.5 scale-95"
+        enter-to-class="opacity-100 translate-y-0 scale-100"
+        leave-active-class="transition-all duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0 scale-100"
+        leave-to-class="opacity-0 -translate-y-1.5 scale-95"
+      >
+        <div
+          v-if="(isMvtLoading || loading) && isMapLoaded"
+          class="flex items-center gap-2 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-blue-500/30 dark:border-blue-500/30 rounded-lg shadow-sm"
+        >
+          <UIcon
+            name="i-lucide-loader-2"
+            class="size-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0"
+          />
+          <span class="text-xs font-medium text-gray-700 dark:text-gray-200">
+            Memuat tile MVT...
+          </span>
+        </div>
+      </Transition>
+    </div>
 
     <!-- ═══ FLOATING DRAW CONTROL (Vertical Toolbar on Left Side, UI/UX like MapControl) ═══ -->
     <Transition
@@ -2312,18 +2705,28 @@ defineExpose({
       leave-to-class="opacity-0 -translate-x-2 scale-95"
     >
       <div
-        v-if="isDrawing"
-        class="absolute top-3 left-3 z-30 flex flex-col gap-1.5 items-start"
+        v-if="isDrawing && floatingModeToolbar"
+        class="absolute top-2.5 left-2.5 z-30 flex flex-col gap-1.5 items-start"
       >
-        <!-- Vertical Toolbar Box (Identical aesthetic to MapControl) -->
-        <div class="flex flex-col gap-0.5 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+        <div
+          v-if="referenceLabel"
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/95 dark:bg-[#0b0f19]/95 border border-sky-200 dark:border-sky-800 text-[11px] font-medium text-sky-700 dark:text-sky-300 shadow-sm max-w-[calc(100vw-4.5rem)]"
+        >
+          <UIcon name="i-lucide-route" class="size-3 shrink-0 text-sky-600 dark:text-sky-400" />
+          <span class="truncate">{{ referenceLabel }}</span>
+        </div>
+
+        <!-- Vertical Toolbar Box (Uniform Mobile Vertical Floating Rail) -->
+        <div class="flex flex-col gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-amber-500/50 dark:border-amber-500/40 rounded-lg shadow-md">
           <!-- 1. Draw -->
           <UTooltip text="Mode Gambar Garis (Draw)">
             <UButton
               icon="i-lucide-pencil"
               size="xs"
-              :color="isDrawInteracting ? 'primary' : 'neutral'"
+              :color="isDrawInteracting ? 'warning' : 'neutral'"
               :variant="isDrawInteracting ? 'solid' : 'ghost'"
+              aria-label="Mode gambar garis"
+              class="relative w-8 h-8 !p-0 justify-center cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
               @click="handleDrawClick"
             />
           </UTooltip>
@@ -2335,6 +2738,8 @@ defineExpose({
               size="xs"
               color="neutral"
               variant="ghost"
+              aria-label="Gambar ulang garis"
+              class="relative w-8 h-8 !p-0 justify-center cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
               @click="handleRedraw"
             />
           </UTooltip>
@@ -2346,6 +2751,8 @@ defineExpose({
               size="xs"
               color="neutral"
               variant="ghost"
+              aria-label="Batalkan titik terakhir"
+              class="relative w-8 h-8 !p-0 justify-center cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
               :disabled="!canUndo"
               @click="handleUndo"
             />
@@ -2358,6 +2765,8 @@ defineExpose({
               size="xs"
               color="neutral"
               variant="ghost"
+              aria-label="Kembalikan titik terakhir"
+              class="relative w-8 h-8 !p-0 justify-center cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
               :disabled="!canRedo"
               @click="handleRedo"
             />
@@ -2373,37 +2782,42 @@ defineExpose({
                 size="xs"
                 :color="isSnappingEnabled ? 'primary' : 'neutral'"
                 :variant="isSnappingEnabled ? 'solid' : 'ghost'"
+                aria-label="Toggle snapping jalan"
+                class="relative w-8 h-8 !p-0 justify-center cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
                 @click="toggleSnapping"
               />
             </UTooltip>
 
             <!-- Indikator Snapping Aktif / Non Aktif di samping kanan toggle -->
-            <div
-              class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-medium select-none whitespace-nowrap shadow-xs transition-all cursor-pointer"
+            <button
+              type="button"
+              :aria-pressed="isSnappingEnabled"
+              :aria-label="isSnappingEnabled ? 'Nonaktifkan snapping ke jaringan jalan' : 'Aktifkan snapping ke jaringan jalan'"
+              class="absolute left-full ml-2 flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-medium select-none whitespace-nowrap shadow-sm transition-colors max-w-[calc(100vw-6.5rem)] truncate cursor-pointer"
               :class="isSnappingEnabled
-                ? 'bg-blue-50/95 dark:bg-blue-950/80 border-blue-200 dark:border-blue-800/80 text-blue-700 dark:text-blue-300'
-                : 'bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400'"
+                ? 'bg-blue-50 dark:bg-blue-950/90 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+                : 'bg-white dark:bg-[#0b0f19] border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300'"
               :title="isSnappingEnabled ? 'Klik untuk menonaktifkan snapping' : 'Klik untuk mengaktifkan snapping'"
               @click="toggleSnapping"
             >
               <span
                 class="size-1.5 rounded-full shrink-0"
-                :class="isSnappingEnabled ? 'bg-blue-500 animate-pulse' : 'bg-gray-400 dark:bg-gray-500'"
+                :class="isSnappingEnabled ? 'bg-blue-600 dark:bg-blue-400' : 'bg-gray-500 dark:bg-gray-400'"
               />
-              <span>{{ isSnappingEnabled ? 'Aktif' : 'Non Aktif' }}</span>
+              <span>{{ isSnappingEnabled ? 'Snap Aktif' : 'Snap Off' }}</span>
               <span
                 v-if="isSnappingEnabled && isSnapLoading"
-                class="flex items-center gap-0.5 text-[9px] text-blue-600/70"
+                class="flex items-center gap-0.5 text-[10px] text-blue-600/80 dark:text-blue-300/80"
               >
-                <UIcon name="i-lucide-loader-2" class="size-2 animate-spin" />
+                <UIcon name="i-lucide-loader-2" class="size-2.5 animate-spin" />
               </span>
               <span
                 v-else-if="isSnappingEnabled && snapRoadCount > 0"
-                class="text-[9px] font-mono text-blue-600/80 dark:text-blue-400/80"
+                class="text-[10px] font-mono tabular-nums text-blue-600/85 dark:text-blue-300/85"
               >
                 ({{ snapRoadCount }})
               </span>
-            </div>
+            </button>
           </div>
 
           <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
@@ -2416,6 +2830,8 @@ defineExpose({
                 size="xs"
                 color="primary"
                 variant="solid"
+                aria-label="Simpan garis hasil digitasi"
+                class="relative w-8 h-8 !p-0 justify-center cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
                 :disabled="!canSave"
                 @click="confirmDraw"
               />
@@ -2432,10 +2848,10 @@ defineExpose({
             >
               <div
                 v-if="drawnPointCount > 0"
-                class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] select-none whitespace-nowrap shadow-xs backdrop-blur-xs bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800"
+                class="absolute left-full ml-2 flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] select-none whitespace-nowrap shadow-sm bg-white dark:bg-[#0b0f19] border-amber-200 dark:border-amber-800 max-w-[calc(100vw-6.5rem)] overflow-hidden"
               >
                 <!-- Panjang (Meter) -->
-                <div class="flex items-center gap-1 font-mono font-semibold text-blue-600 dark:text-blue-400">
+                <div class="flex items-center gap-1 font-mono font-semibold tabular-nums text-amber-700 dark:text-amber-300">
                   <UIcon name="i-lucide-route" class="size-3 shrink-0" />
                   <span>{{ drawnLengthMeters.toLocaleString('id-ID') }} m</span>
                 </div>
@@ -2443,11 +2859,11 @@ defineExpose({
                 <div class="w-px h-3 bg-gray-200 dark:bg-gray-800 shrink-0" />
 
                 <!-- Titik / Vertex -->
-                <div class="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-mono">
-                  <span>{{ drawnPointCount }} vertex</span>
+                <div class="flex items-center gap-1 text-gray-600 dark:text-gray-300 font-mono tabular-nums">
+                  <span>{{ drawnPointCount }} titik</span>
                   <span
                     v-if="hasCompletedLine"
-                    class="text-[9px] font-sans font-medium text-blue-500"
+                    class="text-[10px] font-sans font-semibold text-blue-600 dark:text-blue-400"
                   >
                     (Selesai)
                   </span>
@@ -2463,7 +2879,8 @@ defineExpose({
               size="xs"
               color="neutral"
               variant="ghost"
-              class="text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+              aria-label="Batalkan dan tutup mode gambar"
+              class="relative w-8 h-8 !p-0 justify-center text-gray-500 dark:text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5"
               @click="cancelDrawing(true)"
             />
           </UTooltip>
@@ -2471,57 +2888,91 @@ defineExpose({
       </div>
     </Transition>
 
-    <!-- ═══ FLOATING NAVIGATION CONTROLS (Top Right, Clean Solid) ═══════════════ -->
-    <div class="absolute top-3 right-3 z-20 flex flex-col gap-0.5 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-      <UTooltip text="Perbesar (+)">
-        <UButton
-          icon="i-lucide-plus"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="zoomIn"
-        />
-      </UTooltip>
+    <!-- ═══ FLOATING NAVIGATION CONTROLS (Top Right, Compact Mobile Controls) ═════ -->
+    <div class="absolute top-2.5 right-2.5 lg:top-3 lg:right-3 z-20 flex flex-col gap-2 lg:gap-1.5">
+      <div class="p-0.5 lg:p-1 bg-white/95 dark:bg-[#0b0f19]/95 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+        <UTooltip :text="interactionMode === 'identify' ? 'Identify Feature Aktif (Klik fitur untuk detail)' : 'Aktifkan Identify Feature'">
+          <UButton
+            icon="i-lucide-mouse-pointer-click"
+            size="xs"
+            :color="interactionMode === 'identify' ? 'primary' : 'neutral'"
+            :variant="interactionMode === 'identify' ? 'solid' : 'ghost'"
+            :aria-pressed="interactionMode === 'identify'"
+            aria-label="Toggle mode Identify Feature"
+            :disabled="isDrawing || isEditGeometryMode || isSplitMode"
+            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-1.5 lg:after:hidden"
+            @click="emit('toggleIdentify')"
+          />
+        </UTooltip>
+      </div>
 
-      <UTooltip text="Perkecil (-)">
-        <UButton
-          icon="i-lucide-minus"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="zoomOut"
-        />
-      </UTooltip>
+      <div class="flex flex-col gap-1.5 lg:gap-0.5 p-0.5 lg:p-1 bg-white/95 dark:bg-[#0b0f19]/95 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+        <UTooltip text="Perbesar (+)">
+          <UButton
+            icon="i-lucide-plus"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            aria-label="Perbesar peta"
+            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5 lg:after:hidden"
+            @click="zoomIn"
+          />
+        </UTooltip>
 
-      <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
+        <div class="w-full h-px bg-gray-200 dark:bg-gray-800 hidden lg:block my-0.5" />
 
-      <UTooltip text="Fokus Semua Segmen">
-        <UButton
-          icon="i-lucide-maximize-2"
-          size="xs"
-          color="primary"
-          variant="ghost"
-          @click="fitBounds()"
-        />
-      </UTooltip>
+        <UTooltip text="Perkecil (-)">
+          <UButton
+            icon="i-lucide-minus"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            aria-label="Perkecil peta"
+            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5 lg:after:hidden"
+            @click="zoomOut"
+          />
+        </UTooltip>
+      </div>
+
+      <div class="p-0.5 lg:p-1 bg-white/95 dark:bg-[#0b0f19]/95 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+        <UTooltip text="Fokus Semua Segmen">
+          <UButton
+            icon="i-lucide-maximize-2"
+            size="xs"
+            color="primary"
+            variant="ghost"
+            aria-label="Fokus semua segmen"
+            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-1.5 lg:after:hidden"
+            @click="fitBounds()"
+          />
+        </UTooltip>
+      </div>
     </div>
 
-    <!-- ═══ FLOATING BASEMAP SELECTOR (Bottom Left, Clean Solid) ════════════════ -->
-    <div class="absolute bottom-16 sm:bottom-3 left-3 z-20 flex items-center gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-      <UButton
-        v-for="bm in (['osm', 'dark', 'satellite', 'topo', 'none'] as const)"
-        :key="bm"
-        :label="bm === 'satellite' ? 'Satelit' : bm === 'dark' ? 'Gelap' : bm === 'topo' ? 'Topografi' : bm === 'none' ? 'None' : 'OSM'"
-        size="xs"
-        :color="currentBasemap === bm ? 'primary' : 'neutral'"
-        :variant="currentBasemap === bm ? 'subtle' : 'ghost'"
-        class="capitalize text-xs font-medium cursor-pointer"
-        @click="setBasemap(bm)"
-      />
+    <!-- ═══ FLOATING BASEMAP POPOVER (Bottom Left, Compact & Dock-Safe) ══════ -->
+    <div
+      class="absolute left-2.5 lg:left-3 z-20 transition-all duration-150"
+      :class="selectedSegmen ? 'bottom-[calc(11.25rem+env(safe-area-inset-bottom))] lg:bottom-3' : 'bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-3'"
+    >
+      <UDropdownMenu
+        :items="basemapDropdownItems"
+        :content="{ side: 'top', align: 'start', sideOffset: 6 }"
+      >
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="xs"
+          :icon="activeBasemapMeta.icon"
+          :label="activeBasemapMeta.label"
+          trailing-icon="i-lucide-chevron-up"
+          aria-label="Pilih gaya peta dasar"
+          class="relative bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 shadow-sm h-7 lg:h-auto px-2 py-1 text-[11px] lg:text-xs font-medium cursor-pointer after:content-[''] after:absolute after:-inset-2 lg:after:hidden"
+        />
+      </UDropdownMenu>
     </div>
 
     <!-- ═══ FLOATING COORDINATES PILL (Desktop only, Bottom Center) ═════════════ -->
-    <div class="hidden md:flex absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+    <div class="hidden lg:flex absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none items-center gap-1.5">
       <UBadge
         :label="mouseCoordsText || '0.00000, 0.00000'"
         color="neutral"
@@ -2529,12 +2980,21 @@ defineExpose({
         size="xs"
         class="font-mono shadow-sm px-2.5 py-0.5"
       />
+      <UBadge
+        v-if="clickedCoordText && !selectedSegmen"
+        :label="`Klik: ${clickedCoordText}`"
+        color="primary"
+        variant="subtle"
+        size="xs"
+        class="font-mono shadow-sm px-2.5 py-0.5"
+      />
     </div>
 
-    <!-- ═══ FLOATING SCALE LINE CONTAINER (Bottom Right, Clean Glassmorphic) ═════ -->
+    <!-- ═══ FLOATING SCALE LINE CONTAINER (Bottom Right, Dock & Peek Safe) ═════ -->
     <div
       ref="scaleLineTarget"
-      class="absolute bottom-16 sm:bottom-3 right-3 z-20 pointer-events-none select-none"
+      class="absolute right-2.5 lg:right-3 z-20 pointer-events-none select-none transition-all duration-150"
+      :class="selectedSegmen ? 'bottom-[calc(11.25rem+env(safe-area-inset-bottom))] lg:bottom-3' : 'bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-3'"
     />
 
     <!-- ═══ MAP FEATURE POPUP / TOOLTIP OVERLAY ═══════════════════════════════════ -->
@@ -2547,7 +3007,7 @@ defineExpose({
     >
       <div
         v-if="tooltipData"
-        class="relative p-3 rounded-xl bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-gray-200/90 dark:border-gray-800/90 shadow-2xl max-w-xs text-xs space-y-2 min-w-[220px]"
+        class="relative p-2.5 sm:p-3 rounded-xl bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-gray-200/90 dark:border-gray-800/90 shadow-2xl max-w-[230px] sm:max-w-xs text-xs space-y-1.5 sm:space-y-2 min-w-[185px] sm:min-w-[220px]"
       >
         <!-- ═══ CALLOUT LEADER GEOMETRY & TARGET PINPOINT ═══ -->
         <!-- Anchored at Card Bottom-Left Corner, pointing down-left (-24px, +20px) to Mouse Pointer -->
@@ -2597,11 +3057,7 @@ defineExpose({
             class="absolute -left-1.5 top-[18px] size-3 flex items-center justify-center pointer-events-none"
           >
             <span
-              class="absolute size-4 rounded-full animate-ping"
-              :class="tooltipData.layerId === 'jalan-poros-desa' ? 'bg-blue-500/50' : 'bg-emerald-500/50'"
-            />
-            <span
-              class="relative size-2.5 rounded-full ring-2 ring-white dark:ring-gray-950 shadow-md"
+              class="size-2.5 rounded-full ring-2 ring-white dark:ring-gray-950 shadow-sm"
               :class="tooltipData.layerId === 'jalan-poros-desa' ? 'bg-blue-600' : 'bg-emerald-600'"
             />
           </div>
@@ -2630,7 +3086,8 @@ defineExpose({
             <button
               v-if="isPopupPinned"
               type="button"
-              class="size-5 rounded flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+              aria-label="Tutup popup detail segmen"
+              class="size-5 rounded flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
               title="Tutup popup"
               @click.stop="closePopup"
             >
@@ -2665,7 +3122,7 @@ defineExpose({
             class="text-[10px]"
           />
           <span v-if="tooltipData.panjang > 0" class="font-mono text-gray-800 dark:text-gray-200 font-semibold text-[11px]">
-            {{ Math.round(tooltipData.panjang).toLocaleString('id-ID') }} m
+            {{ Number(tooltipData.panjang).toLocaleString('id-ID', { maximumFractionDigits: 2 }) }} m
           </span>
           <span v-if="tooltipData.lebar" class="text-gray-500 dark:text-gray-400 text-[10px] font-mono">
             (L: {{ tooltipData.lebar }} m)
@@ -2681,7 +3138,7 @@ defineExpose({
         <!-- Status Kondisi / Verifikasi Footer -->
         <div
           v-if="tooltipData.status_kondisi || tooltipData.status_eksisting || tooltipData.status_verifikasi"
-          class="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800/80 pt-1 font-mono"
+          class="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-800/80 pt-1 font-mono"
         >
           <span v-if="tooltipData.status_kondisi || tooltipData.status_eksisting" class="capitalize">
             Status: {{ tooltipData.status_kondisi || tooltipData.status_eksisting }}
@@ -2693,17 +3150,13 @@ defineExpose({
       </div>
     </div>
 
-    <!-- ═══ CLICK PULSE OVERLAY ═════════════════════════════════════════════════ -->
+    <!-- ═══ CLICK POINT MARKER OVERLAY ══════════════════════════════════════════ -->
     <div
       ref="pulseEl"
-      class="pointer-events-none z-20 flex items-center justify-center size-8"
-      :class="isPulseVisible ? 'block' : 'hidden'"
+      class="pointer-events-none z-20 items-center justify-center size-4"
+      :class="isPulseVisible ? 'flex' : 'hidden'"
     >
-      <span class="absolute size-8 rounded-full bg-blue-500/40 animate-ping" />
-      <span class="absolute size-5 rounded-full bg-blue-500/25" />
-      <span class="relative size-3.5 rounded-full bg-blue-600 ring-2 ring-white dark:ring-gray-950 shadow-md flex items-center justify-center">
-        <span class="size-1 rounded-full bg-white" />
-      </span>
+      <span class="size-3 rounded-full bg-blue-600 ring-2 ring-white dark:ring-gray-950 shadow-sm" />
     </div>
 
   </div>
@@ -2745,6 +3198,19 @@ defineExpose({
 :global(.dark) :deep(.ol-scale-line-inner) {
   border-color: #10b981;
   color: #f3f4f6;
+}
+
+@media (max-width: 1023px) {
+  :deep(.ol-scale-line) {
+    padding: 2px 6px;
+    border-radius: 0.375rem;
+  }
+
+  :deep(.ol-scale-line-inner) {
+    font-size: 9px;
+    border-width: 1.5px;
+    padding: 0 3px;
+  }
 }
 
 :deep(.ol-viewport),

@@ -44,8 +44,10 @@ function handleConfirm() {
 <template>
   <UModal
     :open="open"
+    :overlay="false"
+    :modal="false"
     title="Konfirmasi Pemotongan Segmen"
-    :ui="{ content: 'sm:max-w-md' }"
+    :ui="{ content: 'sm:max-w-md bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl' }"
     @update:open="(val) => emit('update:open', val)"
   >
     <template #body>
@@ -75,7 +77,7 @@ function handleConfirm() {
           </div>
         </div>
 
-        <p class="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
+        <p class="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
           Pemotongan membagi geometri menjadi 2 segmen terpisah. Atribut administratif dan teknis dari segmen asal akan diwariskan ke bagian kedua.
         </p>
       </div>

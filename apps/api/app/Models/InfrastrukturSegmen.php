@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 
 class InfrastrukturSegmen extends Model
@@ -108,12 +107,7 @@ class InfrastrukturSegmen extends Model
 
     public function parent(): BelongsTo
     {
-        return $this->belongsTo(InfrastrukturSegmen::class, 'parent_id', 'id');
-    }
-
-    public function children(): HasMany
-    {
-        return $this->hasMany(InfrastrukturSegmen::class, 'parent_id', 'id');
+        return $this->belongsTo(JalanPorosDesa::class, 'parent_id', 'id');
     }
 
     public function plotting(): BelongsTo

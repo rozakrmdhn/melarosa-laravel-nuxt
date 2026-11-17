@@ -11,6 +11,7 @@ use App\Http\Resources\InfrastrukturSegmenResource;
 use App\Models\BatasWilayahDesa;
 use App\Models\BatasWilayahKecamatan;
 use App\Models\InfrastrukturSegmen;
+use App\Models\JalanPorosDesa;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -131,6 +132,19 @@ class InfrastrukturSegmenController extends Controller
             $baseQuery->where('infrastruktur_segmen.plotting_id', $request->input('plotting_id'));
         }
 
+        // Filter parent master ruas (Jalan Poros Desa vs non-referensi / Jalan Lingkungan)
+        if ($request->filled('parent_id')) {
+            $baseQuery->where('infrastruktur_segmen.parent_id', $request->input('parent_id'));
+        }
+
+        if ($request->filled('referensi')) {
+            if ($request->input('referensi') === 'master') {
+                $baseQuery->whereNotNull('infrastruktur_segmen.parent_id');
+            } elseif ($request->input('referensi') === 'non_master') {
+                $baseQuery->whereNull('infrastruktur_segmen.parent_id');
+            }
+        }
+
         // Filter Bounding Box (Viewport Peta GIS)
         if ($request->filled('bbox')) {
             $bbox = explode(',', $request->input('bbox'));
@@ -166,6 +180,20 @@ class InfrastrukturSegmenController extends Controller
                 ->whereNotNull('infrastruktur_segmen.kondisi')
                 ->selectRaw("infrastruktur_segmen.kondisi, COUNT(*) as jumlah, ROUND(SUM(COALESCE(infrastruktur_segmen.panjang, ST_Length(infrastruktur_segmen.geom::geography)))::numeric, 2) as panjang_meter")
                 ->groupBy('infrastruktur_segmen.kondisi')
+                ->orderByDesc('jumlah')
+                ->get();
+
+            $perkerasanBreakdown = (clone $baseQuery)
+                ->whereNotNull('infrastruktur_segmen.jenis_perkerasan')
+                ->where('infrastruktur_segmen.jenis_perkerasan', '!=', '')
+                ->selectRaw("infrastruktur_segmen.jenis_perkerasan as perkerasan, COUNT(*) as jumlah, COALESCE(ROUND(SUM(COALESCE(infrastruktur_segmen.panjang, ST_Length(infrastruktur_segmen.geom::geography)))::numeric, 2), 0) as panjang_meter")
+                ->groupBy('infrastruktur_segmen.jenis_perkerasan')
+                ->orderByDesc('jumlah')
+                ->get();
+
+            $verifikasiBreakdown = (clone $baseQuery)
+                ->selectRaw("COALESCE(infrastruktur_segmen.status_verifikasi, 'draft') as status_verifikasi, COUNT(*) as jumlah, COALESCE(ROUND(SUM(COALESCE(infrastruktur_segmen.panjang, ST_Length(infrastruktur_segmen.geom::geography)))::numeric, 2), 0) as panjang_meter")
+                ->groupBy(DB::raw("COALESCE(infrastruktur_segmen.status_verifikasi, 'draft')"))
                 ->orderByDesc('jumlah')
                 ->get();
 
@@ -219,6 +247,8 @@ class InfrastrukturSegmenController extends Controller
                 'total_panjang_meter' => (float) ($stats->total_panjang_meter ?? 0),
                 'total_panjang_km'    => (float) ($stats->total_panjang_km ?? 0),
                 'kondisi'             => $kondisiBreakdown,
+                'perkerasan'          => $perkerasanBreakdown,
+                'verifikasi'          => $verifikasiBreakdown,
                 'bbox'                => $bbox,
             ]);
         }
@@ -243,6 +273,7 @@ class InfrastrukturSegmenController extends Controller
                     'geometry'   => $geom,
                     'properties' => [
                         'id'                    => $segmen->id,
+                        'parent_id'             => $segmen->parent_id,
                         'tipe_kode'             => $segmen->tipe_kode,
                         'namobj'                => $segmen->namobj,
                         'panjang'               => $segmen->panjang,
@@ -272,7 +303,8 @@ class InfrastrukturSegmenController extends Controller
         }
 
         $perPage = (int) $request->input('per_page', 20);
-        $paginated = $query->orderBy('infrastruktur_segmen.created_at', 'desc')
+        $paginated = $query->with('parent:id,kode_ruas,nama_ruas')
+            ->orderBy('infrastruktur_segmen.created_at', 'desc')
             ->paginate($perPage);
 
         return response()->json([
@@ -298,8 +330,7 @@ class InfrastrukturSegmenController extends Controller
                 'creator:uuid,name,email',
                 'verifierKecamatan:uuid,name,email',
                 'verifierBappeda:uuid,name,email',
-                'parent:id,namobj,tipe_kode',
-                'children:id,parent_id,namobj,panjang,status_verifikasi',
+                'parent:id,kode_ruas,nama_ruas,desa,kecamatan,id_desa,id_kecamatan,panjang',
             ])
             ->where('infrastruktur_segmen.id', $id)
             ->first();
@@ -326,8 +357,36 @@ class InfrastrukturSegmenController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
+        $parentRuas = !empty($validated['parent_id'])
+            ? JalanPorosDesa::find($validated['parent_id'])
+            : null;
+        $isRestricted = $user && !$user->hasRole('admin') && !$user->hasRole('verifierBappeda');
+
+        if ($parentRuas) {
+            if ($isRestricted) {
+                if ($user->id_desa && (int) $parentRuas->id_desa !== (int) $user->id_desa) {
+                    return response()->json([
+                        'ok'      => false,
+                        'message' => 'Jalan poros desa yang dipilih berada di luar wilayah desa Anda.',
+                    ], 403);
+                }
+                if ($user->id_kecamatan && (int) $parentRuas->id_kecamatan !== (int) $user->id_kecamatan) {
+                    return response()->json([
+                        'ok'      => false,
+                        'message' => 'Jalan poros desa yang dipilih berada di luar wilayah kecamatan Anda.',
+                    ], 403);
+                }
+            }
+            if ($parentRuas->id_kecamatan) {
+                $validated['id_kecamatan'] = (int) $parentRuas->id_kecamatan;
+            }
+            if ($parentRuas->id_desa) {
+                $validated['id_desa'] = (int) $parentRuas->id_desa;
+            }
+        }
+
         // Auto-lock wilayah jika pengguna memiliki pembatasan wilayah
-        if ($user && !$user->hasRole('admin') && !$user->hasRole('verifierBappeda')) {
+        if ($isRestricted) {
             if ($user->id_kecamatan) {
                 $validated['id_kecamatan'] = $user->id_kecamatan;
             }
@@ -375,7 +434,13 @@ class InfrastrukturSegmenController extends Controller
         $segmen->geom = DB::raw("ST_SetSRID(ST_GeomFromGeoJSON(" . $pdo->quote($geoJsonString) . "), 4326)");
         $segmen->save();
 
-        $fresh = InfrastrukturSegmen::withGeoJson()->where('id', $segmen->id)->first();
+        $fresh = InfrastrukturSegmen::withGeoJson()
+            ->with([
+                'tipe:id,kode,nama,warna,ikon',
+                'parent:id,kode_ruas,nama_ruas,desa,kecamatan,id_desa,id_kecamatan,panjang',
+            ])
+            ->where('id', $segmen->id)
+            ->first();
 
         return response()->json([
             'ok'      => true,
@@ -397,6 +462,38 @@ class InfrastrukturSegmenController extends Controller
         Gate::authorize('update', $segmen);
 
         $validated = $request->validated();
+
+        if (array_key_exists('parent_id', $validated)) {
+            $parentRuas = !empty($validated['parent_id'])
+                ? JalanPorosDesa::find($validated['parent_id'])
+                : null;
+            $user = $request->user();
+            $isRestricted = $user && !$user->hasRole('admin') && !$user->hasRole('verifierBappeda');
+
+            if ($parentRuas && $isRestricted) {
+                if ($user->id_desa && (int) $parentRuas->id_desa !== (int) $user->id_desa) {
+                    return response()->json([
+                        'ok'      => false,
+                        'message' => 'Jalan poros desa yang dipilih berada di luar wilayah desa Anda.',
+                    ], 403);
+                }
+                if ($user->id_kecamatan && (int) $parentRuas->id_kecamatan !== (int) $user->id_kecamatan) {
+                    return response()->json([
+                        'ok'      => false,
+                        'message' => 'Jalan poros desa yang dipilih berada di luar wilayah kecamatan Anda.',
+                    ], 403);
+                }
+            }
+
+            if ($parentRuas) {
+                if ($parentRuas->id_kecamatan) {
+                    $validated['id_kecamatan'] = (int) $parentRuas->id_kecamatan;
+                }
+                if ($parentRuas->id_desa && (!$isRestricted || !$user->id_desa)) {
+                    $validated['id_desa'] = (int) $parentRuas->id_desa;
+                }
+            }
+        }
 
         $segmen->fill($validated);
 
@@ -429,7 +526,13 @@ class InfrastrukturSegmenController extends Controller
 
         $segmen->save();
 
-        $fresh = InfrastrukturSegmen::withGeoJson()->where('id', $segmen->id)->first();
+        $fresh = InfrastrukturSegmen::withGeoJson()
+            ->with([
+                'tipe:id,kode,nama,warna,ikon',
+                'parent:id,kode_ruas,nama_ruas,desa,kecamatan,id_desa,id_kecamatan,panjang',
+            ])
+            ->where('id', $segmen->id)
+            ->first();
 
         return response()->json([
             'ok'      => true,
@@ -449,13 +552,6 @@ class InfrastrukturSegmenController extends Controller
         }
 
         Gate::authorize('delete', $segmen);
-
-        if ($segmen->children()->exists()) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'Segmen ini tidak dapat dihapus karena menjadi parent dari segmen lain.',
-            ], 422);
-        }
 
         if (DB::table('monitoring_realisasi_items')->where('id_segmen', $id)->exists()) {
             return response()->json([

@@ -144,28 +144,20 @@ class AdminNavigationService
                 'permission' => [
                     'bkkd-proposal-view',
                     'bkkd-proposal-create',
-                    'bkkd-verifikasi-view',
-                    'bkkd-verifikasi-manage',
                     'bkkd-riwayat-view',
                 ],
                 'children' => [
                     [
-                        'label' => 'Daftar Proposal',
-                        'icon' => 'i-lucide-list',
+                        'label' => 'Analisis Proposal',
+                        'icon' => 'i-lucide-layers',
                         'to' => '/admin/bkkd/proposal',
                         'permission' => ['bkkd-proposal-view'],
                     ],
                     [
-                        'label' => 'Hasil Verifikasi OPD',
-                        'icon' => 'i-lucide-clipboard-check',
-                        'to' => '/admin/bkkd/verifikasi',
-                        'permission' => ['bkkd-verifikasi-view'],
-                    ],
-                    [
-                        'label' => 'Rekapitulasi & TAPD',
-                        'icon' => 'i-lucide-calculator',
-                        'to' => '/admin/bkkd/rekapitulasi',
-                        'permission' => ['bkkd-proposal-view'],
+                        'label' => 'Workspace Peta Baru',
+                        'icon' => 'i-lucide-map-pin-plus',
+                        'to' => '/admin/bkkd/proposal/baru',
+                        'permission' => ['bkkd-proposal-create'],
                     ],
                     [
                         'label' => 'Agregasi Usulan Desa',
@@ -182,6 +174,16 @@ class AdminNavigationService
                 ],
             ],
             [
+                'label' => 'Jaringan Jalan',
+                'icon' => 'i-lucide-network',
+                'to' => '/admin/jaringan-jalan',
+                'permission' => [
+                    'bkkd-proposal-view',
+                    'jalan-poros-desa-view',
+                    'jalan-poros-desa-manage',
+                ],
+            ],
+            [
                 'label' => 'Layers',
                 'icon' => 'i-lucide-layers',
                 'to' => '/admin/layers',
@@ -192,6 +194,12 @@ class AdminNavigationService
                 'icon' => 'i-lucide-history',
                 'to' => '/admin/audit-logs',
                 'permission' => ['audit-logs-view'],
+            ],
+            [
+                'label' => 'Backup & Restore',
+                'icon' => 'i-lucide-database-backup',
+                'to' => '/admin/backups',
+                'roles' => ['admin'],
             ],
             [
                 'label' => 'Settings',
@@ -239,6 +247,20 @@ class AdminNavigationService
         $result = [];
 
         foreach ($nodes as $node) {
+            if (! empty($node['roles'])) {
+                $allowedRoles = (array) $node['roles'];
+                $hasRole = false;
+                foreach ($allowedRoles as $role) {
+                    if ($user->hasRole($role)) {
+                        $hasRole = true;
+                        break;
+                    }
+                }
+                if (! $hasRole) {
+                    continue;
+                }
+            }
+
             $hasPermission = true;
 
             if (!$isAdmin && !empty($node['permission'])) {
@@ -270,7 +292,7 @@ class AdminNavigationService
             }
 
             // Remove internal permission metadata from frontend payload
-            unset($node['permission']);
+            unset($node['permission'], $node['roles']);
             $result[] = $node;
         }
 

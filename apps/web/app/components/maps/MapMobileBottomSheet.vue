@@ -18,14 +18,12 @@ const props = withDefaults(
     snap?: SnapLevel;
     title?: string;
     icon?: string;
-    subtitle?: string;
   }>(),
   {
     open: false,
     snap: "peek",
-    title: "Lapisan Peta & Data",
-    icon: "i-lucide-layers",
-    subtitle: "",
+    title: "Peta Bojonegoro",
+    icon: "i-ion-map",
   }
 );
 
@@ -39,7 +37,7 @@ const emit = defineEmits<{
 }>();
 
 // ─── Snap Constants & Bleed ──────────────────────────────────────────────────
-const MIN_HEIGHT_PX = 150; // resting height showing handle, tabs, and search feature
+const MIN_HEIGHT_PX = 156; // resting height showing handle, tabs, and search feature
 const PEEK_RATIO = 0.50; // 50% of viewport (separuh layar)
 const FULL_RATIO = 0.92; // 92% of viewport
 const BOTTOM_BLEED_PX = 120; // extra extension below viewport to eliminate drag-up gap and provide solid base
@@ -448,6 +446,15 @@ watch(
 function onKeydown(e: KeyboardEvent) {
   if (!props.open) return;
 
+  const target = e.target as HTMLElement | null;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      (target as HTMLElement).blur();
+    }
+    return;
+  }
+
   if (e.key === "Escape") {
     e.preventDefault();
     if (snapLevel.value === "full") snapTo("peek");
@@ -541,23 +548,46 @@ onUnmounted(() => {
       >
       <!-- Main Sheet Container with Top Rounded Corners, Border & Depth Shadow (Solid Background) -->
       <div
-        class="flex flex-col h-full bg-white dark:bg-[#0b0f19] rounded-t-[24px] border-t border-l border-r border-slate-200/80 dark:border-white/10 shadow-[0_-10px_36px_rgba(15,23,42,0.18)] dark:shadow-[0_-12px_44px_rgba(0,0,0,0.5)] overflow-hidden"
+        class="flex flex-col h-full bg-white dark:bg-[#0b0f19] rounded-t-[26px] border-t border-l border-r border-slate-200/80 dark:border-white/10 shadow-[0_-10px_36px_rgba(15,23,42,0.16)] dark:shadow-[0_-12px_44px_rgba(0,0,0,0.5)] overflow-hidden"
       >
-        <!-- ── Top Drag Zone (Grab Handle Pill) ── -->
+        <!-- ── Top Drag Zone (Accessible Grab Handle Pill) ── -->
         <div
-          class="shrink-0 touch-none cursor-grab active:cursor-grabbing flex items-center justify-center pt-3 pb-2 select-none"
+          class="shrink-0 touch-none flex items-center justify-center pt-2 pb-1 select-none"
           @touchstart.passive="handleHeaderTouchStart"
           @mousedown="handleHeaderMouseDown"
-          @click.stop="toggleSnapFromHandle"
         >
-          <div
-            class="h-[4.5px] rounded-full transition-all duration-200 cursor-pointer"
-            :class="[
-              isDragging
-                ? 'w-12 bg-blue-600 dark:bg-blue-400 shadow-sm'
-                : 'w-10 bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500'
-            ]"
-          />
+          <button
+            type="button"
+            class="w-24 min-h-[28px] py-2 flex items-center justify-center cursor-grab active:cursor-grabbing focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full"
+            aria-label="Geser atau ketuk untuk mengubah tinggi panel peta"
+            @click.stop="toggleSnapFromHandle"
+          >
+            <span
+              class="h-[4.5px] rounded-full transition-all duration-200 block"
+              :class="[
+                isDragging
+                  ? 'w-12 bg-blue-600 dark:bg-blue-400 shadow-sm'
+                  : 'w-10 bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500'
+              ]"
+            />
+          </button>
+        </div>
+
+        <!-- ── Mobile Compact Brand Bar (Hanya di Peek & Full agar terasa seperti aplikasi modern) ── -->
+        <div
+          v-if="snapLevel !== 'min'"
+          class="px-4 pb-1.5 shrink-0 flex items-center justify-between gap-2"
+          @touchstart.passive="handleHeaderTouchStart"
+          @mousedown="handleHeaderMouseDown"
+        >
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="text-sm font-bold tracking-tight text-slate-900 dark:text-white truncate">
+              {{ title }}
+            </span>
+          </div>
+          <div class="size-8 rounded-full bg-blue-100/90 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <UIcon :name="icon || 'i-ion-map'" class="size-4" />
+          </div>
         </div>
 
         <!-- ── Tab Bar Slot (Draggable when swiping, clickable when tapping) ── -->

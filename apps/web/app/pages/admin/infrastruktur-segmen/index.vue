@@ -3,11 +3,13 @@ import type { SplitterItem } from '@nuxt/ui';
 import MapCanvas from '~/components/dataset/infrastruktur-segmen/MapCanvas.vue';
 import LeftPanel from '~/components/dataset/infrastruktur-segmen/LeftPanel.vue';
 import RightPanel from '~/components/dataset/infrastruktur-segmen/RightPanel.vue';
+import DigitasiSetupPanel from '~/components/dataset/infrastruktur-segmen/DigitasiSetupPanel.vue';
 import BottomPanel from '~/components/dataset/infrastruktur-segmen/BottomPanel.vue';
 import MobileBottomSheet from '~/components/dataset/infrastruktur-segmen/MobileBottomSheet.vue';
 import DialogFilter from '~/components/dataset/infrastruktur-segmen/DialogFilter.vue';
 import DialogSimbology from '~/components/dataset/infrastruktur-segmen/DialogSimbology.vue';
 import DialogSplitSegmen from '~/components/dataset/infrastruktur-segmen/DialogSplitSegmen.vue';
+import NumericTextInput from '~/components/dataset/infrastruktur-segmen/NumericTextInput.vue';
 import FilterContent from '~/components/dataset/infrastruktur-segmen/FilterContent.vue';
 import SimbologyContent from '~/components/dataset/infrastruktur-segmen/SimbologyContent.vue';
 import WilayahSelector from '~/components/common/WilayahSelector.vue';
@@ -19,7 +21,15 @@ import type {
   GeoJsonFeatureCollection,
   InfrastrukturSegmen,
   InfrastrukturTipe,
+  JalanPorosRef,
   PlottingAnggaran,
+} from '~/types/infrastruktur';
+import {
+  KONDISI_OPTIONS,
+  PERKERASAN_OPTIONS,
+  STATUS_ASET_OPTIONS,
+  STATUS_JALAN_OPTIONS,
+  SUMBER_DANA_OPTIONS,
 } from '~/types/infrastruktur';
 import type {
   BasemapType,
@@ -82,51 +92,22 @@ const userRoleLabel = computed(() => {
   return 'Pengguna';
 });
 
-const kecamatanSelectOptions = computed(() => [
-  { label: 'Semua Kecamatan', value: null },
-  ...wilayahStore.kecamatanList.map((k) => ({
-    label: k.nama_kecamatan,
-    value: k.id,
-  })),
-]);
-
-const desaSelectOptions = computed(() => {
-  const currentKecId = filterKecamatan.value ? Number(filterKecamatan.value) : null;
-  if (!currentKecId) {
-    return [{ label: 'Pilih Kecamatan dulu', value: null }];
-  }
-  const list = wilayahStore.desaByKecamatan[currentKecId] || (wilayahStore.desaByKecamatan as any)[String(currentKecId)] || [];
-  return [
-    { label: 'Semua Desa', value: null },
-    ...list.map((d: any) => ({
-      label: d.nama_desa,
-      value: Number(d.id),
-    })),
-  ];
-});
-
-function handleKecamatanFilterChange(val: any) {
+function handleKecamatanFilterChange(val: number | null) {
   if (isKecamatanRestricted.value) return;
-  const kecId = val === null || val === undefined || val === 'ALL' || val === '' ? null : Number(val);
-  filterKecamatan.value = isNaN(kecId!) ? null : kecId;
+  filterKecamatan.value = val;
   if (!isDesaRestricted.value) {
     filterDesa.value = null;
   }
 }
 
-function handleDesaFilterChange(val: any) {
+function handleDesaFilterChange(val: number | null) {
   if (isDesaRestricted.value) return;
-  const desaId = val === null || val === undefined || val === 'ALL' || val === '' ? null : Number(val);
-  filterDesa.value = isNaN(desaId!) ? null : desaId;
-}
-
-function resetWilayahFilter() {
-  if (!isKecamatanRestricted.value) filterKecamatan.value = null;
-  if (!isDesaRestricted.value) filterDesa.value = null;
+  filterDesa.value = val;
 }
 
 // ─── Workspace Splitters Layout ───────────────────────────────────────────────
 const SIDE_PANEL_WIDTH = 300;
+const RIGHT_PANEL_WIDTH = 340;
 const SIDE_PANEL_MIN = 280;
 const SIDE_PANEL_MAX = 480;
 
@@ -152,11 +133,11 @@ const horizontalSplitterItems = ref<SplitterItem[]>([
     id: 'right-panel',
     slot: 'right',
     sizeUnit: 'px',
-    defaultSize: 42,
+    defaultSize: 0,
     minSize: SIDE_PANEL_MIN,
     maxSize: SIDE_PANEL_MAX,
     collapsible: true,
-    collapsedSize: 42,
+    collapsedSize: 0,
     class: 'h-full',
   },
 ]);
@@ -183,10 +164,36 @@ const verticalSplitterItems = ref<SplitterItem[]>([
 
 const horizontalSplitterRef = ref<any>(null);
 const verticalSplitterRef = ref<any>(null);
+const leftPaneContainerRef = ref<HTMLElement | null>(null);
+const leftPanelActualWidth = ref<number>(SIDE_PANEL_WIDTH);
+const isLeftPanelCollapsed = computed(() => leftPanelActualWidth.value < SIDE_PANEL_MIN - 20);
+let leftPaneResizeObserver: ResizeObserver | null = null;
 
-// Drag responsiveness flags
+watch(
+  leftPaneContainerRef,
+  (el) => {
+    if (leftPaneResizeObserver) {
+      leftPaneResizeObserver.disconnect();
+      leftPaneResizeObserver = null;
+    }
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measured = Math.round(el.getBoundingClientRect().width);
+    if (measured > 0) leftPanelActualWidth.value = measured;
+    leftPaneResizeObserver = new ResizeObserver((entries) => {
+      const width = Math.round(entries[0]?.contentRect?.width ?? 0);
+      if (width > 0) {
+        leftPanelActualWidth.value = width;
+      }
+    });
+    leftPaneResizeObserver.observe(el);
+  },
+  { flush: 'post' },
+);
+
+// Drag & right-panel collapse tracking
 const isDraggingHorizontal = ref(false);
 const isDraggingVertical = ref(false);
+const isRightPanelCollapsed = ref(true);
 
 function onHorizontalDragging(_index: number, dragging: boolean) {
   isDraggingHorizontal.value = dragging;
@@ -196,44 +203,60 @@ function onVerticalDragging(_index: number, dragging: boolean) {
   isDraggingVertical.value = dragging;
 }
 
-// Right panel auto-expansion synchronization
-const rightPanelSlotData = shallowRef<{
-  collapsed: boolean;
-  collapse: () => void;
-  expand: () => void;
-  resize: (size: number) => void;
-} | null>(null);
+function onHorizontalCollapse(index: number) {
+  if (index === 2) {
+    isRightPanelCollapsed.value = true;
+  }
+}
 
-function syncRightPanelActions(
-  collapsed: boolean,
-  collapse: () => void,
-  expand: () => void,
-  resize: (size: number) => void
-) {
-  rightPanelSlotData.value = { collapsed, collapse, expand, resize };
-  return '';
+function onHorizontalExpand(index: number) {
+  if (index === 2) {
+    isRightPanelCollapsed.value = false;
+  }
+}
+
+function onHorizontalResize(index: number, size: number) {
+  if (index === 2) {
+    isRightPanelCollapsed.value = size <= 1;
+  }
+}
+
+// Right panel auto-expansion synchronization (desktop USplitter only)
+function withDesktopRightPanel(action: (panel: any) => void) {
+  if (!isDesktop.value) return;
+  const splitter = horizontalSplitterRef.value;
+  const splitterEl = splitter?.$el as HTMLElement | undefined;
+  const panel = splitter?.panelsRef?.[2];
+  if (!splitterEl?.isConnected || !panel) return;
+  try {
+    action(panel);
+  } catch {
+    // SplitterGroup layout may still be initializing or unmounting across viewport changes
+  }
 }
 
 function expandRightPanel() {
-  if (rightPanelSlotData.value) {
-    rightPanelSlotData.value.resize(SIDE_PANEL_WIDTH);
-    if (rightPanelSlotData.value.collapsed) {
-      rightPanelSlotData.value.expand?.();
+  if (!isDesktop.value) return;
+  withDesktopRightPanel((panel) => {
+    if (unref(panel.isCollapsed)) {
+      panel.expand?.();
     }
-  } else {
-    horizontalSplitterRef.value?.panelsRef?.[2]?.resize?.(SIDE_PANEL_WIDTH);
-    horizontalSplitterRef.value?.panelsRef?.[2]?.expand?.();
-  }
+    panel.resize?.(RIGHT_PANEL_WIDTH);
+    isRightPanelCollapsed.value = false;
+    allPanelsHidden.value = false;
+  });
 }
 
 function collapseRightPanel() {
-  if (rightPanelSlotData.value) {
-    if (!rightPanelSlotData.value.collapsed) {
-      rightPanelSlotData.value.collapse();
+  if (!isDesktop.value) return;
+  withDesktopRightPanel((panel) => {
+    if (!unref(panel.isCollapsed)) {
+      panel.collapse?.();
+    } else {
+      panel.resize?.(0);
     }
-  } else {
-    horizontalSplitterRef.value?.panelsRef?.[2]?.collapse?.();
-  }
+    isRightPanelCollapsed.value = true;
+  });
 }
 
 // Focus / Map-Only Mode
@@ -242,7 +265,11 @@ const allPanelsHidden = ref(false);
 function toggleAllPanels() {
   if (allPanelsHidden.value) {
     horizontalSplitterRef.value?.panelsRef?.[0]?.resize?.(SIDE_PANEL_WIDTH);
-    expandRightPanel();
+    if (selectedSegmen.value || isDigitasiSetupOpen.value) {
+      expandRightPanel();
+    } else {
+      collapseRightPanel();
+    }
     verticalSplitterRef.value?.panelsRef?.[1]?.resize?.(280);
     bottomPanelOpen.value = true;
     allPanelsHidden.value = false;
@@ -322,7 +349,7 @@ watch(
 const activeFilterCount = computed(() => {
   let count = 0;
   if (filterTahunPembangunan.value) count++;
-  else if (filterTipe.value) count++;
+  if (filterTipe.value) count++;
   if (filterPerkerasan.value) count++;
   if (filterKondisi.value) count++;
   if (filterStatusVerifikasi.value) count++;
@@ -330,8 +357,8 @@ const activeFilterCount = computed(() => {
   if (filterStatusKondisi.value) count++;
   if (filterStatusAset.value) count++;
   if (filterSumberDana.value) count++;
-  if (filterKecamatan.value) count++;
-  if (filterDesa.value) count++;
+  if (!isKecamatanRestricted.value && filterKecamatan.value) count++;
+  if (!isDesaRestricted.value && filterDesa.value) count++;
   return count;
 });
 
@@ -416,18 +443,46 @@ const jalanPorosDesaSymbology = ref<LayerSymbology>({
 });
 
 const filterJalanKecamatan = ref<number | null>(
-  isKecamatanRestricted.value ? userKecamatanId.value : null
+  isKecamatanRestricted.value ? userKecamatanId.value : filterKecamatan.value
 );
 const filterJalanDesa = ref<number | null>(
-  isDesaRestricted.value ? userDesaId.value : null
+  isDesaRestricted.value ? userDesaId.value : filterDesa.value
 );
 const filterJalanKondisi = ref<string | null>(null);
 const filterJalanPerkerasan = ref<string | null>(null);
 
+// Unifikasi wilayah kerja antara layer Segmen Fisik dan Jalan Poros Desa
+watch([filterKecamatan, filterDesa], ([newKec, newDesa]) => {
+  let jalanChanged = false;
+  if (filterJalanKecamatan.value !== newKec) {
+    filterJalanKecamatan.value = newKec;
+    jalanChanged = true;
+  }
+  if (filterJalanDesa.value !== newDesa) {
+    filterJalanDesa.value = newDesa;
+    jalanChanged = true;
+  }
+  if (jalanChanged) {
+    mapCanvasRef.value?.refreshJalanPorosVectorTiles();
+    mobileMapCanvasRef.value?.refreshJalanPorosVectorTiles();
+  }
+});
+
+watch([filterJalanKecamatan, filterJalanDesa], ([newKec, newDesa]) => {
+  const authorizedKec = getAuthorizedKecamatan(newKec);
+  const authorizedDesa = getAuthorizedDesa(newDesa);
+  if (filterKecamatan.value !== authorizedKec) {
+    filterKecamatan.value = authorizedKec;
+  }
+  if (filterDesa.value !== authorizedDesa) {
+    filterDesa.value = authorizedDesa;
+  }
+});
+
 const activeSegmenFilterCount = computed(() => {
   let count = 0;
   if (filterTahunPembangunan.value) count++;
-  else if (filterTipe.value) count++;
+  if (filterTipe.value) count++;
   if (filterPerkerasan.value) count++;
   if (filterKondisi.value) count++;
   if (filterStatusVerifikasi.value) count++;
@@ -435,8 +490,8 @@ const activeSegmenFilterCount = computed(() => {
   if (filterStatusKondisi.value) count++;
   if (filterStatusAset.value) count++;
   if (filterSumberDana.value) count++;
-  if (filterKecamatan.value) count++;
-  if (filterDesa.value) count++;
+  if (!isKecamatanRestricted.value && filterKecamatan.value) count++;
+  if (!isDesaRestricted.value && filterDesa.value) count++;
   return count;
 });
 
@@ -444,8 +499,8 @@ const activeJalanFilterCount = computed(() => {
   let count = 0;
   if (filterJalanPerkerasan.value) count++;
   if (filterJalanKondisi.value) count++;
-  if (filterJalanKecamatan.value) count++;
-  if (filterJalanDesa.value) count++;
+  if (!isKecamatanRestricted.value && filterJalanKecamatan.value) count++;
+  if (!isDesaRestricted.value && filterJalanDesa.value) count++;
   return count;
 });
 
@@ -491,6 +546,44 @@ function resetJalanFilters() {
   if (!isDesaRestricted.value) filterJalanDesa.value = null;
   mapCanvasRef.value?.refreshJalanPorosVectorTiles();
   mobileMapCanvasRef.value?.refreshJalanPorosVectorTiles();
+}
+
+const totalActiveFilterBadge = computed(() => {
+  return activeLayerId.value === 'jalan-poros-desa' ? activeJalanFilterCount.value : activeSegmenFilterCount.value;
+});
+
+const hasAnyActiveFilter = computed(() => {
+  return activeSegmenFilterCount.value > 0 || activeJalanFilterCount.value > 0;
+});
+
+function handleToggleLegendFilter(payload: { layerId: string; field: 'kondisi' | 'perkerasan'; value: string }) {
+  if (payload.layerId === 'jalan-poros-desa') {
+    if (payload.field === 'kondisi') {
+      const same = (filterJalanKondisi.value || '').toLowerCase() === payload.value.toLowerCase();
+      filterJalanKondisi.value = same ? null : payload.value;
+    } else {
+      const same = (filterJalanPerkerasan.value || '').toLowerCase() === payload.value.toLowerCase();
+      filterJalanPerkerasan.value = same ? null : payload.value;
+    }
+    mapCanvasRef.value?.refreshJalanPorosVectorTiles();
+    mobileMapCanvasRef.value?.refreshJalanPorosVectorTiles();
+    return;
+  }
+
+  if (payload.field === 'kondisi') {
+    const same = (filterKondisi.value || '').toLowerCase() === payload.value.toLowerCase();
+    filterKondisi.value = same ? null : payload.value;
+  } else {
+    const same = (filterPerkerasan.value || '').toLowerCase() === payload.value.toLowerCase();
+    filterPerkerasan.value = same ? null : payload.value;
+  }
+}
+
+function resetActiveLayerFilters() {
+  resetFilters();
+  if (filterJalanKondisi.value || filterJalanPerkerasan.value) {
+    resetJalanFilters();
+  }
 }
 
 onMounted(() => {
@@ -624,6 +717,26 @@ function addLog(level: 'INFO' | 'WARN' | 'ERROR', message: string) {
 // ─── Data State ───────────────────────────────────────────────────────────────
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
 const mobileMapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
+const rightPanelRef = ref<InstanceType<typeof RightPanel> | null>(null);
+const mobileRightPanelRef = ref<InstanceType<typeof RightPanel> | null>(null);
+const isDesktop = ref(true);
+
+function updateViewportMode() {
+  if (typeof window !== 'undefined') {
+    isDesktop.value = window.innerWidth >= 1024;
+  }
+}
+
+watch(isDesktop, (desktop) => {
+  if (!desktop) return;
+  nextTick(() => {
+    if (selectedSegmen.value || isDigitasiSetupOpen.value) {
+      expandRightPanel();
+    } else {
+      collapseRightPanel();
+    }
+  });
+});
 
 function fitAllBounds(customBbox?: [number, number, number, number] | null) {
   const target = customBbox || datasetBbox.value;
@@ -643,6 +756,7 @@ const desaList = computed(() => (filterKecamatan.value ? wilayahStore.desaByKeca
 const tableRows = ref<InfrastrukturSegmen[]>([]);
 const tableTotal = ref(0);
 const tableLastPage = ref(1);
+const tableError = ref<string | null>(null);
 const selectedSegmenId = ref<string | null>(null);
 const selectedSegmen = ref<InfrastrukturSegmen | null>(null);
 
@@ -654,7 +768,9 @@ const totalSegmen = computed(() => summaryTotalSegmen.value ?? tableTotal.value)
 
 const loadingMap = ref(false);
 const loadingTable = ref(false);
+const isSavingSegmen = ref(false);
 const isDrawingMode = ref(false);
+const isDigitasiSetupOpen = ref(false);
 const bottomActiveTab = ref<'table' | 'console'>('table');
 
 // Track whether bottom panel is open (non-collapsed); used for on-demand fetch & sync
@@ -693,6 +809,10 @@ const currentDesaName = computed(() => {
   return wilayahStore.getDesaName(filterDesa.value, filterKecamatan.value);
 });
 
+const clickedCoordText = computed(() => {
+  if (!clickedCoordinate.value) return '';
+  return `${clickedCoordinate.value[1].toFixed(5)}, ${clickedCoordinate.value[0].toFixed(5)}`;
+});
 
 // ─── API Loaders ──────────────────────────────────────────────────────────────
 async function loadMasterData() {
@@ -752,6 +872,7 @@ async function loadSummary(shouldFitBounds = false) {
 async function loadTable() {
   if (loadingTable.value) return;
   loadingTable.value = true;
+  tableError.value = null;
   try {
     const params: Record<string, any> = {
       page: tablePage.value,
@@ -777,7 +898,9 @@ async function loadTable() {
       tableLastPage.value = res.meta?.last_page ?? 1;
     }
   } catch (err: any) {
-    addLog('ERROR', `Gagal memuat tabel segmen: ${err?.message}`);
+    const msg = err?.data?.message || err?.message || 'Gagal menghubungi server.';
+    tableError.value = msg;
+    addLog('ERROR', `Gagal memuat tabel segmen: ${msg}`);
   } finally {
     loadingTable.value = false;
   }
@@ -798,12 +921,7 @@ async function refreshAll(shouldFit = true) {
 }
 
 async function handleRefreshAll() {
-  const tasks: Promise<any>[] = [loadMasterData(), loadSummary(true)];
-  if (bottomPanelOpen.value) {
-    tasks.push(loadTable());
-  } else {
-    loadTable();
-  }
+  const tasks: Promise<any>[] = [loadMasterData(), loadSummary(true), loadTable()];
   await Promise.all(tasks);
   refreshAllVectorTiles();
   addLog('INFO', 'Data spasial telah disinkronkan.');
@@ -975,52 +1093,105 @@ watch(tablePerPage, () => {
   loadTable();
 });
 
-// Watch selection to expand/collapse Right Panel
-watch(selectedSegmen, (seg) => {
-  if (seg) {
-    nextTick(() => expandRightPanel());
-  } else {
-    nextTick(() => collapseRightPanel());
-  }
-});
+// Watch selection & digitasi setup to expand/collapse Right Panel on desktop
+watch(
+  [isDigitasiSetupOpen, selectedSegmen],
+  ([setupOpen, seg], [prevSetupOpen, prevSeg]) => {
+    if (!isDesktop.value) return;
+    if (setupOpen || seg) {
+      const setupOpened = setupOpen && !prevSetupOpen;
+      const segChanged = seg && (!prevSeg || String(seg.id) !== String(prevSeg.id));
+      if (setupOpened || segChanged || (!prevSetupOpen && !prevSeg)) {
+        nextTick(() => expandRightPanel());
+      }
+    } else {
+      nextTick(() => collapseRightPanel());
+    }
+  },
+);
 
 // ─── Selection Logic ──────────────────────────────────────────────────────────
 const isDetailLoading = ref(false);
 
 function canEditSegmen(seg: InfrastrukturSegmen | null): boolean {
   if (!seg || !canEdit.value) return false;
-  if (isAdmin()) return true;
-  if (isKecamatanRestricted.value && Number(seg.id_kecamatan) !== Number(userKecamatanId.value)) {
-    return false;
+  if (isAdmin() || isBappeda.value) return true;
+  const status = String(seg.status_verifikasi || '').toLowerCase();
+  if (isDesaRestricted.value) {
+    return (
+      Number(seg.id_desa) === Number(userDesaId.value) &&
+      (status === 'draft' || status === 'rejected_kecamatan')
+    );
   }
-  if (isDesaRestricted.value && Number(seg.id_desa) !== Number(userDesaId.value)) {
-    return false;
+  if (isKecamatanRestricted.value) {
+    return Number(seg.id_kecamatan) === Number(userKecamatanId.value);
   }
   return true;
 }
 
 function canDeleteSegmen(seg: InfrastrukturSegmen | null): boolean {
   if (!seg || !canDelete.value) return false;
-  if (isAdmin()) return true;
-  if (isKecamatanRestricted.value && Number(seg.id_kecamatan) !== Number(userKecamatanId.value)) {
-    return false;
-  }
-  if (isDesaRestricted.value && Number(seg.id_desa) !== Number(userDesaId.value)) {
-    return false;
+  if (isAdmin() || isBappeda.value) return true;
+  if (isDesaRestricted.value) return false;
+  if (isKecamatanRestricted.value) {
+    const status = String(seg.status_verifikasi || '').toLowerCase();
+    return (
+      Number(seg.id_kecamatan) === Number(userKecamatanId.value) &&
+      (status === 'draft' || status === 'rejected_kecamatan')
+    );
   }
   return true;
+}
+
+function canSubmitSegmen(seg: InfrastrukturSegmen | null): boolean {
+  if (!seg || !canSubmit.value) return false;
+  const status = String(seg.status_verifikasi || '').toLowerCase();
+  if (status !== 'draft' && status !== 'rejected_kecamatan') return false;
+  if (isAdmin()) return true;
+  if (isDesaRestricted.value) {
+    return Number(seg.id_desa) === Number(userDesaId.value);
+  }
+  return false;
+}
+
+function handleEditRowFromTable(row: InfrastrukturSegmen) {
+  handleFeatureSelect(row, true);
+  nextTick(() => {
+    expandRightPanel();
+    rightPanelRef.value?.setActiveTab('edit');
+  });
+}
+
+function handleMobileEditRowFromTable(row: InfrastrukturSegmen) {
+  handleFeatureSelect(row, true);
+  switchMobileTab('inspector');
+  nextTick(() => {
+    mobileRightPanelRef.value?.setActiveTab('edit');
+  });
 }
 
 async function handleFeatureSelect(feat: any | null, shouldZoom = false) {
   if (!feat) {
     selectedSegmenId.value = null;
     selectedSegmen.value = null;
-    collapseRightPanel();
+    if (!isDigitasiSetupOpen.value) {
+      collapseRightPanel();
+    }
     syncQueryToUrl();
     return;
   }
 
+  if (isDigitasiSetupOpen.value) {
+    isDigitasiSetupOpen.value = false;
+    if (mobileDrawerTab.value === 'digitasi-setup') {
+      mobileDrawerOpen.value = false;
+    }
+    clearCanvasReferenceHighlight(true);
+  }
+  isIdentifyMode.value = true;
+
   const id = String(feat.id || feat.properties?.id);
+  const isReselectSameFeature = selectedSegmenId.value === id;
   selectedSegmenId.value = id;
   syncQueryToUrl();
 
@@ -1044,8 +1215,8 @@ async function handleFeatureSelect(feat: any | null, shouldZoom = false) {
     namobj: p.namobj || rowMatch?.namobj || 'Segmen Tanpa Nama',
     tipe_kode: p.tipe_kode || rowMatch?.tipe_kode || '',
     tipe: matchedTipe,
-    panjang: p.panjang ?? rowMatch?.panjang ?? p.panjang_meter_gis ?? null,
-    panjang_meter_gis: p.panjang_meter_gis ?? rowMatch?.panjang_meter_gis ?? p.panjang ?? null,
+    panjang: p.panjang ?? rowMatch?.panjang ?? null,
+    panjang_meter_gis: p.panjang_meter_gis ?? rowMatch?.panjang_meter_gis ?? null,
     lebar: p.lebar ?? rowMatch?.lebar ?? null,
     kondisi: p.kondisi || rowMatch?.kondisi || 'Baik',
     status_kondisi: p.status_kondisi || rowMatch?.status_kondisi || 'Eksisting',
@@ -1064,8 +1235,10 @@ async function handleFeatureSelect(feat: any | null, shouldZoom = false) {
     centroid: p.centroid || rowMatch?.centroid || null,
   } as any;
 
-  // 2. Auto-expand right panel immediately
-  nextTick(() => expandRightPanel());
+  // 2. Re-expand right panel on desktop when clicking an already-selected feature (new selections handled by watcher)
+  if (isDesktop.value && isReselectSameFeature) {
+    nextTick(() => expandRightPanel());
+  }
   if (shouldZoom) {
     mapCanvasRef.value?.zoomToFeature(selectedSegmen.value);
     mobileMapCanvasRef.value?.zoomToFeature(selectedSegmen.value);
@@ -1103,19 +1276,47 @@ function handleZoomToFeature(feat: any) {
 const isCreateModalOpen = ref(false);
 const isCreating = ref(false);
 
+const maxBuildYear = new Date().getFullYear() + 5;
+const createPanjangRef = ref<InstanceType<typeof NumericTextInput> | null>(null);
+const createLebarRef = ref<InstanceType<typeof NumericTextInput> | null>(null);
+const createTahunRef = ref<InstanceType<typeof NumericTextInput> | null>(null);
+
+const createNumericErrors = reactive({
+  panjang: null as string | null,
+  lebar: null as string | null,
+  tahun_pembangunan: null as string | null,
+});
+
+function resetCreateNumericErrors() {
+  createNumericErrors.panjang = null;
+  createNumericErrors.lebar = null;
+  createNumericErrors.tahun_pembangunan = null;
+  createPanjangRef.value?.clearValidation();
+  createLebarRef.value?.clearValidation();
+  createTahunRef.value?.clearValidation();
+}
+
+function validateCreateNumericFields(): boolean {
+  const v1 = createPanjangRef.value?.validate() ?? true;
+  const v2 = createLebarRef.value?.validate() ?? true;
+  const v3 = createTahunRef.value?.validate() ?? true;
+  return v1 && v2 && v3;
+}
+
 const createForm = reactive({
   namobj: '',
   tipe_kode: '',
   id_kecamatan: null as number | null,
   id_desa: null as number | null,
   plotting_id: null as string | null,
-  panjang: 0,
-  lebar: 3.5,
+  parent_id: null as string | null,
+  panjang: 0 as number | null,
+  lebar: 3.5 as number | null,
   jenis_perkerasan: 'Aspal',
   status_jalan: 'Jalan Desa',
   kondisi: 'Baik' as any,
   status_kondisi: 'Eksisting' as any,
-  tahun_pembangunan: new Date().getFullYear(),
+  tahun_pembangunan: new Date().getFullYear() as number | null,
   sumber_dana: 'APBD',
   status_aset: 'Aset Desa',
   sumber_data: 'Digitasi Canvas GIS',
@@ -1123,15 +1324,339 @@ const createForm = reactive({
   geometry: null as any,
 });
 
+// ─── Pre-Digitization Setup & Map Interaction Modes ──────────────────────────
+const isIdentifyMode = ref(true);
+const identifyModeBeforeDraw = ref(true);
+const digitasiMethod = ref<'manual' | 'auto'>('manual'); // TODO: Implementasi digitasi otomatis mengikuti geometri Jalan Poros Desa
+const digitasiRefMode = ref<'with_ref' | 'without_ref'>('with_ref');
+
+const mapInteractionMode = computed<'pan' | 'identify' | 'pick-reference'>(() => {
+  if (isDigitasiSetupOpen.value) {
+    return digitasiRefMode.value === 'with_ref' ? 'pick-reference' : 'pan';
+  }
+  return isIdentifyMode.value ? 'identify' : 'pan';
+});
+
+function toggleIdentifyMode() {
+  if (isDrawingMode.value) return;
+  if (!isIdentifyMode.value) {
+    if (isDigitasiSetupOpen.value) {
+      handleCloseDigitasiSetup();
+    }
+    isIdentifyMode.value = true;
+    addLog('INFO', 'Mode Identify Feature diaktifkan. Klik fitur di peta untuk lihat detail.');
+  } else {
+    isIdentifyMode.value = false;
+    mapCanvasRef.value?.closePopup();
+    mobileMapCanvasRef.value?.closePopup();
+    addLog('INFO', 'Mode Identify Feature dinonaktifkan (mode jelajah peta).');
+  }
+}
+const setupRoadList = ref<JalanPorosRef[]>([]);
+const setupRoadLoading = ref(false);
+const setupRoadError = ref<string | null>(null);
+const selectedSetupRoadId = ref<string | null>(null);
+const selectedSetupRoadDetail = ref<{ data: JalanPorosRef; feature: any } | null>(null);
+const setupZoomLoading = ref(false);
+
+const activeDigitasiRef = ref<{ data: JalanPorosRef; feature: any } | null>(null);
+const savedJalanLayerVisibleBeforeDraw = ref<boolean | null>(null);
+let roadLookupSeq = 0;
+let roadFeatureSeq = 0;
+
+function formatRoadOptionLabel(road: JalanPorosRef): string {
+  const kode = road.kode_ruas != null && String(road.kode_ruas).trim() !== ''
+    ? `[#${road.kode_ruas}] `
+    : '';
+  const nama = road.nama_ruas || 'Ruas Tanpa Nama';
+  const desa = road.desa ? ` · Ds. ${road.desa}` : '';
+  return `${kode}${nama}${desa}`;
+}
+
+const setupRoadItems = computed(() =>
+  setupRoadList.value.map((r) => ({
+    label: formatRoadOptionLabel(r),
+    value: r.id,
+  })),
+);
+
+const activeReferenceLabel = computed(() => {
+  if (activeDigitasiRef.value) {
+    const r = activeDigitasiRef.value.data;
+    const kode = r.kode_ruas != null && String(r.kode_ruas).trim() !== '' ? `[#${r.kode_ruas}] ` : '';
+    return `Ref: ${kode}${r.nama_ruas || 'Jalan Poros'}`;
+  }
+  if (isDrawingMode.value) {
+    return 'Tanpa Referensi (Mandiri)';
+  }
+  return null;
+});
+
+const canConfirmDigitasiSetup = computed(() => {
+  if (digitasiMethod.value !== 'manual') return false;
+  if (digitasiRefMode.value === 'with_ref') {
+    return Boolean(selectedSetupRoadId.value && selectedSetupRoadDetail.value && !setupZoomLoading.value);
+  }
+  return true;
+});
+
+const isCreateRegionLockedByParent = computed(() => {
+  if (!createForm.parent_id || !activeDigitasiRef.value) return false;
+  const refData = activeDigitasiRef.value.data;
+  return Boolean(refData.id_kecamatan && refData.id_desa);
+});
+
+async function loadSetupRoadOptions() {
+  const seq = ++roadLookupSeq;
+  setupRoadLoading.value = true;
+  setupRoadError.value = null;
+  const activeKecId = isKecamatanRestricted.value
+    ? userKecamatanId.value
+    : (filterKecamatan.value ?? null);
+  const activeDesaId = isDesaRestricted.value
+    ? userDesaId.value
+    : (filterDesa.value ?? null);
+  try {
+    const res = await api.fetchJalanPorosLookup({
+      id_kecamatan: activeKecId,
+      id_desa: activeDesaId,
+      limit: 500,
+    });
+    if (seq !== roadLookupSeq) return;
+    if (res?.ok && Array.isArray(res.data)) {
+      setupRoadList.value = res.data;
+    } else {
+      setupRoadList.value = [];
+    }
+  } catch (err: any) {
+    if (seq !== roadLookupSeq) return;
+    setupRoadList.value = [];
+    setupRoadError.value = err?.data?.message || err?.message || 'Gagal memuat daftar jalan poros desa.';
+  } finally {
+    if (seq === roadLookupSeq) {
+      setupRoadLoading.value = false;
+    }
+  }
+}
+
+watch([filterKecamatan, filterDesa], () => {
+  if (!isDigitasiSetupOpen.value) return;
+  selectedSetupRoadId.value = null;
+  selectedSetupRoadDetail.value = null;
+  clearCanvasReferenceHighlight(true);
+  loadSetupRoadOptions();
+});
+
+function clearCanvasReferenceHighlight(restoreLayerVisibility = true) {
+  mapCanvasRef.value?.setReferenceJalanPoros(null, false);
+  mobileMapCanvasRef.value?.setReferenceJalanPoros(null, false);
+  if (restoreLayerVisibility && savedJalanLayerVisibleBeforeDraw.value !== null) {
+    jalanPorosDesaVisible.value = savedJalanLayerVisibleBeforeDraw.value;
+    savedJalanLayerVisibleBeforeDraw.value = null;
+  }
+}
+
+function cleanupDigitasiReferenceState() {
+  activeDigitasiRef.value = null;
+  clearCanvasReferenceHighlight(true);
+  isIdentifyMode.value = identifyModeBeforeDraw.value;
+}
+
+function ensureJalanPorosVisibleForSetup() {
+  if (savedJalanLayerVisibleBeforeDraw.value === null) {
+    savedJalanLayerVisibleBeforeDraw.value = jalanPorosDesaVisible.value;
+  }
+  jalanPorosDesaVisible.value = true;
+}
+
+async function focusMapToReferenceRoad(feature: any, shouldZoom = true) {
+  if (!feature) return;
+  ensureJalanPorosVisibleForSetup();
+  await nextTick();
+  mapCanvasRef.value?.setReferenceJalanPoros(feature, shouldZoom);
+  mobileMapCanvasRef.value?.setReferenceJalanPoros(feature, shouldZoom);
+}
+
+async function handleSetupRoadChange(roadId: string | null, shouldZoom = true) {
+  selectedSetupRoadId.value = roadId;
+  selectedSetupRoadDetail.value = null;
+  const seq = ++roadFeatureSeq;
+
+  if (!roadId) {
+    clearCanvasReferenceHighlight(false);
+    return;
+  }
+
+  clearCanvasReferenceHighlight(false);
+  setupZoomLoading.value = true;
+  try {
+    const res = await api.getJalanPoros(roadId);
+    if (seq !== roadFeatureSeq) return;
+    if (res?.ok && res.data && res.feature) {
+      if (!setupRoadList.value.some((r) => String(r.id) === String(res.data.id))) {
+        setupRoadList.value = [res.data, ...setupRoadList.value];
+      }
+      selectedSetupRoadDetail.value = { data: res.data, feature: res.feature };
+      await focusMapToReferenceRoad(res.feature, shouldZoom);
+      addLog(
+        'INFO',
+        shouldZoom
+          ? `Peta difokuskan ke ruas jalan poros: ${res.data.nama_ruas || res.data.id}.`
+          : `Ruas referensi dipilih dari peta: ${res.data.nama_ruas || res.data.id}.`,
+      );
+    } else {
+      toast.add({
+        title: 'Geometri Ruas Tidak Tersedia',
+        description: 'Data geometri jalan poros desa tidak ditemukan.',
+        color: 'warning',
+      });
+    }
+  } catch (err: any) {
+    if (seq !== roadFeatureSeq) return;
+    const msg = err?.data?.message || err?.message || 'Gagal mengambil geometri jalan poros.';
+    toast.add({ title: 'Gagal Fokus ke Ruas', description: msg, color: 'error' });
+  } finally {
+    if (seq === roadFeatureSeq) {
+      setupZoomLoading.value = false;
+    }
+  }
+}
+
+function handleMapPickReferenceRoad(payload: { id: string; namobj?: string; kode_ruas?: string | null }) {
+  if (!isDigitasiSetupOpen.value || digitasiRefMode.value !== 'with_ref') return;
+  handleSetupRoadChange(payload.id, false);
+}
+
+function handleSwitchSetupRefMode(mode: 'with_ref' | 'without_ref') {
+  digitasiRefMode.value = mode;
+  if (mode === 'without_ref') {
+    clearCanvasReferenceHighlight(true);
+  } else {
+    ensureJalanPorosVisibleForSetup();
+    if (selectedSetupRoadDetail.value?.feature) {
+      focusMapToReferenceRoad(selectedSetupRoadDetail.value.feature, false);
+    }
+  }
+}
+
 function handleStartDrawing() {
+  if (isDrawingMode.value) return;
+  if (isDigitasiSetupOpen.value) {
+    if (!isDesktop.value) {
+      openMobileTab('digitasi-setup');
+    } else {
+      nextTick(() => expandRightPanel());
+    }
+    return;
+  }
+  identifyModeBeforeDraw.value = isIdentifyMode.value;
+  isIdentifyMode.value = false;
+  mapCanvasRef.value?.closePopup();
+  mobileMapCanvasRef.value?.closePopup();
+  digitasiMethod.value = 'manual';
+  selectedSetupRoadId.value = null;
+  selectedSetupRoadDetail.value = null;
+  setupRoadError.value = null;
+  if (digitasiRefMode.value === 'with_ref') {
+    ensureJalanPorosVisibleForSetup();
+  }
+  isDigitasiSetupOpen.value = true;
+  if (!isDesktop.value) {
+    openMobileTab('digitasi-setup');
+  } else {
+    nextTick(() => expandRightPanel());
+  }
+  loadSetupRoadOptions();
+}
+
+function handleCloseDigitasiSetup(closeMobileDrawer = true) {
+  isDigitasiSetupOpen.value = false;
+  if (closeMobileDrawer && mobileDrawerTab.value === 'digitasi-setup') {
+    mobileDrawerOpen.value = false;
+  }
+  if (!isDrawingMode.value && !isCreateModalOpen.value) {
+    clearCanvasReferenceHighlight(true);
+    isIdentifyMode.value = identifyModeBeforeDraw.value;
+  }
+  if (isDesktop.value && !selectedSegmen.value) {
+    nextTick(() => collapseRightPanel());
+  }
+}
+
+function handleConfirmDigitasiSetup() {
+  if (!canConfirmDigitasiSetup.value) {
+    if (digitasiRefMode.value === 'with_ref' && !selectedSetupRoadId.value) {
+      toast.add({
+        title: 'Pilih Jalan Poros',
+        description: 'Pilih ruas jalan poros desa terlebih dahulu sebelum mulai menggambar.',
+        color: 'warning',
+      });
+    }
+    return;
+  }
+
+  if (digitasiRefMode.value === 'with_ref' && selectedSetupRoadDetail.value) {
+    activeDigitasiRef.value = selectedSetupRoadDetail.value;
+    if (savedJalanLayerVisibleBeforeDraw.value === null) {
+      savedJalanLayerVisibleBeforeDraw.value = jalanPorosDesaVisible.value;
+    }
+    jalanPorosDesaVisible.value = true;
+    const feat = selectedSetupRoadDetail.value.feature;
+    nextTick(() => {
+      mapCanvasRef.value?.setReferenceJalanPoros(feat, false);
+      mobileMapCanvasRef.value?.setReferenceJalanPoros(feat, false);
+    });
+  } else {
+    activeDigitasiRef.value = null;
+    clearCanvasReferenceHighlight(true);
+  }
+
+  isDigitasiSetupOpen.value = false;
+  if (mobileDrawerTab.value === 'digitasi-setup') {
+    mobileDrawerOpen.value = false;
+  }
+  if (isDesktop.value) {
+    nextTick(() => collapseRightPanel());
+  }
   isDrawingMode.value = true;
-  mapCanvasRef.value?.startDrawing();
-  mobileMapCanvasRef.value?.startDrawing();
-  addLog('INFO', 'Memulai digitasi segmen garis baru.');
+  nextTick(() => {
+    mapCanvasRef.value?.startDrawing();
+    mobileMapCanvasRef.value?.startDrawing();
+  });
+
+  if (activeDigitasiRef.value) {
+    addLog('INFO', `Memulai digitasi manual mengacu ruas: ${formatRoadOptionLabel(activeDigitasiRef.value.data)}.`);
+  } else {
+    addLog('INFO', 'Memulai digitasi manual tanpa referensi jalan poros (segmen mandiri).');
+  }
+}
+
+function handleReopenDigitasiSetup() {
+  mapCanvasRef.value?.cancelDrawing(false);
+  mobileMapCanvasRef.value?.cancelDrawing(false);
+  isDrawingMode.value = false;
+  isIdentifyMode.value = false;
+  digitasiMethod.value = 'manual';
+  if (activeDigitasiRef.value) {
+    digitasiRefMode.value = 'with_ref';
+    selectedSetupRoadId.value = activeDigitasiRef.value.data.id;
+    selectedSetupRoadDetail.value = activeDigitasiRef.value;
+    ensureJalanPorosVisibleForSetup();
+  } else {
+    digitasiRefMode.value = 'without_ref';
+  }
+  isDigitasiSetupOpen.value = true;
+  if (!isDesktop.value) {
+    openMobileTab('digitasi-setup');
+  } else {
+    nextTick(() => expandRightPanel());
+  }
+  loadSetupRoadOptions();
 }
 
 function onDrawCanceled() {
   isDrawingMode.value = false;
+  cleanupDigitasiReferenceState();
   addLog('INFO', 'Mode gambar dibatalkan.');
 }
 
@@ -1139,6 +1664,7 @@ function handleCancelDrawing() {
   isDrawingMode.value = false;
   mapCanvasRef.value?.cancelDrawing();
   mobileMapCanvasRef.value?.cancelDrawing();
+  cleanupDigitasiReferenceState();
 }
 
 function handleRedraw() {
@@ -1166,20 +1692,118 @@ function handleToggleSnap() {
   mobileMapCanvasRef.value?.toggleSnapping();
 }
 
+function handleDrawClick() {
+  mapCanvasRef.value?.handleDrawClick();
+  mobileMapCanvasRef.value?.handleDrawClick();
+}
+
+function handleConfirmDraw() {
+  mapCanvasRef.value?.confirmDraw();
+  mobileMapCanvasRef.value?.confirmDraw();
+}
+
+function handleSaveEditedGeometry() {
+  mapCanvasRef.value?.saveEditedGeometry();
+  mobileMapCanvasRef.value?.saveEditedGeometry();
+}
+
+function handleCancelEditGeometry() {
+  mapCanvasRef.value?.cancelEditGeometry();
+  mobileMapCanvasRef.value?.cancelEditGeometry();
+}
+
+function handleCancelSplitMode() {
+  isSplitDialogOpen.value = false;
+  splitTargetSegmen.value = null;
+  splitPointCoordinate.value = null;
+  mapCanvasRef.value?.cancelSplitMode();
+  mobileMapCanvasRef.value?.cancelSplitMode();
+  addLog('INFO', 'Mode potong segmen dibatalkan.');
+}
+
+const desktopSpatialMode = computed<'edit-geometry' | 'split' | 'draw' | null>(() => {
+  if (!isDesktop.value) return null;
+  const canvas = mapCanvasRef.value;
+  if (canvas?.isEditGeometryMode) return 'edit-geometry';
+  if (canvas?.isSplitMode) return 'split';
+  if (canvas?.isDrawing || isDrawingMode.value) return 'draw';
+  return null;
+});
+
+const desktopEditSegmenName = computed(() => mapCanvasRef.value?.editingSegmenData?.namobj || 'Segmen');
+const desktopEditedLengthMeters = computed(() => Number(mapCanvasRef.value?.editedLengthMeters ?? 0));
+const desktopSplitSegmenName = computed(() => mapCanvasRef.value?.splitSegmenData?.namobj || 'Segmen');
+
+const desktopIsDrawInteracting = computed(() => Boolean(mapCanvasRef.value?.isDrawInteracting));
+const desktopCanUndo = computed(() => Boolean(mapCanvasRef.value?.canUndo));
+const desktopCanRedo = computed(() => Boolean(mapCanvasRef.value?.canRedo));
+const desktopCanSave = computed(() => Boolean(mapCanvasRef.value?.canSave));
+const desktopHasCompletedLine = computed(() => Boolean(mapCanvasRef.value?.hasCompletedLine));
+const desktopDrawnPointCount = computed(() => Number(mapCanvasRef.value?.drawnPointCount ?? 0));
+const desktopDrawnLengthMeters = computed(() => Number(mapCanvasRef.value?.drawnLengthMeters ?? 0));
+const desktopIsSnappingEnabled = computed(() => Boolean(mapCanvasRef.value?.isSnappingEnabled ?? true));
+const desktopIsSnapLoading = computed(() => Boolean(mapCanvasRef.value?.isSnapLoading));
+const desktopSnapRoadCount = computed(() => Number(mapCanvasRef.value?.snapRoadCount ?? 0));
+
 function handleDrawSaved(payload: { geojson: any; lengthMeters: number }) {
   isDrawingMode.value = false;
   createForm.geometry = payload.geojson;
-  createForm.panjang = Math.round(payload.lengthMeters);
-  if (filterKecamatan.value) createForm.id_kecamatan = filterKecamatan.value;
-  if (filterDesa.value) createForm.id_desa = filterDesa.value;
+  createForm.panjang = Number.isFinite(payload.lengthMeters)
+    ? Math.round(payload.lengthMeters * 100) / 100
+    : 0;
+  createForm.plotting_id = null;
+  createForm.keterangan = '';
+
+  const refRoad = activeDigitasiRef.value?.data;
+  if (refRoad) {
+    createForm.parent_id = refRoad.id;
+    createForm.namobj = refRoad.nama_ruas || '';
+    createForm.id_kecamatan = isKecamatanRestricted.value
+      ? userKecamatanId.value
+      : (refRoad.id_kecamatan ?? filterKecamatan.value ?? null);
+    createForm.id_desa = isDesaRestricted.value
+      ? userDesaId.value
+      : (refRoad.id_desa ?? filterDesa.value ?? null);
+  } else {
+    createForm.parent_id = null;
+    createForm.namobj = '';
+    createForm.id_kecamatan = isKecamatanRestricted.value
+      ? userKecamatanId.value
+      : (filterKecamatan.value ?? null);
+    createForm.id_desa = isDesaRestricted.value
+      ? userDesaId.value
+      : (filterDesa.value ?? null);
+  }
+
   if (filterTipe.value) createForm.tipe_kode = filterTipe.value;
   else if (tipeList.value.length > 0) createForm.tipe_kode = tipeList.value[0].kode;
 
   addLog('INFO', `Digitasi garis selesai. Panjang: ${createForm.panjang} m.`);
+  resetCreateNumericErrors();
   isCreateModalOpen.value = true;
 }
 
+watch(isCreateModalOpen, (open, prevOpen) => {
+  if (!open && prevOpen) {
+    cleanupDigitasiReferenceState();
+  }
+});
+
+watch(isDigitasiSetupOpen, (open, prevOpen) => {
+  if (!open && prevOpen && !isDrawingMode.value && !isCreateModalOpen.value) {
+    clearCanvasReferenceHighlight(true);
+  }
+});
+
 async function handleConfirmCreate() {
+  if (!validateCreateNumericFields()) {
+    toast.add({
+      title: 'Validasi',
+      description: 'Periksa kembali isian angka yang belum valid.',
+      color: 'warning',
+    });
+    return;
+  }
   if (!createForm.tipe_kode) {
     toast.add({ title: 'Validasi', description: 'Tipe infrastruktur wajib dipilih.', color: 'warning' });
     return;
@@ -1201,7 +1825,8 @@ async function handleConfirmCreate() {
       id_kecamatan: createForm.id_kecamatan,
       id_desa: createForm.id_desa,
       plotting_id: createForm.plotting_id,
-      panjang: createForm.panjang,
+      parent_id: createForm.parent_id,
+      panjang: createForm.panjang ?? 0,
       lebar: createForm.lebar,
       jenis_perkerasan: createForm.jenis_perkerasan,
       status_jalan: createForm.status_jalan,
@@ -1239,7 +1864,8 @@ async function handleConfirmCreate() {
 
 // ─── Edit Action ──────────────────────────────────────────────────────────────
 async function handleSaveSegmen(payload: Partial<InfrastrukturSegmen>) {
-  if (!selectedSegmen.value) return;
+  if (!selectedSegmen.value || isSavingSegmen.value) return;
+  isSavingSegmen.value = true;
   try {
     await api.updateSegmen(selectedSegmen.value.id, payload);
     toast.add({
@@ -1251,10 +1877,14 @@ async function handleSaveSegmen(payload: Partial<InfrastrukturSegmen>) {
     refreshAll();
     const res = await api.getSegmen(selectedSegmen.value.id);
     if (res?.data) selectedSegmen.value = res.data;
+    rightPanelRef.value?.setActiveTab('inspector');
+    mobileRightPanelRef.value?.setActiveTab('inspector');
   } catch (err: any) {
     const msg = err?.data?.message || err?.message || 'Terjadi kesalahan.';
     toast.add({ title: 'Gagal Memperbarui', description: msg, color: 'error' });
     addLog('ERROR', `Gagal memperbarui segmen: ${msg}`);
+  } finally {
+    isSavingSegmen.value = false;
   }
 }
 
@@ -1425,18 +2055,24 @@ const isFilterDialogOpen = ref(false);
 const isSymbologyDialogOpen = ref(false);
 
 // ─── Mobile Drawer & Action Dock State ────────────────────────────────────────
-export type MobileDrawerTabType = 'layer' | 'symbology' | 'filter' | 'table' | 'inspector';
+export type MobileDrawerTabType = 'layer' | 'symbology' | 'filter' | 'table' | 'inspector' | 'digitasi-setup';
 const mobileDrawerOpen = ref(false);
 const mobileDrawerTab = ref<MobileDrawerTabType>('layer');
 const mobileDrawerSnap = ref<'peek' | 'full'>('peek');
 
+watch(mobileDrawerOpen, (open) => {
+  if (!open && mobileDrawerTab.value === 'digitasi-setup' && isDigitasiSetupOpen.value) {
+    handleCloseDigitasiSetup();
+  }
+});
+
 function openMobileTab(tab: MobileDrawerTabType) {
-  if (!mobileDrawerOpen.value) {
-    if (tab === 'table' || tab === 'filter') {
-      mobileDrawerSnap.value = 'full';
-    } else {
-      mobileDrawerSnap.value = 'peek';
-    }
+  if (tab !== 'digitasi-setup' && isDigitasiSetupOpen.value) {
+    handleCloseDigitasiSetup(false);
+  }
+  const targetSnap: 'peek' | 'full' = (tab === 'table' || tab === 'filter') ? 'full' : 'peek';
+  if (!mobileDrawerOpen.value || tab === 'digitasi-setup') {
+    mobileDrawerSnap.value = targetSnap;
     mobileDrawerOpen.value = true;
   }
   mobileDrawerTab.value = tab;
@@ -1446,6 +2082,9 @@ function openMobileTab(tab: MobileDrawerTabType) {
 }
 
 function switchMobileTab(tab: MobileDrawerTabType) {
+  if (tab !== 'digitasi-setup' && isDigitasiSetupOpen.value) {
+    handleCloseDigitasiSetup(false);
+  }
   mobileDrawerTab.value = tab;
   // Catatan: mobileDrawerSnap sengaja dipertahankan agar tinggi sheet tidak berubah saat berganti tab
   if (tab === 'table' && tableRows.value.length === 0) {
@@ -1471,16 +2110,24 @@ function handleViewInTable(seg?: InfrastrukturSegmen | null) {
 
 // Initial mount & lifecycle
 onMounted(async () => {
+  updateViewportMode();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateViewportMode);
+  }
+
   // 1. Ambil Master Data Tipe & Plotting
   loadMasterData();
 
   // 2. Muat ringkasan spasial (bbox awal) & data tabel pertama kali
   await Promise.all([loadSummary(false), loadTable()]);
 
-  // 3. Pastikan bottom panel tetap collapsed saat awal buka halaman (sesuai referensi jalan-poros-desa)
+  // 3. Pastikan bottom & right panel tetap collapsed saat awal buka halaman
   nextTick(() => {
     if (!bottomPanelOpen.value) {
       verticalSplitterRef.value?.panelsRef?.[1]?.collapse?.();
+    }
+    if (!selectedSegmen.value && !isDigitasiSetupOpen.value) {
+      collapseRightPanel();
     }
   });
 
@@ -1501,175 +2148,397 @@ onMounted(async () => {
 
   addLog('INFO', 'Editor spasial siap digunakan.');
 });
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateViewportMode);
+  }
+  if (leftPaneResizeObserver) {
+    leftPaneResizeObserver.disconnect();
+    leftPaneResizeObserver = null;
+  }
+});
 </script>
 
 <template>
-  <div class="flex flex-col w-full h-[calc(100vh-3.5rem)] overflow-hidden bg-white dark:bg-[#0b0f19] text-gray-900 dark:text-gray-100 font-[Inter,sans-serif]">
-    <!-- ═══ TOPBAR (Clean Solid Admin Header) ════════════════════════════════ -->
-    <header class="flex items-center justify-between h-11 px-3 sm:px-4 border-b border-gray-200 dark:border-gray-800 shrink-0 z-30 bg-white dark:bg-[#0b0f19]">
-      <!-- Left: Title & Overview Badges -->
-      <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <UIcon name="i-lucide-network" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
-          <h1 class="text-xs font-semibold text-gray-800 dark:text-gray-200 capitalize tracking-wide truncate">
-            Segmen Fisik Infrastruktur
-          </h1>
+  <div class="flex flex-col w-full h-[calc(100dvh-3.5rem)] overflow-hidden bg-white dark:bg-[#0b0f19] text-gray-900 dark:text-gray-100 font-['Plus_Jakarta_Sans',sans-serif]">
+    <!-- ═══ TOPBAR (Clean Solid Admin Header / Contextual Desktop Mode Toolbar) ═══ -->
+    <header
+      class="flex items-center justify-between gap-2 sm:gap-3 h-11 border-b shrink-0 z-30 transition-colors duration-150"
+      :class="[
+        (isDesktop && !desktopSpatialMode && !isLeftPanelCollapsed) ? 'pl-0 pr-3 sm:pr-4' : 'px-3 sm:px-4',
+        desktopSpatialMode === 'edit-geometry'
+          ? 'bg-blue-50/90 dark:bg-blue-950/35 border-blue-200 dark:border-blue-800/80'
+          : desktopSpatialMode === 'split' || desktopSpatialMode === 'draw'
+            ? 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-200 dark:border-amber-800/80'
+            : 'bg-white dark:bg-[#0b0f19] border-gray-200 dark:border-gray-800',
+      ]"
+    >
+      <!-- Contextual Toolbar Mode 1: Edit Geometri (Desktop) -->
+      <template v-if="desktopSpatialMode === 'edit-geometry'">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-700 text-white text-[11px] font-semibold shrink-0">
+            <UIcon name="i-lucide-pen-tool" class="size-3.5" />
+            <span>Edit Geometri</span>
+          </span>
+          <span class="text-xs font-medium text-gray-800 dark:text-gray-100 truncate max-w-[240px] xl:max-w-[340px]">
+            {{ desktopEditSegmenName }}
+          </span>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-[#0b0f19] border border-blue-200 dark:border-blue-800 text-[11px] font-mono font-semibold tabular-nums text-blue-700 dark:text-blue-300 shrink-0">
+            <UIcon name="i-lucide-route" class="size-3 shrink-0" />
+            <span>{{ desktopEditedLengthMeters.toLocaleString('id-ID') }} m</span>
+          </span>
+          <span class="hidden xl:inline text-[11px] text-gray-600 dark:text-gray-400 truncate">
+            Geser titik vertex pada peta untuk mengubah bentuk ruas
+          </span>
         </div>
 
-        <USeparator orientation="vertical" class="h-4 hidden sm:block" />
-
-        <div class="flex items-center gap-1 sm:gap-1.5">
-          <UBadge
-            :label="`${totalSegmen} segmen`"
-            color="neutral"
-            variant="subtle"
+        <div class="flex items-center gap-1.5 shrink-0">
+          <UButton
+            icon="i-lucide-x"
+            label="Batal"
             size="xs"
-            class="font-mono"
+            color="neutral"
+            variant="outline"
+            class="cursor-pointer bg-white dark:bg-[#0b0f19]"
+            @click="handleCancelEditGeometry"
           />
-          <UBadge
-            :label="`${Math.round(totalPanjangMeter).toLocaleString('id-ID')} m`"
+          <UButton
+            icon="i-lucide-check"
+            label="Simpan Geometri"
+            size="xs"
             color="primary"
-            variant="subtle"
-            size="xs"
-            class="font-mono hidden sm:inline-flex"
-          />
-          <UBadge
-            v-if="isDesaRestricted"
-            label="Tingkat Desa"
-            color="warning"
-            variant="subtle"
-            size="xs"
-            icon="i-lucide-map-pin"
-            class="hidden md:inline-flex"
-          />
-          <UBadge
-            v-else-if="isKecamatanRestricted"
-            label="Tingkat Kecamatan"
-            color="info"
-            variant="subtle"
-            size="xs"
-            icon="i-lucide-map-pin"
-            class="hidden md:inline-flex"
-          />
-        </div>
-      </div>
-
-      <!-- Center: Filter Wilayah (Kecamatan & Desa) Terintegrasi Role Permission -->
-      <div class="hidden md:flex items-center gap-1.5">
-        <!-- Kecamatan Selector / Locked Badge -->
-        <div
-          v-if="isKecamatanRestricted"
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white dark:bg-[#0e1424] border border-gray-200/60 dark:border-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
-          :title="`Wilayah kerja Anda terkunci pada Kecamatan ${currentKecamatanName || ''}`"
-        >
-          <UIcon name="i-lucide-lock" class="size-3 text-amber-500 shrink-0" />
-          <span class="truncate max-w-[130px]">Kec. {{ currentKecamatanName || 'Kerja' }}</span>
-        </div>
-        <USelectMenu
-          v-else
-          :model-value="filterKecamatan"
-          :items="kecamatanSelectOptions"
-          value-key="value"
-          label-key="label"
-          placeholder="Pilih Kecamatan"
-          size="xs"
-          class="w-36 lg:w-44 cursor-pointer"
-          :leading-icon="'i-lucide-map-pin'"
-          @update:model-value="handleKecamatanFilterChange"
-        />
-
-        <!-- Desa Selector / Locked Badge -->
-        <div
-          v-if="isDesaRestricted"
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white dark:bg-[#0e1424] border border-gray-200/60 dark:border-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
-          :title="`Wilayah kerja Anda terkunci pada Desa ${currentDesaName || ''}`"
-        >
-          <UIcon name="i-lucide-lock" class="size-3 text-amber-500 shrink-0" />
-          <span class="truncate max-w-[130px]">Ds. {{ currentDesaName || 'Kerja' }}</span>
-        </div>
-        <USelectMenu
-          v-else
-          :model-value="filterDesa"
-          :items="desaSelectOptions"
-          value-key="value"
-          label-key="label"
-          :placeholder="filterKecamatan ? 'Pilih Desa' : 'Pilih Kecamatan dulu'"
-          :disabled="!filterKecamatan"
-          size="xs"
-          class="w-36 lg:w-44 cursor-pointer"
-          :leading-icon="'i-lucide-building-2'"
-          @update:model-value="handleDesaFilterChange"
-        />
-
-        <!-- Reset Filter Wilayah (hanya jika admin/bappeda dan ada filter aktif) -->
-        <UTooltip v-if="!isKecamatanRestricted && (filterKecamatan || filterDesa)" text="Reset Wilayah ke Semua">
-          <UButton
-            icon="i-lucide-rotate-ccw"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            class="size-6 p-0 flex items-center justify-center cursor-pointer text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-            @click="resetWilayahFilter"
-          />
-        </UTooltip>
-      </div>
-
-      <!-- Right: Action Buttons -->
-      <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        <UTooltip text="Sinkronkan Data & Peta">
-          <UButton
-            icon="i-lucide-refresh-cw"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            :loading="loadingMap || loadingTable"
-            class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white cursor-pointer"
-            @click="handleRefreshAll"
-          />
-        </UTooltip>
-
-        <UTooltip :text="allPanelsHidden ? 'Tampilkan semua panel' : 'Mode peta penuh'">
-          <UButton
-            icon="i-lucide-layout-dashboard"
-            size="xs"
-            color="neutral"
-            :variant="allPanelsHidden ? 'subtle' : 'ghost'"
-            :class="allPanelsHidden
-              ? 'text-blue-600 dark:text-blue-400'
-              : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'"
+            variant="solid"
             class="cursor-pointer"
-            @click="toggleAllPanels"
+            @click="handleSaveEditedGeometry"
           />
-        </UTooltip>
+        </div>
+      </template>
 
-        <UButton
-          v-if="canCreate"
-          icon="i-lucide-pen-tool"
-          label="Mulai Digitasi"
-          size="xs"
-          color="warning"
-          variant="solid"
-          class="hidden sm:inline-flex cursor-pointer"
-          :disabled="isDrawingMode"
-          @click="handleStartDrawing"
-        />
-        <UButton
-          v-if="canCreate"
-          icon="i-lucide-pen-tool"
-          size="xs"
-          color="warning"
-          variant="solid"
-          class="sm:hidden cursor-pointer"
-          :disabled="isDrawingMode"
-          @click="handleStartDrawing"
-        />
-      </div>
+      <!-- Contextual Toolbar Mode 2: Split / Potong Segmen (Desktop) -->
+      <template v-else-if="desktopSpatialMode === 'split'">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-700 text-white text-[11px] font-semibold shrink-0">
+            <UIcon name="i-lucide-scissors" class="size-3.5" />
+            <span>Potong Segmen</span>
+          </span>
+          <span class="text-xs font-medium text-gray-800 dark:text-gray-100 truncate max-w-[240px] xl:max-w-[340px]">
+            {{ desktopSplitSegmenName }}
+          </span>
+          <span class="hidden md:inline text-[11px] text-amber-800 dark:text-amber-300 truncate">
+            Klik titik pada garis segmen di peta untuk memotong menjadi 2 bagian
+          </span>
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <UButton
+            icon="i-lucide-x"
+            label="Batal"
+            size="xs"
+            color="neutral"
+            variant="outline"
+            class="cursor-pointer bg-white dark:bg-[#0b0f19]"
+            @click="handleCancelSplitMode"
+          />
+        </div>
+      </template>
+
+      <!-- Contextual Toolbar Mode 3: Digitasi / Draw Segmen Baru (Desktop) -->
+      <template v-else-if="desktopSpatialMode === 'draw'">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-700 text-white text-[11px] font-semibold shrink-0">
+            <UIcon name="i-lucide-pencil" class="size-3.5" />
+            <span>Digitasi</span>
+          </span>
+
+          <div
+            v-if="activeReferenceLabel"
+            class="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md border text-[11px] font-medium max-w-[260px] min-w-0"
+            :class="activeDigitasiRef
+              ? 'bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300'
+              : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'"
+          >
+            <UIcon name="i-lucide-route" class="size-3 shrink-0" />
+            <span class="truncate">{{ activeReferenceLabel }}</span>
+            <button
+              type="button"
+              aria-label="Ubah referensi jalan poros"
+              class="ml-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/80 dark:bg-black/30 hover:bg-white dark:hover:bg-black/50 text-current cursor-pointer shrink-0"
+              @click="handleReopenDigitasiSetup"
+            >
+              Ubah
+            </button>
+          </div>
+
+          <div
+            v-if="desktopDrawnPointCount > 0"
+            class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white dark:bg-[#0b0f19] border border-amber-200 dark:border-amber-800 text-[11px] font-mono tabular-nums shrink-0"
+          >
+            <span class="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-300">
+              <UIcon name="i-lucide-route" class="size-3 shrink-0" />
+              <span>{{ desktopDrawnLengthMeters.toLocaleString('id-ID') }} m</span>
+            </span>
+            <span class="w-px h-3 bg-gray-200 dark:bg-gray-800" />
+            <span class="text-gray-700 dark:text-gray-300">{{ desktopDrawnPointCount }} titik</span>
+            <span
+              v-if="desktopHasCompletedLine"
+              class="font-sans font-semibold text-blue-600 dark:text-blue-400"
+            >
+              (Selesai)
+            </span>
+          </div>
+
+          <span class="hidden xl:inline text-[11px] text-gray-600 dark:text-gray-400 truncate">
+            {{ desktopHasCompletedLine ? 'Garis selesai, klik Simpan untuk isi atribut' : 'Klik peta untuk titik baru, klik ganda untuk mengakhiri garis' }}
+          </span>
+        </div>
+
+        <div class="flex items-center gap-1 shrink-0">
+          <UTooltip text="Mode Gambar Garis (Draw)">
+            <UButton
+              icon="i-lucide-pencil"
+              size="xs"
+              :color="desktopIsDrawInteracting ? 'warning' : 'neutral'"
+              :variant="desktopIsDrawInteracting ? 'solid' : 'ghost'"
+              aria-label="Mode gambar garis"
+              class="cursor-pointer"
+              @click="handleDrawClick"
+            >
+              <span class="hidden xl:inline">Gambar</span>
+            </UButton>
+          </UTooltip>
+
+          <UTooltip text="Gambar Ulang (Redraw)">
+            <UButton
+              icon="i-lucide-rotate-ccw"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              aria-label="Gambar ulang garis"
+              class="cursor-pointer"
+              @click="handleRedraw"
+            >
+              <span class="hidden xl:inline">Ulang</span>
+            </UButton>
+          </UTooltip>
+
+          <UTooltip text="Undo (Batalkan Titik)">
+            <UButton
+              icon="i-lucide-undo-2"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              aria-label="Batalkan titik terakhir"
+              class="cursor-pointer"
+              :disabled="!desktopCanUndo"
+              @click="handleUndo"
+            />
+          </UTooltip>
+
+          <UTooltip text="Redo (Kembalikan Titik)">
+            <UButton
+              icon="i-lucide-redo-2"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              aria-label="Kembalikan titik terakhir"
+              class="cursor-pointer"
+              :disabled="!desktopCanRedo"
+              @click="handleRedo"
+            />
+          </UTooltip>
+
+          <div class="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-0.5" />
+
+          <UTooltip :text="desktopIsSnappingEnabled ? 'Snapping Aktif: Klik untuk nonaktifkan' : 'Snapping Nonaktif: Klik untuk aktifkan'">
+            <UButton
+              icon="i-lucide-magnet"
+              size="xs"
+              :color="desktopIsSnappingEnabled ? 'primary' : 'neutral'"
+              :variant="desktopIsSnappingEnabled ? 'subtle' : 'ghost'"
+              :aria-pressed="desktopIsSnappingEnabled"
+              aria-label="Toggle snapping jalan"
+              class="cursor-pointer font-mono tabular-nums"
+              @click="handleToggleSnap"
+            >
+              <span class="font-sans">{{ desktopIsSnappingEnabled ? 'Snap Aktif' : 'Snap Off' }}</span>
+              <UIcon v-if="desktopIsSnappingEnabled && desktopIsSnapLoading" name="i-lucide-loader-2" class="size-3 animate-spin" />
+              <span v-else-if="desktopIsSnappingEnabled && desktopSnapRoadCount > 0" class="text-[10px] opacity-80">({{ desktopSnapRoadCount }})</span>
+            </UButton>
+          </UTooltip>
+
+          <div class="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-0.5" />
+
+          <UButton
+            icon="i-lucide-x"
+            label="Batal"
+            size="xs"
+            color="neutral"
+            variant="outline"
+            class="cursor-pointer bg-white dark:bg-[#0b0f19]"
+            @click="handleCancelDrawing"
+          />
+
+          <UButton
+            icon="i-lucide-check"
+            label="Simpan"
+            size="xs"
+            color="primary"
+            variant="solid"
+            class="cursor-pointer"
+            :disabled="!desktopCanSave"
+            @click="handleConfirmDraw"
+          />
+        </div>
+      </template>
+
+      <!-- Normal Mode Header -->
+      <template v-else>
+        <!-- Left: Title Column aligned with Left Panel Boundary + Filter Wilayah -->
+        <div class="flex items-center min-w-0 flex-1 h-full">
+          <div
+            class="flex items-center justify-between gap-2 min-w-0 shrink-0 h-full"
+            :class="isDesktop && !isLeftPanelCollapsed ? 'px-3' : 'pr-2'"
+            :style="isDesktop && !isLeftPanelCollapsed ? { width: `${leftPanelActualWidth}px` } : undefined"
+          >
+            <div class="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <UIcon name="i-lucide-network" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
+              <h1 class="text-xs font-semibold text-gray-800 dark:text-gray-200 capitalize tracking-wide truncate">
+                Segmen Fisik Infrastruktur
+              </h1>
+            </div>
+
+            <div v-if="isDesaRestricted || isKecamatanRestricted" class="hidden md:flex items-center gap-1.5 shrink-0">
+              <UBadge
+                v-if="isDesaRestricted"
+                label="Tingkat Desa"
+                color="warning"
+                variant="subtle"
+                size="xs"
+                icon="i-lucide-map-pin"
+              />
+              <UBadge
+                v-else-if="isKecamatanRestricted"
+                label="Tingkat Kecamatan"
+                color="info"
+                variant="subtle"
+                size="xs"
+                icon="i-lucide-map-pin"
+              />
+            </div>
+          </div>
+
+          <div
+            v-if="isDesktop && !isLeftPanelCollapsed"
+            class="w-1 h-full flex justify-center shrink-0"
+            aria-hidden="true"
+          >
+            <div class="w-px h-full bg-gray-200 dark:bg-gray-800" />
+          </div>
+          <USeparator v-else orientation="vertical" class="h-4 hidden md:block shrink-0" />
+
+          <!-- Filter Wilayah (Kecamatan & Desa) Terintegrasi Role Permission -->
+          <div
+            class="hidden md:flex items-center min-w-0"
+            :class="isDesktop && !isLeftPanelCollapsed ? 'pl-3' : 'pl-2.5'"
+          >
+            <WilayahSelector
+              :model-kecamatan="filterKecamatan"
+              :model-desa="filterDesa"
+              layout="inline"
+              :allow-all="true"
+              :show-clear="false"
+              :show-labels="false"
+              size="xs"
+              @update:model-kecamatan="handleKecamatanFilterChange"
+              @update:model-desa="handleDesaFilterChange"
+            />
+          </div>
+        </div>
+
+        <!-- Right: Action Buttons -->
+        <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <UButton
+            icon="i-lucide-filter"
+            :label="totalActiveFilterBadge > 0 ? `Filter (${totalActiveFilterBadge})` : 'Filter'"
+            size="xs"
+            :color="totalActiveFilterBadge > 0 ? 'primary' : 'neutral'"
+            :variant="totalActiveFilterBadge > 0 ? 'subtle' : 'ghost'"
+            class="hidden lg:inline-flex cursor-pointer"
+            @click="isFilterDialogOpen = true"
+          />
+
+          <UTooltip v-if="hasAnyActiveFilter" text="Hapus semua filter aktif">
+            <UButton
+              icon="i-lucide-filter-x"
+              label="Clear"
+              size="xs"
+              color="error"
+              variant="subtle"
+              aria-label="Hapus semua filter aktif"
+              class="relative cursor-pointer after:content-[''] after:absolute after:-inset-y-1.5 after:-inset-x-0.5 sm:after:hidden"
+              @click="resetActiveLayerFilters"
+            />
+          </UTooltip>
+
+          <UTooltip text="Sinkronkan Data & Peta">
+            <UButton
+              icon="i-lucide-refresh-cw"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              aria-label="Sinkronkan data dan peta"
+              :loading="loadingMap || loadingTable"
+              class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white cursor-pointer"
+              @click="handleRefreshAll"
+            />
+          </UTooltip>
+
+          <UTooltip :text="allPanelsHidden ? 'Tampilkan semua panel' : 'Mode peta penuh'">
+            <UButton
+              icon="i-lucide-layout-dashboard"
+              size="xs"
+              color="neutral"
+              :variant="allPanelsHidden ? 'subtle' : 'ghost'"
+              :aria-label="allPanelsHidden ? 'Tampilkan semua panel' : 'Aktifkan mode peta penuh'"
+              :class="allPanelsHidden
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'"
+              class="hidden lg:inline-flex cursor-pointer"
+              @click="toggleAllPanels"
+            />
+          </UTooltip>
+
+          <UButton
+            v-if="canCreate"
+            icon="i-lucide-pen-tool"
+            label="Mulai Digitasi"
+            size="xs"
+            color="warning"
+            :variant="isDigitasiSetupOpen ? 'subtle' : 'solid'"
+            class="hidden sm:inline-flex cursor-pointer"
+            :disabled="isDrawingMode"
+            @click="handleStartDrawing"
+          />
+          <UButton
+            v-if="canCreate"
+            icon="i-lucide-pen-tool"
+            size="xs"
+            color="warning"
+            :variant="isDigitasiSetupOpen ? 'subtle' : 'solid'"
+            aria-label="Mulai digitasi segmen baru"
+            class="sm:hidden cursor-pointer"
+            :disabled="isDrawingMode"
+            @click="handleStartDrawing"
+          />
+        </div>
+      </template>
     </header>
 
     <!-- ═══ MAIN WORKSPACE (USplitter with 60 FPS Drag Optimization) ══════════ -->
     <div class="flex flex-1 overflow-hidden relative w-full h-full">
-      <!-- Desktop View: Nested Two-Tier USplitter -->
-      <div class="hidden lg:flex flex-1 w-full h-full overflow-hidden">
+      <!-- Desktop View: Nested Two-Tier USplitter (hanya dimount saat viewport desktop) -->
+      <div v-if="isDesktop" class="flex flex-1 w-full h-full overflow-hidden">
         <USplitter
           ref="verticalSplitterRef"
           :items="verticalSplitterItems"
@@ -1690,6 +2559,9 @@ onMounted(async () => {
               orientation="horizontal"
               class="w-full h-full"
               @dragging="onHorizontalDragging"
+              @collapse="onHorizontalCollapse"
+              @expand="onHorizontalExpand"
+              @resize="onHorizontalResize"
               :ui="{
                 root: 'h-full w-full',
                 panel: isDraggingHorizontal ? '' : 'panel-smooth-transition',
@@ -1698,7 +2570,8 @@ onMounted(async () => {
             >
               <!-- Panel Kiri: Layer & Simbologi -->
               <template #left="{ collapsed, collapse, expand, resize }">
-                <LeftPanel
+                <div ref="leftPaneContainerRef" class="h-full w-full flex flex-col min-h-0 overflow-hidden">
+                  <LeftPanel
                   :collapsed="collapsed"
                   :collapsible="true"
                   :layers="gisLayers"
@@ -1709,18 +2582,22 @@ onMounted(async () => {
                   :tipe-list="tipeList"
                   v-model:selected-tipe="filterTipe"
                   v-model:selected-tahun-pembangunan="filterTahunPembangunan"
+                  v-model:selected-perkerasan="filterPerkerasan"
                   v-model:selected-kondisi="filterKondisi"
                   v-model:selected-status-verifikasi="filterStatusVerifikasi"
                   v-model:selected-status-jalan="filterStatusJalan"
                   v-model:selected-status-kondisi="filterStatusKondisi"
                   v-model:selected-status-aset="filterStatusAset"
                   v-model:selected-sumber-dana="filterSumberDana"
+                  :jalan-poros-desa-kondisi-filter="filterJalanKondisi"
+                  :jalan-poros-desa-perkerasan-filter="filterJalanPerkerasan"
                   v-model:model-kecamatan="filterKecamatan"
                   v-model:model-desa="filterDesa"
                   :kecamatan-name="currentKecamatanName"
                   :desa-name="currentDesaName"
                   :is-kecamatan-locked="isKecamatanRestricted"
                   :is-desa-locked="isDesaRestricted"
+                  :show-inline-wilayah-selector="false"
                   :user-role-label="userRoleLabel"
                   :kondisi-stats="kondisiStats"
                   :total-segmen="totalSegmen"
@@ -1746,7 +2623,9 @@ onMounted(async () => {
                   @apply-filter="fitAllBounds"
                   @open-filter="handleOpenFilterForLayer"
                   @open-symbology="handleOpenSymbologyForLayer"
-                />
+                  @toggle-legend-filter="handleToggleLegendFilter"
+                  />
+                </div>
               </template>
 
               <!-- Map Canvas -->
@@ -1781,9 +2660,15 @@ onMounted(async () => {
                     :jalan-poros-desa-perkerasan-filter="filterJalanPerkerasan"
                     :bbox="datasetBbox"
                     :clicked-coordinate="clickedCoordinate"
+                    :clicked-coord-text="clickedCoordText"
+                    :floating-mode-toolbar="false"
+                    :interaction-mode="mapInteractionMode"
+                    :selected-reference-road-id="selectedSetupRoadId"
                     v-model:basemap="currentBasemap"
                     v-model:mouse-coords="mouseCoords"
                     @select="handleFeatureSelect"
+                    @pick-reference-road="handleMapPickReferenceRoad"
+                    @toggle-identify="toggleIdentifyMode"
                     @log="(level, msg) => addLog(level, msg)"
                     @draw-saved="handleDrawSaved"
                     @draw-canceled="onDrawCanceled"
@@ -1792,24 +2677,67 @@ onMounted(async () => {
                     @edit-geometry-canceled="handleEditGeometryCanceled"
                     @split-point-selected="handleSplitPointSelected"
                   />
+
+                  <div
+                    v-if="isRightPanelCollapsed && (isDigitasiSetupOpen || selectedSegmen)"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 z-20"
+                  >
+                    <UTooltip :text="isDigitasiSetupOpen ? 'Buka Panel Digitasi Setup' : 'Buka Detail Segmen'">
+                      <UButton
+                        :icon="isDigitasiSetupOpen ? 'i-lucide-pen-tool' : 'i-lucide-panel-right-open'"
+                        :label="isDigitasiSetupOpen ? 'Digitasi Setup' : 'Detail'"
+                        size="xs"
+                        :color="isDigitasiSetupOpen ? 'warning' : 'neutral'"
+                        variant="solid"
+                        class="shadow-lg cursor-pointer"
+                        @click="expandRightPanel"
+                      />
+                    </UTooltip>
+                  </div>
                 </div>
               </template>
 
-              <!-- Panel Kanan: Properties / Feature Inspector -->
+              <!-- Panel Kanan: Pengaturan Digitasi atau Properties / Feature Inspector -->
               <template #right="{ collapsed, collapse, expand, resize }">
-                <span :class="syncRightPanelActions(collapsed, collapse, expand, resize)" class="hidden" />
+                <DigitasiSetupPanel
+                  v-if="isDigitasiSetupOpen"
+                  :collapsed="collapsed"
+                  :collapsible="true"
+                  :digitasi-method="digitasiMethod"
+                  :ref-mode="digitasiRefMode"
+                  :road-items="setupRoadItems"
+                  :selected-road-id="selectedSetupRoadId"
+                  :selected-road-detail="selectedSetupRoadDetail"
+                  :road-loading="setupRoadLoading"
+                  :zoom-loading="setupZoomLoading"
+                  :road-error="setupRoadError"
+                  :can-confirm="canConfirmDigitasiSetup"
+                  @update:collapsed="(c) => c ? collapse() : (resize ? resize(RIGHT_PANEL_WIDTH) : expand())"
+                  @update:digitasi-method="(val) => digitasiMethod = val"
+                  @switch-ref-mode="handleSwitchSetupRefMode"
+                  @road-change="handleSetupRoadChange"
+                  @reload-roads="loadSetupRoadOptions"
+                  @refocus-road="() => selectedSetupRoadDetail?.feature && focusMapToReferenceRoad(selectedSetupRoadDetail.feature, true)"
+                  @confirm="handleConfirmDigitasiSetup"
+                  @cancel="() => handleCloseDigitasiSetup(true)"
+                />
                 <RightPanel
+                  v-else-if="selectedSegmen"
+                  ref="rightPanelRef"
                   :collapsed="collapsed"
                   :collapsible="true"
                   :selected-segmen="selectedSegmen"
                   :clicked-coordinate="clickedCoordinate"
                   :loading="isDetailLoading"
+                  :saving="isSavingSegmen"
                   :tipe-list="tipeList"
                   :plotting-list="plottingList"
                   :can-edit="canEditSegmen(selectedSegmen)"
                   :can-delete="canDeleteSegmen(selectedSegmen)"
-                  :can-submit="canSubmit"
-                  @update:collapsed="(c) => c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand())"
+                  :can-submit="canSubmitSegmen(selectedSegmen)"
+                  :can-split="canEditSegmen(selectedSegmen) && canCreate"
+                  @update:collapsed="(c) => c ? collapse() : (resize ? resize(RIGHT_PANEL_WIDTH) : expand())"
+                  @close="handleFeatureSelect(null)"
                   @zoom-to-feature="handleZoomToFeature"
                   @delete-segmen="confirmDelete"
                   @submit-verifikasi="handleSubmitVerifikasi"
@@ -1830,19 +2758,25 @@ onMounted(async () => {
               v-model:active-tab="bottomActiveTab"
               :table-rows="tableRows"
               :table-total="tableTotal"
+              :total-panjang-meter="totalPanjangMeter"
               :table-page="tablePage"
               :table-last-page="tableLastPage"
               :table-per-page="tablePerPage"
               v-model:table-search="tableSearch"
               :table-loading="loadingTable"
+              :table-error="tableError"
               :selected-segmen-id="selectedSegmenId"
               :console-logs="consoleLogs"
               :can-edit="canEdit"
               :can-delete="canDelete"
               :can-submit="canSubmit"
+              :can-edit-row="canEditSegmen"
+              :can-delete-row="canDeleteSegmen"
+              :can-submit-row="canSubmitSegmen"
               :tipe-list="tipeList"
               :selected-tipe="filterTipe"
               :selected-tahun-pembangunan="filterTahunPembangunan"
+              :selected-perkerasan="filterPerkerasan"
               :selected-kondisi="filterKondisi"
               :selected-status-verifikasi="filterStatusVerifikasi"
               :selected-status-jalan="filterStatusJalan"
@@ -1860,6 +2794,7 @@ onMounted(async () => {
               @update:table-per-page="(pp) => tablePerPage = pp"
               @update:selected-tipe="(val) => filterTipe = val"
               @update:selected-tahun-pembangunan="(val) => filterTahunPembangunan = val"
+              @update:selected-perkerasan="(val) => filterPerkerasan = val"
               @update:selected-kondisi="(val) => filterKondisi = val"
               @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
               @update:selected-status-jalan="(val) => filterStatusJalan = val"
@@ -1869,8 +2804,9 @@ onMounted(async () => {
               @update:model-kecamatan="(val) => filterKecamatan = val"
               @update:model-desa="(val) => filterDesa = val"
               @reset-filters="resetFilters"
+              @refresh="loadTable"
               @row-click="handleZoomToFeature"
-              @edit-row="handleZoomToFeature"
+              @edit-row="handleEditRowFromTable"
               @delete-row="confirmDelete"
               @submit-row="handleSubmitVerifikasi"
               @clear-logs="consoleLogs = []"
@@ -1879,8 +2815,8 @@ onMounted(async () => {
         </USplitter>
       </div>
 
-      <!-- Mobile View: Full-Bleed Map Canvas -->
-      <div class="lg:hidden flex-1 relative overflow-hidden h-full w-full">
+      <!-- Mobile View: Full-Bleed Map Canvas (hanya dimount saat viewport mobile/tablet) -->
+      <div v-else class="flex-1 relative overflow-hidden h-full w-full">
         <MapCanvas
           ref="mobileMapCanvasRef"
           :api-base="apiBase"
@@ -1910,9 +2846,16 @@ onMounted(async () => {
           :jalan-poros-desa-perkerasan-filter="filterJalanPerkerasan"
           :bbox="datasetBbox"
           :clicked-coordinate="clickedCoordinate"
+          :clicked-coord-text="clickedCoordText"
+          :floating-mode-toolbar="true"
+          :reference-label="activeReferenceLabel"
+          :interaction-mode="mapInteractionMode"
+          :selected-reference-road-id="selectedSetupRoadId"
           v-model:basemap="currentBasemap"
           v-model:mouse-coords="mouseCoords"
           @select="handleFeatureSelect"
+          @pick-reference-road="handleMapPickReferenceRoad"
+          @toggle-identify="toggleIdentifyMode"
           @log="(level, msg) => addLog(level, msg)"
           @draw-saved="handleDrawSaved"
           @draw-canceled="onDrawCanceled"
@@ -1926,16 +2869,16 @@ onMounted(async () => {
 
     <!-- ═══ MOBILE FEATURE PEEK CARD ═════════════════════════════════════════ -->
     <div
-      v-if="selectedSegmen"
-      class="lg:hidden fixed bottom-16 left-3 right-3 z-30 pointer-events-auto transition-transform duration-200"
+      v-if="selectedSegmen && !isDigitasiSetupOpen && !isDrawingMode"
+      class="lg:hidden fixed bottom-[calc(3.875rem+env(safe-area-inset-bottom))] left-2.5 right-2.5 z-30 pointer-events-auto transition-transform duration-200"
     >
-      <div class="p-3 rounded-xl bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-xl space-y-2">
+      <div class="p-2.5 rounded-xl bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-xl space-y-1.5">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0 flex-1">
             <p class="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
               {{ selectedSegmen.namobj || 'Segmen Tanpa Nama' }}
             </p>
-            <p class="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">
+            <p class="text-[11px] text-gray-500 dark:text-gray-400 truncate">
               {{ formatWilayah(selectedSegmen.desa) }}, Kec. {{ formatWilayah(selectedSegmen.kecamatan) }}
             </p>
           </div>
@@ -1944,34 +2887,35 @@ onMounted(async () => {
             size="xs"
             color="neutral"
             variant="ghost"
-            class="p-1 cursor-pointer"
+            aria-label="Tutup pratinjau segmen"
+            class="relative p-0 cursor-pointer size-7 justify-center shrink-0 after:content-[''] after:absolute after:-inset-2"
             @click="handleFeatureSelect(null)"
           />
         </div>
 
-        <div class="flex items-center justify-between pt-1 border-t border-gray-100 dark:border-gray-800/80 text-xs">
-          <div class="flex items-center gap-1.5">
+        <div class="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800/80 text-xs gap-2">
+          <div class="flex items-center gap-1.5 min-w-0">
             <UBadge
               :label="selectedSegmen.kondisi || '-'"
               color="primary"
               variant="subtle"
               size="xs"
             />
-            <span class="text-[11px] font-mono text-gray-600 dark:text-gray-400">
-              {{ Number(selectedSegmen.panjang_meter_gis ?? selectedSegmen.panjang ?? 0).toLocaleString('id-ID') }} m
+            <span class="text-[11px] tabular-nums text-gray-600 dark:text-gray-400 truncate">
+              {{ Number(selectedSegmen.panjang_meter_gis ?? selectedSegmen.panjang ?? 0).toLocaleString('id-ID', { maximumFractionDigits: 4 }) }} m
             </span>
           </div>
 
-          <div class="flex items-center gap-1">
+          <div class="flex items-center gap-1.5 shrink-0">
             <UButton
-              v-if="canEdit"
+              v-if="canEditSegmen(selectedSegmen)"
               icon="i-lucide-pencil"
               size="xs"
               color="neutral"
               variant="subtle"
               label="Edit"
-              class="cursor-pointer"
-              @click="openMobileTab('inspector')"
+              class="relative cursor-pointer min-h-[34px] px-2.5 after:content-[''] after:absolute after:-inset-y-1"
+              @click="() => { openMobileTab('inspector'); nextTick(() => mobileRightPanelRef?.setActiveTab('edit')); }"
             />
             <UButton
               icon="i-lucide-info"
@@ -1979,7 +2923,7 @@ onMounted(async () => {
               color="primary"
               variant="solid"
               label="Detail"
-              class="cursor-pointer"
+              class="relative cursor-pointer min-h-[34px] px-2.5 after:content-[''] after:absolute after:-inset-y-1"
               @click="openMobileTab('inspector')"
             />
           </div>
@@ -2023,7 +2967,7 @@ onMounted(async () => {
           <UIcon name="i-lucide-table" class="size-5" />
           <span
             v-if="tableTotal > 0"
-            class="absolute -top-1 -right-2.5 px-1 text-[8px] font-mono rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold"
+            class="absolute -top-1 -right-2.5 px-1 text-[8px] tabular-nums rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold"
           >
             {{ tableTotal > 99 ? '99+' : tableTotal }}
           </span>
@@ -2080,7 +3024,7 @@ onMounted(async () => {
           <UIcon name="i-lucide-filter" class="size-5" />
           <span
             v-if="activeFilterCount > 0"
-            class="absolute -top-1 -right-2 px-1 text-[8px] font-mono rounded-full bg-blue-600 text-white font-bold"
+            class="absolute -top-1 -right-2 px-1 text-[8px] tabular-nums rounded-full bg-blue-600 text-white font-bold"
           >
             {{ activeFilterCount }}
           </span>
@@ -2102,7 +3046,9 @@ onMounted(async () => {
               ? 'Tabel Atribut Segmen'
               : mobileDrawerTab === 'inspector'
                 ? 'Detail Segmen Fisik'
-                : 'Filter Data Segmen'
+                : mobileDrawerTab === 'digitasi-setup'
+                  ? 'Mulai Digitasi Segmen'
+                  : 'Filter Data Segmen'
       "
       :icon="
         mobileDrawerTab === 'layer'
@@ -2113,92 +3059,40 @@ onMounted(async () => {
               ? 'i-lucide-table'
               : mobileDrawerTab === 'inspector'
                 ? 'i-lucide-info'
-                : 'i-lucide-filter'
+                : mobileDrawerTab === 'digitasi-setup'
+                  ? 'i-lucide-pen-tool'
+                  : 'i-lucide-filter'
       "
     >
-      <!-- Quick Tab Switcher inside sheet (5 Tabs: Layer, Gaya, Filter, Tabel, Detail) -->
+      <!-- Contextual Sub-Tab Header hanya untuk sub-mode berpasangan (Layer & Gaya) -->
       <template #tabs>
-        <div class="px-2 pt-1 pb-2 border-b border-gray-100 dark:border-gray-800/80 bg-gray-50/50 dark:bg-gray-900/30">
-          <div class="grid grid-cols-5 gap-1 p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl">
-            <!-- Tab 1: Layer -->
+        <div
+          v-if="mobileDrawerTab === 'layer' || mobileDrawerTab === 'symbology'"
+          class="px-3 pt-1 pb-2 border-b border-gray-100 dark:border-gray-800/80 bg-gray-50/50 dark:bg-gray-900/30"
+        >
+          <div class="grid grid-cols-2 gap-1 p-1 bg-gray-100 dark:bg-gray-800/70 rounded-xl">
             <button
               type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-0.5 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[44px]"
+              class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[44px]"
               :class="mobileDrawerTab === 'layer'
                 ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
               @click="switchMobileTab('layer')"
             >
               <UIcon name="i-lucide-layers" class="size-3.5 shrink-0" />
-              <span class="text-[11px] truncate">Layer</span>
+              <span>Daftar Layer</span>
             </button>
 
-            <!-- Tab 2: Gaya (Simbologi) -->
             <button
               type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-0.5 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[44px]"
+              class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[44px]"
               :class="mobileDrawerTab === 'symbology'
                 ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
               @click="switchMobileTab('symbology')"
             >
               <UIcon name="i-lucide-palette" class="size-3.5 shrink-0" />
-              <span class="text-[11px] truncate">Gaya</span>
-            </button>
-
-            <!-- Tab 3: Filter -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-0.5 rounded-lg text-xs font-medium transition-all relative cursor-pointer min-h-[44px]"
-              :class="mobileDrawerTab === 'filter'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="switchMobileTab('filter')"
-            >
-              <UIcon name="i-lucide-filter" class="size-3.5 shrink-0" />
-              <span class="text-[11px] truncate">Filter</span>
-              <span
-                v-if="activeFilterCount > 0"
-                class="px-1 py-0.2 rounded-full text-[9px] font-mono leading-tight bg-blue-600 text-white"
-              >
-                {{ activeFilterCount }}
-              </span>
-            </button>
-
-            <!-- Tab 4: Tabel -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-0.5 rounded-lg text-xs font-medium transition-all cursor-pointer min-h-[44px]"
-              :class="mobileDrawerTab === 'table'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="switchMobileTab('table')"
-            >
-              <UIcon name="i-lucide-table" class="size-3.5 shrink-0" />
-              <span class="text-[11px] truncate">Tabel</span>
-              <span
-                v-if="tableTotal > 0"
-                class="px-1 py-0.2 rounded-full text-[9px] font-mono leading-tight bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300 hidden sm:inline-block"
-              >
-                {{ tableTotal > 999 ? (tableTotal / 1000).toFixed(1) + 'k' : tableTotal }}
-              </span>
-            </button>
-
-            <!-- Tab 5: Detail Properties -->
-            <button
-              type="button"
-              class="flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-0.5 rounded-lg text-xs font-medium transition-all relative cursor-pointer min-h-[44px]"
-              :class="mobileDrawerTab === 'inspector'
-                ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
-              @click="switchMobileTab('inspector')"
-            >
-              <UIcon name="i-lucide-info" class="size-3.5 shrink-0" />
-              <span class="text-[11px] truncate">Detail</span>
-              <span
-                v-if="selectedSegmen"
-                class="size-1.5 rounded-full bg-blue-500 shrink-0"
-              />
+              <span>Gaya & Warna</span>
             </button>
           </div>
         </div>
@@ -2219,18 +3113,22 @@ onMounted(async () => {
           :tipe-list="tipeList"
           :selected-tipe="filterTipe"
           :selected-tahun-pembangunan="filterTahunPembangunan"
+          :selected-perkerasan="filterPerkerasan"
           :selected-kondisi="filterKondisi"
           :selected-status-verifikasi="filterStatusVerifikasi"
           :selected-status-jalan="filterStatusJalan"
           :selected-status-kondisi="filterStatusKondisi"
           :selected-status-aset="filterStatusAset"
           :selected-sumber-dana="filterSumberDana"
+          :jalan-poros-desa-kondisi-filter="filterJalanKondisi"
+          :jalan-poros-desa-perkerasan-filter="filterJalanPerkerasan"
           v-model:model-kecamatan="filterKecamatan"
           v-model:model-desa="filterDesa"
           :kecamatan-name="currentKecamatanName"
           :desa-name="currentDesaName"
           :is-kecamatan-locked="isKecamatanRestricted"
           :is-desa-locked="isDesaRestricted"
+          :show-inline-wilayah-selector="true"
           :user-role-label="userRoleLabel"
           :kondisi-stats="kondisiStats"
           :total-segmen="totalSegmen"
@@ -2245,6 +3143,7 @@ onMounted(async () => {
           @update:layer-opacity="handleUpdateLayerOpacity"
           @open-filter="handleMobileOpenFilter"
           @open-symbology="handleMobileOpenSymbology"
+          @toggle-legend-filter="handleToggleLegendFilter"
           @start-drawing="() => { mobileDrawerOpen = false; handleStartDrawing(); }"
           @start-draw="() => { mobileDrawerOpen = false; handleStartDrawing(); }"
           @redraw="handleRedraw"
@@ -2268,7 +3167,7 @@ onMounted(async () => {
             <button
               type="button"
               :class="[
-                'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[38px]',
+                'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]',
                 activeLayerId === 'infrastruktur-segmen'
                   ? 'bg-white dark:bg-[#0e1424] text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
                   : 'text-gray-600 dark:text-gray-400'
@@ -2281,7 +3180,7 @@ onMounted(async () => {
             <button
               type="button"
               :class="[
-                'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[38px]',
+                'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]',
                 activeLayerId === 'jalan-poros-desa'
                   ? 'bg-white dark:bg-[#0e1424] text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
                   : 'text-gray-600 dark:text-gray-400'
@@ -2321,18 +3220,24 @@ onMounted(async () => {
           style="-webkit-overflow-scrolling: touch; touch-action: pan-y;"
         >
           <!-- Mobile Layer Switcher for Filter -->
-          <div class="mb-3 p-1 bg-gray-100 dark:bg-gray-800/80 rounded-xl flex items-center gap-1 border border-gray-200/60 dark:border-gray-800">
+          <div
+            role="tablist"
+            aria-label="Pilih layer filter peta"
+            class="mb-3 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl flex items-center gap-1 border border-slate-200/70 dark:border-slate-800"
+          >
             <button
               type="button"
+              role="tab"
+              :aria-selected="activeLayerId === 'infrastruktur-segmen'"
               :class="[
-                'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[38px]',
+                'flex-1 py-2 px-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]',
                 activeLayerId === 'infrastruktur-segmen'
-                  ? 'bg-white dark:bg-[#0e1424] text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-                  : 'text-gray-600 dark:text-gray-400'
+                  ? 'bg-white dark:bg-[#0e1526] text-blue-600 dark:text-blue-400 font-semibold shadow-xs ring-1 ring-slate-200/80 dark:ring-slate-700/80'
+                  : 'text-slate-600 dark:text-slate-400'
               ]"
               @click="activeLayerId = 'infrastruktur-segmen'"
             >
-              <UIcon name="i-lucide-route" class="size-3.5 shrink-0" />
+              <UIcon name="i-lucide-route" class="size-3.5 shrink-0" aria-hidden="true" />
               <span>Segmen Fisik</span>
               <UBadge
                 v-if="activeSegmenFilterCount > 0"
@@ -2340,20 +3245,22 @@ onMounted(async () => {
                 size="xs"
                 color="primary"
                 variant="subtle"
-                class="text-[9px] px-1 py-0 h-4 font-mono ml-0.5"
+                class="text-[10px] px-1.5 py-0 h-4 tabular-nums"
               />
             </button>
             <button
               type="button"
+              role="tab"
+              :aria-selected="activeLayerId === 'jalan-poros-desa'"
               :class="[
-                'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[38px]',
+                'flex-1 py-2 px-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]',
                 activeLayerId === 'jalan-poros-desa'
-                  ? 'bg-white dark:bg-[#0e1424] text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-                  : 'text-gray-600 dark:text-gray-400'
+                  ? 'bg-white dark:bg-[#0e1526] text-blue-600 dark:text-blue-400 font-semibold shadow-xs ring-1 ring-slate-200/80 dark:ring-slate-700/80'
+                  : 'text-slate-600 dark:text-slate-400'
               ]"
               @click="activeLayerId = 'jalan-poros-desa'"
             >
-              <UIcon name="i-lucide-milestone" class="size-3.5 shrink-0" />
+              <UIcon name="i-lucide-milestone" class="size-3.5 shrink-0" aria-hidden="true" />
               <span>Jalan Poros Desa</span>
               <UBadge
                 v-if="activeJalanFilterCount > 0"
@@ -2361,7 +3268,7 @@ onMounted(async () => {
                 size="xs"
                 color="info"
                 variant="subtle"
-                class="text-[9px] px-1 py-0 h-4 font-mono ml-0.5"
+                class="text-[9px] px-1 py-0 h-4 tabular-nums ml-0.5"
               />
             </button>
           </div>
@@ -2384,6 +3291,8 @@ onMounted(async () => {
             :selected-sumber-dana="filterSumberDana"
             :model-kecamatan="filterKecamatan"
             :model-desa="filterDesa"
+            :is-kecamatan-locked="isKecamatanRestricted"
+            :is-desa-locked="isDesaRestricted"
             @update:selected-tipe="(val) => filterTipe = val"
             @update:selected-tahun-pembangunan="(val) => filterTahunPembangunan = val"
             @update:selected-perkerasan="(val) => filterPerkerasan = val"
@@ -2409,6 +3318,8 @@ onMounted(async () => {
             :selected-kondisi="filterJalanKondisi"
             :model-kecamatan="filterJalanKecamatan"
             :model-desa="filterJalanDesa"
+            :is-kecamatan-locked="isKecamatanRestricted"
+            :is-desa-locked="isDesaRestricted"
             @update:selected-perkerasan="(val) => filterJalanPerkerasan = val"
             @update:selected-kondisi="(val) => filterJalanKondisi = val"
             @update:model-kecamatan="(val) => filterJalanKecamatan = val"
@@ -2425,19 +3336,25 @@ onMounted(async () => {
           v-model:active-tab="bottomActiveTab"
           :table-rows="tableRows"
           :table-total="tableTotal"
+          :total-panjang-meter="totalPanjangMeter"
           :table-page="tablePage"
           :table-last-page="tableLastPage"
           :table-per-page="tablePerPage"
           v-model:table-search="tableSearch"
           :table-loading="loadingTable"
+          :table-error="tableError"
           :selected-segmen-id="selectedSegmenId"
           :console-logs="consoleLogs"
           :can-edit="canEdit"
           :can-delete="canDelete"
           :can-submit="canSubmit"
+          :can-edit-row="canEditSegmen"
+          :can-delete-row="canDeleteSegmen"
+          :can-submit-row="canSubmitSegmen"
           :tipe-list="tipeList"
           :selected-tipe="filterTipe"
           :selected-tahun-pembangunan="filterTahunPembangunan"
+          :selected-perkerasan="filterPerkerasan"
           :selected-kondisi="filterKondisi"
           :selected-status-verifikasi="filterStatusVerifikasi"
           :selected-status-jalan="filterStatusJalan"
@@ -2454,6 +3371,7 @@ onMounted(async () => {
           @update:table-per-page="(pp) => tablePerPage = pp"
           @update:selected-tipe="(val) => filterTipe = val"
           @update:selected-tahun-pembangunan="(val) => filterTahunPembangunan = val"
+          @update:selected-perkerasan="(val) => filterPerkerasan = val"
           @update:selected-kondisi="(val) => filterKondisi = val"
           @update:selected-status-verifikasi="(val) => filterStatusVerifikasi = val"
           @update:selected-status-jalan="(val) => filterStatusJalan = val"
@@ -2463,8 +3381,9 @@ onMounted(async () => {
           @update:model-kecamatan="(val) => filterKecamatan = val"
           @update:model-desa="(val) => filterDesa = val"
           @reset-filters="resetFilters"
+          @refresh="loadTable"
           @row-click="(row) => { handleZoomToFeature(row); mobileDrawerOpen = false; }"
-          @edit-row="(row) => { switchMobileTab('inspector'); handleZoomToFeature(row); }"
+          @edit-row="(row) => handleMobileEditRowFromTable(row)"
           @delete-row="(row) => { confirmDelete(row); mobileDrawerOpen = false; }"
           @submit-row="(row) => handleSubmitVerifikasi(row)"
           @clear-logs="consoleLogs = []"
@@ -2473,20 +3392,46 @@ onMounted(async () => {
         <!-- Tab 5: Properties Tab -->
         <RightPanel
           v-else-if="mobileDrawerTab === 'inspector'"
+          ref="mobileRightPanelRef"
           :is-mobile-drawer="true"
           :selected-segmen="selectedSegmen"
           :clicked-coordinate="clickedCoordinate"
           :loading="isDetailLoading"
+          :saving="isSavingSegmen"
           :tipe-list="tipeList"
           :plotting-list="plottingList"
           :can-edit="canEditSegmen(selectedSegmen)"
           :can-delete="canDeleteSegmen(selectedSegmen)"
-          :can-submit="canSubmit"
+          :can-submit="canSubmitSegmen(selectedSegmen)"
+          :can-split="canEditSegmen(selectedSegmen) && canCreate"
           @zoom-to-feature="(feat) => { handleZoomToFeature(feat); mobileDrawerOpen = false; }"
           @delete-segmen="(feat) => { confirmDelete(feat); mobileDrawerOpen = false; }"
           @submit-verifikasi="handleSubmitVerifikasi"
           @save-segmen="handleSaveSegmen"
           @view-in-table="(seg) => { if (seg) tableSearch = seg.namobj || ''; switchMobileTab('table'); }"
+          @edit-geometry="(feat) => { mobileDrawerOpen = false; handleStartEditGeometry(feat); }"
+          @split-segmen="(feat) => { mobileDrawerOpen = false; handleStartSplitSegmen(feat); }"
+        />
+        <!-- Tab 6: Setup Digitasi Mobile -->
+        <DigitasiSetupPanel
+          v-else-if="mobileDrawerTab === 'digitasi-setup'"
+          :is-mobile-drawer="true"
+          :digitasi-method="digitasiMethod"
+          :ref-mode="digitasiRefMode"
+          :road-items="setupRoadItems"
+          :selected-road-id="selectedSetupRoadId"
+          :selected-road-detail="selectedSetupRoadDetail"
+          :road-loading="setupRoadLoading"
+          :zoom-loading="setupZoomLoading"
+          :road-error="setupRoadError"
+          :can-confirm="canConfirmDigitasiSetup"
+          @update:digitasi-method="(val) => digitasiMethod = val"
+          @switch-ref-mode="handleSwitchSetupRefMode"
+          @road-change="handleSetupRoadChange"
+          @reload-roads="loadSetupRoadOptions"
+          @refocus-road="() => selectedSetupRoadDetail?.feature && focusMapToReferenceRoad(selectedSetupRoadDetail.feature, true)"
+          @confirm="handleConfirmDigitasiSetup"
+          @cancel="() => handleCloseDigitasiSetup(true)"
         />
       </div>
     </MobileBottomSheet>
@@ -2532,8 +3477,10 @@ onMounted(async () => {
     <!-- ═══ MODAL: Simpan Segmen Baru dari Digitasi ═══════════════════════════ -->
     <UModal
       v-model:open="isCreateModalOpen"
+      :overlay="false"
+      :modal="false"
       title="Simpan Segmen Fisik Baru"
-      :ui="{ content: 'max-w-xl bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800' }"
+      :ui="{ content: 'max-w-xl bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl' }"
     >
       <template #body>
         <div class="space-y-3.5 text-xs">
@@ -2544,12 +3491,39 @@ onMounted(async () => {
               <span class="font-medium text-gray-800 dark:text-gray-200">Garis LineString Selesai</span>
             </div>
             <UBadge
-              :label="`Panjang: ${createForm.panjang.toLocaleString('id-ID')} m`"
+              :label="`Panjang: ${(createForm.panjang ?? 0).toLocaleString('id-ID', { maximumFractionDigits: 4 })} m`"
               color="warning"
               variant="subtle"
               size="xs"
-              class="font-mono"
+              class="tabular-nums"
             />
+          </div>
+
+          <!-- Status Referensi Jalan Poros Desa -->
+          <div
+            v-if="createForm.parent_id && activeDigitasiRef"
+            class="p-2.5 rounded-lg bg-sky-50/70 dark:bg-sky-950/25 border border-sky-200 dark:border-sky-800/80 space-y-1"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="inline-flex items-center gap-1.5 font-semibold text-sky-800 dark:text-sky-200">
+                <UIcon name="i-lucide-route" class="size-3.5 shrink-0" />
+                <span>Mengacu Jalan Poros Desa</span>
+              </span>
+              <span class="text-[11px] font-mono tabular-nums text-sky-700 dark:text-sky-300">
+                Ruas {{ Number(activeDigitasiRef.data.panjang ?? 0).toLocaleString('id-ID', { maximumFractionDigits: 2 }) }} m
+              </span>
+            </div>
+            <p class="text-[11px] text-sky-700 dark:text-sky-300">
+              {{ formatRoadOptionLabel(activeDigitasiRef.data) }}
+              <span v-if="isCreateRegionLockedByParent"> (Wilayah disinkronkan otomatis dengan ruas referensi)</span>
+            </p>
+          </div>
+          <div
+            v-else
+            class="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 flex items-center gap-2 text-[11px] text-gray-600 dark:text-gray-400"
+          >
+            <UIcon name="i-lucide-git-commit-horizontal" class="size-3.5 shrink-0" />
+            <span>Tanpa referensi jalan poros desa (Segmen Mandiri). Dapat ditautkan kapan saja melalui menu Edit.</span>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2581,6 +3555,7 @@ onMounted(async () => {
             :model-desa="createForm.id_desa"
             layout="row"
             :required="true"
+            :disabled="isCreateRegionLockedByParent"
             size="sm"
             @update:model-kecamatan="(val) => createForm.id_kecamatan = val"
             @update:model-desa="(val) => createForm.id_desa = val"
@@ -2605,41 +3580,62 @@ onMounted(async () => {
             />
           </UFormField>
 
-          <div class="grid grid-cols-3 gap-2">
-            <UFormField label="Panjang (m)" size="sm">
-              <UInputNumber
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <UFormField
+              label="Panjang (m)"
+              :error="createNumericErrors.panjang || undefined"
+              size="sm"
+            >
+              <NumericTextInput
+                ref="createPanjangRef"
                 v-model="createForm.panjang"
-                :step="1"
+                field-label="Panjang"
+                :allow-decimal="true"
+                :min="0"
+                placeholder="Contoh: 120.5"
                 size="sm"
-                class="w-full"
+                @update:error="createNumericErrors.panjang = $event"
               />
             </UFormField>
 
-            <UFormField label="Lebar (m)" size="sm">
-              <UInputNumber
+            <UFormField
+              label="Lebar (m)"
+              :error="createNumericErrors.lebar || undefined"
+              size="sm"
+            >
+              <NumericTextInput
+                ref="createLebarRef"
                 v-model="createForm.lebar"
-                :step="0.1"
+                field-label="Lebar"
+                :allow-decimal="true"
+                :min="0"
                 placeholder="Contoh: 3.5"
                 size="sm"
-                class="w-full"
+                @update:error="createNumericErrors.lebar = $event"
               />
             </UFormField>
 
             <UFormField label="Kondisi Fisik" size="sm">
               <USelectMenu
                 v-model="createForm.kondisi"
-                :items="['Baik', 'Sedang', 'Rusak Ringan', 'Rusak Berat']"
+                :items="KONDISI_OPTIONS"
+                value-key="value"
+                label-key="label"
+                :search-input="false"
                 size="sm"
                 class="w-full"
               />
             </UFormField>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <UFormField label="Jenis Perkerasan" size="sm">
               <USelectMenu
                 v-model="createForm.jenis_perkerasan"
-                :items="['Beton Cor', 'Aspal', 'Paving', 'Makadam', 'Tanah']"
+                :items="PERKERASAN_OPTIONS"
+                value-key="value"
+                label-key="label"
+                :search-input="false"
                 size="sm"
                 class="w-full"
               />
@@ -2648,28 +3644,56 @@ onMounted(async () => {
             <UFormField label="Status Jalan" size="sm">
               <USelectMenu
                 v-model="createForm.status_jalan"
-                :items="['Jalan Desa', 'Jalan Poros Desa', 'Jalan Kabupaten']"
+                :items="STATUS_JALAN_OPTIONS"
+                value-key="value"
+                label-key="label"
+                :search-input="false"
                 size="sm"
                 class="w-full"
               />
             </UFormField>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <UFormField label="Sumber Dana" size="sm">
-              <UInput
+              <USelectMenu
                 v-model="createForm.sumber_dana"
-                placeholder="Contoh: BKKD / APBD"
+                :items="SUMBER_DANA_OPTIONS"
+                value-key="value"
+                label-key="label"
                 size="sm"
                 class="w-full"
               />
             </UFormField>
 
-            <UFormField label="Tahun Bangun" size="sm">
-              <UInputNumber
-                v-model="createForm.tahun_pembangunan"
+            <UFormField label="Status Aset" size="sm">
+              <USelectMenu
+                v-model="createForm.status_aset"
+                :items="STATUS_ASET_OPTIONS"
+                value-key="value"
+                label-key="label"
+                :search-input="false"
                 size="sm"
                 class="w-full"
+              />
+            </UFormField>
+
+            <UFormField
+              label="Tahun Bangun"
+              :error="createNumericErrors.tahun_pembangunan || undefined"
+              size="sm"
+            >
+              <NumericTextInput
+                ref="createTahunRef"
+                v-model="createForm.tahun_pembangunan"
+                field-label="Tahun bangun"
+                :allow-decimal="false"
+                :min="1900"
+                :max="maxBuildYear"
+                :max-digits="4"
+                placeholder="Contoh: 2024"
+                size="sm"
+                @update:error="createNumericErrors.tahun_pembangunan = $event"
               />
             </UFormField>
           </div>
@@ -2711,8 +3735,10 @@ onMounted(async () => {
     <!-- ═══ MODAL: Konfirmasi Hapus Segmen ═════════════════════════════════════ -->
     <UModal
       v-model:open="isDeleteModalOpen"
+      :overlay="false"
+      :modal="false"
       title="Hapus Segmen Fisik"
-      :ui="{ content: 'max-w-sm bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800' }"
+      :ui="{ content: 'max-w-sm bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl' }"
     >
       <template #body>
         <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">

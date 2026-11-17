@@ -30,9 +30,4 @@ class RefOpd extends Model
     {
         return $this->hasMany(RefBkkdBidang::class, 'id_opd_default', 'id');
     }
-
-    public function verifikasi(): HasMany
-    {
-        return $this->hasMany(BkkdVerifikasi::class, 'id_opd', 'id');
-    }
 }

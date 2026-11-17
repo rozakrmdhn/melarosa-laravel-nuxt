@@ -36,40 +36,51 @@ const props = withDefaults(
     features?: IdentifiedFeature[];
     loading?: boolean;
     error?: string | null;
+    selectedIndex?: number;
+    hasPoint?: boolean;
   }>(),
   {
     features: () => [],
     loading: false,
     error: null,
+    selectedIndex: undefined,
+    hasPoint: false,
   }
 );
 
 const emit = defineEmits<{
   (e: "select-feature", feature: IdentifiedFeature): void;
+  (e: "update:selected-index", index: number): void;
 }>();
 
-const selectedIndex = ref(0);
+const internalSelectedIndex = ref(0);
+const activeIndex = computed({
+  get: () => (props.selectedIndex !== undefined ? props.selectedIndex : internalSelectedIndex.value),
+  set: (val: number) => {
+    internalSelectedIndex.value = val;
+    emit("update:selected-index", val);
+  },
+});
+
 const searchQuery = ref("");
 const copiedKey = ref<string | null>(null);
-let copiedTimer: any = null;
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 const activeKugiMeta = ref<KugiMeta | null>(null);
 const isLoadingKugi = ref(false);
 
-// Reset indeks aktif jika daftar fitur berganti
+// Reset indeks aktif & saringan pencarian jika daftar fitur berganti
 watch(
   () => props.features,
-  (newFeatures) => {
-    if (selectedIndex.value >= newFeatures.length) {
-      selectedIndex.value = 0;
-    }
-  },
-  { deep: true }
+  () => {
+    searchQuery.value = "";
+    activeIndex.value = 0;
+  }
 );
 
 const currentFeature = computed<IdentifiedFeature | null>(() => {
   if (!props.features || props.features.length === 0) return null;
-  return props.features[selectedIndex.value] || props.features[0] || null;
+  return props.features[activeIndex.value] || props.features[0] || null;
 });
 
 // Beritahu komponen induk saat fitur aktif berubah
@@ -171,28 +182,6 @@ watch(
   { immediate: true }
 );
 
-// Judul utama fitur ditentukan secara dinamis tanpa mengunci nama atribut spesifik
-const featureDisplayName = computed(() => {
-  if (!currentFeature.value) return "Fitur Tidak Diketahui";
-  const p = currentFeature.value.properties || {};
-
-  // Cari properti string non-kosong pertama yang kuncinya mengandung 'nam' atau 'title'
-  const nameEntry = Object.entries(p).find(
-    ([k, v]) => typeof v === "string" && v.trim() && (k.toLowerCase().includes("nam") || k.toLowerCase().includes("title"))
-  );
-  if (nameEntry) return String(nameEntry[1]);
-
-  if (currentFeature.value.id) return currentFeature.value.id;
-
-  // Fallback ke alias KUGI jika ada
-  if (activeKugiMeta.value?.aliases) {
-    return activeKugiMeta.value.aliases;
-  }
-
-  // Fallback ke nilai non-kosong pertama
-  const firstValid = Object.values(p).find((v) => v !== null && v !== undefined && v !== "");
-  return firstValid ? String(firstValid) : "Objek Spasial";
-});
 
 // Resolusi label atribut: prioritas ke kamus KUGI resmi BIG, lalu kamus lokal, lalu snake_case
 function resolveAttributeLabel(key: string): { label: string; isKugi: boolean } {
@@ -216,7 +205,7 @@ function resolveAttributeLabel(key: string): { label: string; isKugi: boolean } 
     WADMPR: "Provinsi",
     LUASWH: "Luas Wilayah",
     TIPADM: "Tipe Administrasi",
-    SRS_ID: "Sistem Referensi Spasial",
+    SRS_ID: "Referensi Peta",
     METADATA: "Sumber Data",
     UUPP: "Dasar Hukum / Delineasi",
     NAMA_RUAS: "Nama Ruas Jalan",
@@ -250,32 +239,43 @@ function resolveAttributeLabel(key: string): { label: string; isKugi: boolean } 
   };
 }
 
-// Daftar properti terformat dan difilter secara dinamis berdasarkan data
-const formattedProperties = computed(() => {
+// Daftar seluruh properti terformat (sebelum saringan pencarian)
+const excludedKeys = new Set([
+  "bbox",
+  "geometry",
+  "the_geom",
+  "geom",
+  "fid",
+  "ogc_fid",
+  "objectid",
+  "fcode",
+  "lcode",
+  "srs_id",
+  "shape_leng",
+  "shape_area",
+  "tipadm",
+  "uupp",
+  "id_segmen",
+  "id_ruas",
+  "id_desa",
+  "id_kecamatan",
+  "kdcpum",
+  "kdepum",
+]);
+
+const allFormattedProperties = computed(() => {
   if (!currentFeature.value) return [];
   const rawProps = currentFeature.value.properties || {};
-  const query = searchQuery.value.trim().toLowerCase();
-
-  // Properti internal geometri GIS yang disembunyikan
-  const excludedKeys = new Set(["bbox", "geometry", "the_geom", "geom"]);
 
   return Object.entries(rawProps)
     .filter(([key, val]) => {
       if (excludedKeys.has(key.toLowerCase())) return false;
       if (val === null || val === undefined || val === "") return false;
-
-      const { label } = resolveAttributeLabel(key);
-
-      if (!query) return true;
-      const matchKey = key.toLowerCase().includes(query);
-      const matchLabel = label.toLowerCase().includes(query);
-      const matchVal = String(val).toLowerCase().includes(query);
-      return matchKey || matchLabel || matchVal;
+      return true;
     })
     .map(([key, val]) => {
       const { label, isKugi } = resolveAttributeLabel(key);
 
-      // Nilai diproses secara dinamis tanpa membatasi tipe data
       let formattedVal: string;
       if (typeof val === "number") {
         formattedVal = Number.isInteger(val)
@@ -299,12 +299,41 @@ const formattedProperties = computed(() => {
     });
 });
 
+const formattedProperties = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return allFormattedProperties.value;
+  return allFormattedProperties.value.filter(
+    (item) =>
+      item.key.toLowerCase().includes(query) ||
+      item.label.toLowerCase().includes(query) ||
+      item.value.toLowerCase().includes(query)
+  );
+});
+
+function fallbackCopy(text: string) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    document.execCommand("copy");
+  } catch (err) {
+    console.warn("Gagal menyalin teks:", err);
+  }
+  document.body.removeChild(textArea);
+}
+
 function copyValue(key: string, val: string) {
   if (navigator?.clipboard?.writeText && window.isSecureContext) {
-    navigator.clipboard.writeText(val);
+    navigator.clipboard.writeText(val).catch(() => fallbackCopy(val));
+  } else {
+    fallbackCopy(val);
   }
   copiedKey.value = key;
-  clearTimeout(copiedTimer);
+  if (copiedTimer) clearTimeout(copiedTimer);
   copiedTimer = setTimeout(() => {
     copiedKey.value = null;
   }, 1800);
@@ -314,217 +343,159 @@ function copyValue(key: string, val: string) {
 <template>
   <div class="space-y-3">
     <!-- ═══ 1. STATE MEMUAT (LOADING) ═══════════════════════════════════════ -->
-      <div
-        v-if="loading"
-        key="loading"
-        class="p-3.5 rounded-2xl border border-blue-200/80 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 space-y-3 transition-colors"
-      >
-        <div class="flex items-center gap-3">
-          <UIcon name="i-lucide-loader-2" class="size-4.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
-          <div class="min-w-0 flex-1">
-            <p class="text-xs font-bold text-blue-900 dark:text-blue-200">
-              Memeriksa Data WMS...
-            </p>
-            <p class="text-xs text-blue-600/80 dark:text-blue-300/80 truncate">
-              Mengambil atribut fitur dari Geoportal Bojonegoro
-            </p>
-          </div>
-        </div>
-
-        <!-- Skeleton placeholders for smooth micro-animation feedback -->
-        <div class="space-y-2 pt-1 border-t border-blue-200/40 dark:border-blue-900/30">
-          <div class="h-3 bg-blue-200/60 dark:bg-blue-800/30 rounded-md w-3/4 animate-pulse" />
-          <div class="h-3 bg-blue-200/40 dark:bg-blue-800/20 rounded-md w-1/2 animate-pulse" />
+    <div
+      v-if="loading"
+      key="loading"
+      class="p-3.5 rounded-2xl border border-slate-200/80 dark:border-white/10 bg-slate-50/80 dark:bg-white/[0.03] space-y-3"
+    >
+      <div class="flex items-center gap-3">
+        <UIcon name="i-ion-refresh-outline" class="size-4.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+        <div class="min-w-0 flex-1">
+          <p class="text-xs font-bold text-slate-900 dark:text-slate-100">
+            Memeriksa informasi lokasi...
+          </p>
+          <p class="text-xs text-slate-600 dark:text-slate-400 truncate mt-0.5">
+            Mengambil atribut data peta Bojonegoro
+          </p>
         </div>
       </div>
 
-      <!-- ═══ 2. STATE KOSONG (EMPTY STATE) ═══════════════════════════════════ -->
-      <div
-        v-else-if="!features || features.length === 0"
-        key="empty"
-        class="p-3.5 rounded-2xl border border-slate-200/80 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.02] text-center space-y-1.5"
-      >
-        <div class="size-9 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-500 dark:text-slate-400 mx-auto">
-          <UIcon name="i-lucide-mouse-pointer-click" class="size-4.5 stroke-[1.75]" />
-        </div>
-        <p class="text-xs font-bold text-slate-800 dark:text-slate-200">
-          Pilih Objek Peta WMS
-        </p>
-        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-[260px] mx-auto">
-          Klik pada batas wilayah desa atau ruas jalan untuk menampilkan data atribut lengkap.
-        </p>
+      <div class="space-y-2 pt-2 border-t border-slate-200/70 dark:border-white/10">
+        <div class="h-3 bg-slate-200/80 dark:bg-white/10 rounded-md w-3/4 animate-pulse" />
+        <div class="h-3 bg-slate-200/60 dark:bg-white/5 rounded-md w-1/2 animate-pulse" />
       </div>
+    </div>
 
-      <!-- ═══ 3. STATE FITUR TERSEDIA (DATA LOADED) ═══════════════════════════ -->
-      <div v-else key="content" class="space-y-2.5">
-        <!-- Header Kartu: Info Fitur & Kamus KUGI -->
-        <div class="p-3 rounded-xl border border-blue-200/80 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 space-y-2.5">
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0 flex-1 space-y-1">
-              <!-- Baris Tag Meta: KUGI & FCODE -->
-              <div class="flex items-center flex-wrap gap-1.5">
-                <span
-                  v-if="features.length > 1"
-                  class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-slate-200/80 dark:bg-white/10 text-slate-700 dark:text-slate-300"
-                >
-                  {{ selectedIndex + 1 }} dari {{ features.length }}
-                </span>
+    <!-- ═══ 2. STATE ERROR ══════════════════════════════════════════════════ -->
+    <div
+      v-else-if="error"
+      key="error"
+      class="p-3.5 rounded-2xl border border-red-200/80 dark:border-red-900/50 bg-red-50/70 dark:bg-red-950/25 text-xs text-red-700 dark:text-red-300 space-y-1"
+    >
+      <p class="font-bold">Gagal memuat informasi objek</p>
+      <p class="leading-relaxed">{{ error }}</p>
+    </div>
 
-                <!-- Badge KUGI jika ada FCODE -->
-                <span
-                  v-if="activeKugiMeta"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800/40"
-                  :title="activeKugiMeta.definition || activeKugiMeta.typeName"
-                >
-                  <UIcon name="i-lucide-badge-check" class="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  KUGI: {{ activeKugiMeta.aliases || activeKugiMeta.typeName }}
-                </span>
+    <!-- ═══ 3. STATE KOSONG (EMPTY STATE) ═══════════════════════════════════ -->
+    <div
+      v-else-if="!features || features.length === 0"
+      key="empty"
+      class="p-4 rounded-2xl border border-slate-200/80 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.02] text-center space-y-1.5"
+    >
+      <div class="size-9 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-600 dark:text-slate-300 mx-auto">
+        <UIcon name="i-ion-location-outline" class="size-4.5" />
+      </div>
+      <p class="text-xs font-bold text-slate-800 dark:text-slate-200">
+        {{ hasPoint ? "Tidak ada data infrastruktur atau wilayah di titik ini" : "Belum ada jalan atau wilayah terpilih" }}
+      </p>
+      <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed max-w-[270px] mx-auto">
+        Ketuk tepat pada garis jalan, jembatan, atau batas desa pada peta untuk melihat atribut lengkapnya.
+      </p>
+    </div>
 
-                <!-- Loading status kamus KUGI -->
-                <span
-                  v-else-if="isLoadingKugi"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-medium bg-blue-100/60 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                >
-                  <UIcon name="i-lucide-loader-2" class="size-3 animate-spin shrink-0" />
-                  Kamus KUGI...
-                </span>
-
-                <!-- Badge Kode FCODE -->
-                <span
-                  v-if="currentFcode"
-                  class="px-1.5 py-0.5 rounded-md text-xs font-semibold tracking-wide bg-blue-100/80 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
-                >
-                  FCODE: {{ currentFcode }}
-                </span>
-              </div>
-
-              <!-- Judul Objek Fitur -->
-              <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">
-                {{ featureDisplayName }}
-              </h4>
-              <p v-if="currentFeature?.layerTitle" class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 truncate pt-0.5">
-                <span class="font-medium text-slate-700 dark:text-slate-300">{{ currentFeature.layerTitle }}</span>
-                <span v-if="currentFeature.layerInstansi || currentFeature.layerAttribution" class="text-slate-300 dark:text-slate-600">•</span>
-                <span v-if="currentFeature.layerInstansi || currentFeature.layerAttribution" class="text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
-                  <UIcon name="i-lucide-building-2" class="size-3 text-slate-500 shrink-0" />
-                  {{ currentFeature.layerInstansi || currentFeature.layerAttribution }}
-                </span>
-              </p>
-            </div>
-
-            <!-- Tombol Navigasi Antar Fitur jika ada lebih dari 1 fitur -->
-            <div v-if="features.length > 1" class="flex items-center gap-1 shrink-0 pt-0.5">
-              <button
-                type="button"
-                class="size-7 rounded-lg flex items-center justify-center border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                :disabled="selectedIndex === 0"
-                aria-label="Fitur Sebelumnya"
-                @click="selectedIndex--"
-              >
-                <UIcon name="i-lucide-chevron-left" class="size-4" />
-              </button>
-              <button
-                type="button"
-                class="size-7 rounded-lg flex items-center justify-center border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                :disabled="selectedIndex === features.length - 1"
-                aria-label="Fitur Berikutnya"
-                @click="selectedIndex++"
-              >
-                <UIcon name="i-lucide-chevron-right" class="size-4" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Keterangan Definisi Resmi KUGI jika tersedia -->
-          <div
-            v-if="activeKugiMeta?.definition"
-            class="p-2 rounded-lg bg-white/70 dark:bg-black/25 border border-blue-100 dark:border-blue-900/30 text-xs text-slate-600 dark:text-slate-300 leading-relaxed"
-          >
-            <span class="font-semibold text-blue-700 dark:text-blue-400">Definisi KUGI: </span>
-            <span>{{ activeKugiMeta.definition }}</span>
-            <div v-if="activeKugiMeta.producer" class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Walidata: {{ activeKugiMeta.producer }}
-            </div>
-          </div>
+    <!-- ═══ 4. STATE FITUR TERSEDIA (DATA LOADED) ═══════════════════════════ -->
+    <div v-else key="content" class="space-y-3">
+      <!-- Switcher ringkas hanya muncul jika ada lebih dari 1 fitur pada titik yang sama -->
+      <div
+        v-if="features.length > 1"
+        class="flex items-center justify-between gap-2 px-3 py-2 rounded-2xl border border-slate-200/85 dark:border-white/10 bg-slate-50/80 dark:bg-white/[0.03]"
+      >
+        <div class="min-w-0 flex-1">
+          <p class="text-xs font-bold text-slate-900 dark:text-slate-100 tabular-nums">
+            Data {{ activeIndex + 1 }} dari {{ features.length }} di titik ini
+          </p>
+          <p v-if="currentFeature?.layerTitle" class="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-0.5">
+            {{ currentFeature.layerTitle }}
+          </p>
         </div>
 
-        <!-- Kotak Pencarian Properti Cepat (jika atribut lebih dari 5) -->
-        <div v-if="formattedProperties.length > 5 || searchQuery" class="relative">
-          <UIcon
-            name="i-lucide-search"
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-500 dark:text-slate-400"
-          />
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="Cari atribut KUGI atau nilai..."
-            class="w-full h-8 pl-8 pr-3 text-base sm:text-xs rounded-lg border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition-all"
-          />
+        <div class="flex items-center gap-1.5 shrink-0">
           <button
-            v-if="searchQuery"
             type="button"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600 dark:hover:text-slate-200"
-            aria-label="Hapus Pencarian"
-            @click="searchQuery = ''"
+            class="size-11 rounded-xl flex items-center justify-center border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+            :disabled="activeIndex === 0"
+            aria-label="Data sebelumnya"
+            title="Data sebelumnya"
+            @click="activeIndex--"
           >
-            <UIcon name="i-lucide-x" class="size-3.5" />
+            <UIcon name="i-ion-chevron-back" class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="size-11 rounded-xl flex items-center justify-center border border-slate-200 dark:border-white/10 bg-white dark:bg-[#070b14] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+            :disabled="activeIndex === features.length - 1"
+            aria-label="Data berikutnya"
+            title="Data berikutnya"
+            @click="activeIndex++"
+          >
+            <UIcon name="i-ion-chevron-forward" class="size-4" />
           </button>
         </div>
+      </div>
 
-        <!-- Tabel / Daftar Pasangan Kunci-Nilai Atribut -->
-        <div class="rounded-xl border border-slate-200/80 dark:border-white/10 overflow-hidden divide-y divide-slate-100 dark:divide-white/5 bg-white dark:bg-[#070b14]">
-          <div
-            v-for="prop in formattedProperties"
-            :key="prop.key"
-            class="flex items-center justify-between p-2.5 gap-2 hover:bg-slate-50/80 dark:hover:bg-white/[0.02] transition-colors group"
-          >
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
-                  {{ prop.label }}
-                </span>
-                <!-- Kode field teknis GIS -->
-                <span class="text-xs font-medium text-slate-500 dark:text-slate-400">
-                  [{{ prop.key }}]
-                </span>
-                <!-- Indikator validasi KUGI -->
-                <span
-                  v-if="prop.isKugi"
-                  class="px-1 py-0.2 rounded text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40"
-                  title="Sesuai Kamus KUGI Resmi BIG"
-                >
-                  KUGI
-                </span>
-              </div>
-              <p class="text-xs font-semibold text-slate-900 dark:text-slate-100 break-words tabular-nums mt-0.5">
-                {{ prop.value }}
-              </p>
-            </div>
+      <!-- Kotak Pencarian Cepat (jika atribut lebih dari 5) -->
+      <div v-if="allFormattedProperties.length > 5 || searchQuery" class="relative">
+        <UIcon
+          name="i-ion-search-outline"
+          class="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-500 dark:text-slate-400 pointer-events-none"
+        />
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="Saring atribut fitur..."
+          aria-label="Saring atribut fitur"
+          class="w-full min-h-[44px] h-11 pl-9 pr-11 text-base sm:text-xs rounded-full border border-slate-200/90 dark:border-white/10 bg-slate-50/70 dark:bg-[#070b14] text-slate-900 dark:text-slate-100 placeholder:text-slate-500 focus:bg-white dark:focus:bg-[#0c1424] focus:outline-hidden focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+        />
+        <button
+          v-if="searchQuery"
+          type="button"
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 size-9 after:absolute after:-inset-1.5 after:content-[''] rounded-full flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-white/10 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label="Hapus pencarian atribut"
+          @click="searchQuery = ''"
+        >
+          <UIcon name="i-ion-close" class="size-4" />
+        </button>
+      </div>
 
-            <!-- Tombol Salin Nilai Atribut -->
-            <UTooltip :text="copiedKey === prop.key ? 'Nilai disalin' : 'Salin nilai'">
-              <button
-                type="button"
-                class="relative after:absolute after:-inset-2 after:content-[''] size-7 rounded-md flex items-center justify-center text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 opacity-60 group-hover:opacity-100 transition-all cursor-pointer shrink-0"
-                aria-label="Salin nilai atribut"
-                @click="copyValue(prop.key, String(prop.raw))"
-              >
-                <UIcon
-                  :name="copiedKey === prop.key ? 'i-lucide-check' : 'i-lucide-copy'"
-                  class="size-3.5"
-                  :class="copiedKey === prop.key ? 'text-green-600 dark:text-green-400' : ''"
-                />
-              </button>
-            </UTooltip>
+      <!-- Daftar Atribut Feature Keseluruhan -->
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
+        <div
+          v-for="prop in formattedProperties"
+          :key="prop.key"
+          class="flex items-center justify-between px-3.5 py-3 gap-3 hover:bg-slate-200/45 dark:hover:bg-white/[0.04] transition-colors group"
+        >
+          <div class="min-w-0 flex-1">
+            <span class="text-[11px] font-medium text-slate-600 dark:text-slate-400 block">
+              {{ prop.label }}
+            </span>
+            <p class="text-xs sm:text-[13px] font-semibold text-slate-900 dark:text-slate-100 break-words tabular-nums mt-0.5 select-text leading-snug">
+              {{ prop.value }}
+            </p>
           </div>
 
-          <div
-            v-if="formattedProperties.length === 0"
-            class="p-4 text-center text-xs text-slate-500 dark:text-slate-400"
-          >
-            Tidak ada atribut yang cocok dengan pencarian
-          </div>
+          <UTooltip :text="copiedKey === prop.key ? 'Tersalin' : 'Salin nilai'">
+            <button
+              type="button"
+              class="relative after:absolute after:-inset-1.5 after:content-[''] size-9 rounded-lg flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 opacity-80 group-hover:opacity-100 focus-visible:opacity-100 transition-all cursor-pointer shrink-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+              :aria-label="`Salin ${prop.label}`"
+              @click="copyValue(prop.key, String(prop.raw))"
+            >
+              <UIcon
+                :name="copiedKey === prop.key ? 'i-ion-checkmark-circle' : 'i-ion-copy-outline'"
+                class="size-4"
+                :class="copiedKey === prop.key ? 'text-emerald-700 dark:text-emerald-400' : ''"
+              />
+            </button>
+          </UTooltip>
+        </div>
+
+        <div
+          v-if="formattedProperties.length === 0"
+          class="p-4 text-center text-xs text-slate-600 dark:text-slate-400"
+        >
+          Tidak ada atribut yang cocok dengan pencarian
         </div>
       </div>
+    </div>
   </div>
 </template>

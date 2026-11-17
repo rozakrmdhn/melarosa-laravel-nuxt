@@ -3,6 +3,7 @@ import type {
   GeoJsonFeatureCollection,
   InfrastrukturSegmen,
   InfrastrukturTipe,
+  JalanPorosRef,
   MonitoringRealisasi,
   PlottingAnggaran,
   RefSumberDana,
@@ -268,6 +269,31 @@ export function useInfrastrukturApi() {
     });
   }
 
+  // ─── Referensi Jalan Poros Desa ────────────────────────────────────────────
+  async function fetchJalanPorosLookup(params?: {
+    id_kecamatan?: number | null;
+    id_desa?: number | null;
+    search?: string;
+    limit?: number;
+  }) {
+    return $http<ApiResponse<JalanPorosRef[]>>('admin/jalan-poros-desa', {
+      method: 'GET',
+      query: {
+        format: 'lookup',
+        limit: params?.limit ?? 500,
+        ...(params?.id_kecamatan ? { id_kecamatan: params.id_kecamatan } : {}),
+        ...(params?.id_desa ? { id_desa: params.id_desa } : {}),
+        ...(params?.search?.trim() ? { search: params.search.trim() } : {}),
+      },
+    });
+  }
+
+  async function getJalanPoros(id: string) {
+    return $http<{ ok: boolean; data: JalanPorosRef; feature: any }>(`admin/jalan-poros-desa/${id}`, {
+      method: 'GET',
+    });
+  }
+
   return {
     // Master
     fetchTipeList,
@@ -310,5 +336,8 @@ export function useInfrastrukturApi() {
     // Wilayah
     fetchKecamatanList,
     fetchDesaList,
+    // Referensi Jalan Poros Desa
+    fetchJalanPorosLookup,
+    getJalanPoros,
   };
 }

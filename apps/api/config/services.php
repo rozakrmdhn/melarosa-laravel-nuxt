@@ -49,4 +49,10 @@ return [
         'csw_url' => env('GEOPORTAL_CSW_URL', 'https://geoportal.bojonegorokab.go.id/csw/'),
         'wms_url' => env('GEOPORTAL_WMS_URL', 'https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms'),
     ],
+
+    'openrouteservice' => [
+        'key' => env('OPENROUTESERVICE_API_KEY'),
+        'base_url' => env('OPENROUTESERVICE_BASE_URL', 'https://api.openrouteservice.org'),
+        'enable_in_tests' => false,
+    ],
 ];

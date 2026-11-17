@@ -8,6 +8,7 @@ use App\Models\BkkdProposal;
 use App\Models\RefBkkdBidang;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -24,13 +25,13 @@ class BkkdAgregasiDesaController extends Controller
         $idBidang = $request->filled('id_bidang') && $request->input('id_bidang') !== 'ALL' ? $request->input('id_bidang') : null;
         $statusFilter = $request->input('status', 'ALL');
         $search = trim((string) $request->input('search', ''));
-        $mode = $request->input('mode', 'bidang'); // 'bidang' (per bidang & OPD) or 'desa' (konsolidasi per desa)
+        $mode = $request->input('mode', 'bidang'); // 'bidang' (per bidang) or 'desa' (konsolidasi per desa)
 
         $sortBy = (string) $request->input('sort_by', 'kecamatan');
         $sortOrder = strtolower((string) $request->input('sort_order', 'asc')) === 'desc' ? 'desc' : 'asc';
 
-        $allBidang = \Illuminate\Support\Facades\Cache::remember('ref_bkkd_bidang_with_opd', 300, function () {
-            return RefBkkdBidang::with('opdDefault:id,kode,nama')->get();
+        $allBidang = Cache::remember('ref_bkkd_bidang_all', 300, function () {
+            return RefBkkdBidang::select(['id', 'nama'])->get();
         });
         $bidangMap = $allBidang->keyBy('id');
 
@@ -54,9 +55,7 @@ class BkkdAgregasiDesaController extends Controller
         $allDesas = $desaQuery->get();
 
         $propQuery = BkkdProposal::with([
-            'bidang.opdDefault:id,kode,nama',
-            'verifikasiAktif:id,id_proposal,id_opd,nilai_rekomendasi,hasil,nomor_surat_hasil',
-            'verifikasiAktif.opd:id,kode,nama',
+            'bidang:id,nama',
         ])
         ->select([
             'id',
@@ -64,11 +63,9 @@ class BkkdAgregasiDesaController extends Controller
             'id_kecamatan',
             'id_bidang',
             'nomor_registrasi',
-            'nomor_surat_desa',
             'judul_kegiatan',
             'nilai_usulan',
-            'nilai_disetujui_tapd',
-            'status',
+            'status_analisa_spasial',
             'tahun_anggaran',
         ])
         ->forUser($user)
@@ -87,35 +84,16 @@ class BkkdAgregasiDesaController extends Controller
         $allProposals = $propQuery->get();
         $proposalsByDesa = $allProposals->groupBy('id_desa');
 
-        // Summary KPI dihitung langsung secara efisien
         $totalDesaWilayah = $allDesas->count();
         $desaWithProposalsCount = 0;
-        $desaWithVerifiedCount = 0;
-        $desaWithTapdCount = 0;
-        $totalUsulanSemua = $allProposals->count();
-        $totalUsulanVerified = 0;
-        $totalUsulanTapd = 0;
-
-        foreach ($allProposals as $p) {
-            if (in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan'], true) || $p->verifikasiAktif !== null) {
-                $totalUsulanVerified++;
-            }
-            if ($p->status === 'ditetapkan_tapd') {
-                $totalUsulanTapd++;
-            }
-        }
-
         foreach ($proposalsByDesa as $pDesa) {
             if ($pDesa->isNotEmpty()) {
                 $desaWithProposalsCount++;
-                if ($pDesa->contains(fn ($p) => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan'], true) || $p->verifikasiAktif !== null)) {
-                    $desaWithVerifiedCount++;
-                }
-                if ($pDesa->contains(fn ($p) => $p->status === 'ditetapkan_tapd')) {
-                    $desaWithTapdCount++;
-                }
             }
         }
+
+        $totalUsulanSemua = $allProposals->count();
+        $totalNilaiSemua = (float) $allProposals->sum('nilai_usulan');
 
         $records = [];
         $selectedBidangObj = $idBidang ? $bidangMap->get($idBidang) : null;
@@ -125,11 +103,7 @@ class BkkdAgregasiDesaController extends Controller
 
             if ($mode === 'desa') {
                 $jumlahUsulan = $pDesa->count();
-                $usulanDiverifikasi = $pDesa->filter(fn ($p) => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan']) || $p->verifikasiAktif !== null)->count();
-                $usulanDipilih = $pDesa->where('status', 'ditetapkan_tapd')->count();
-
                 $bidangList = $pDesa->map(fn ($p) => $p->bidang?->nama)->filter()->unique()->values()->all();
-                $opdList = $pDesa->map(fn ($p) => $p->verifikasiAktif?->opd?->nama ?? $p->bidang?->opdDefault?->nama)->filter()->unique()->values()->all();
 
                 $records[] = [
                     'id_desa' => $desa->id,
@@ -137,28 +111,17 @@ class BkkdAgregasiDesaController extends Controller
                     'id_kecamatan' => $desa->id_kecamatan,
                     'nama_kecamatan' => $desa->nama_kecamatan ?? $desa->kecamatan?->nama_kecamatan ?? '',
                     'nama_bidang' => !empty($bidangList) ? implode(', ', $bidangList) : '-',
-                    'nama_opd' => !empty($opdList) ? implode(', ', $opdList) : '-',
-                    'kode_opd' => '-',
                     'jumlah_usulan' => $jumlahUsulan,
-                    'usulan_diverifikasi' => $usulanDiverifikasi,
-                    'usulan_dipilih' => $usulanDipilih,
                     'total_nilai_usulan' => (float) $pDesa->sum('nilai_usulan'),
-                    'total_rekomendasi_opd' => (float) $pDesa->sum(fn ($p) => $p->verifikasiAktif?->nilai_rekomendasi ?? 0),
-                    'total_disetujui_tapd' => (float) $pDesa->where('status', 'ditetapkan_tapd')->sum('nilai_disetujui_tapd'),
                     'proposals' => $pDesa->map(fn ($p) => [
                         'id' => $p->id,
                         'nomor_registrasi' => $p->nomor_registrasi,
-                        'nomor_surat_desa' => $p->nomor_surat_desa,
                         'judul_kegiatan' => $p->judul_kegiatan,
                         'id_bidang' => $p->id_bidang,
                         'bidang' => $p->bidang?->nama,
-                        'opd' => $p->verifikasiAktif?->opd?->nama ?? $p->bidang?->opdDefault?->nama ?? '-',
                         'nilai_usulan' => $p->nilai_usulan !== null ? (float) $p->nilai_usulan : null,
-                        'nilai_rekomendasi' => $p->verifikasiAktif?->nilai_rekomendasi !== null ? (float) $p->verifikasiAktif->nilai_rekomendasi : null,
-                        'nilai_disetujui_tapd' => $p->nilai_disetujui_tapd !== null ? (float) $p->nilai_disetujui_tapd : null,
-                        'status' => $p->status,
-                        'is_diverifikasi' => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan']) || $p->verifikasiAktif !== null,
-                        'is_dipilih' => $p->status === 'ditetapkan_tapd',
+                        'status_analisa_spasial' => $p->status_analisa_spasial ?? 'belum_dianalisa',
+                        'status' => $p->status_analisa_spasial ?? 'belum_dianalisa',
                     ])->values()->all(),
                 ];
             } else {
@@ -170,15 +133,8 @@ class BkkdAgregasiDesaController extends Controller
                         'nama_kecamatan' => $desa->nama_kecamatan ?? $desa->kecamatan?->nama_kecamatan ?? '',
                         'id_bidang' => $selectedBidangObj?->id ?? null,
                         'nama_bidang' => $selectedBidangObj?->nama ?? '-',
-                        'id_opd' => $selectedBidangObj?->opdDefault?->id ?? null,
-                        'nama_opd' => $selectedBidangObj?->opdDefault?->nama ?? '-',
-                        'kode_opd' => $selectedBidangObj?->opdDefault?->kode ?? '-',
                         'jumlah_usulan' => 0,
-                        'usulan_diverifikasi' => 0,
-                        'usulan_dipilih' => 0,
                         'total_nilai_usulan' => 0,
-                        'total_rekomendasi_opd' => 0,
-                        'total_disetujui_tapd' => 0,
                         'proposals' => [],
                     ];
                 } else {
@@ -186,11 +142,7 @@ class BkkdAgregasiDesaController extends Controller
                     foreach ($byBidang as $bId => $bidangProps) {
                         $firstP = $bidangProps->first();
                         $bidang = $firstP->bidang;
-                        $opd = $firstP->verifikasiAktif?->opd ?? $bidang?->opdDefault;
-
                         $jumlahUsulan = $bidangProps->count();
-                        $usulanDiverifikasi = $bidangProps->filter(fn ($p) => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan']) || $p->verifikasiAktif !== null)->count();
-                        $usulanDipilih = $bidangProps->where('status', 'ditetapkan_tapd')->count();
 
                         $records[] = [
                             'id_desa' => $desa->id,
@@ -199,29 +151,17 @@ class BkkdAgregasiDesaController extends Controller
                             'nama_kecamatan' => $desa->nama_kecamatan ?? $desa->kecamatan?->nama_kecamatan ?? '',
                             'id_bidang' => $bId,
                             'nama_bidang' => $bidang?->nama ?? '-',
-                            'id_opd' => $opd?->id,
-                            'nama_opd' => $opd?->nama ?? '-',
-                            'kode_opd' => $opd?->kode ?? '-',
                             'jumlah_usulan' => $jumlahUsulan,
-                            'usulan_diverifikasi' => $usulanDiverifikasi,
-                            'usulan_dipilih' => $usulanDipilih,
                             'total_nilai_usulan' => (float) $bidangProps->sum('nilai_usulan'),
-                            'total_rekomendasi_opd' => (float) $bidangProps->sum(fn ($p) => $p->verifikasiAktif?->nilai_rekomendasi ?? 0),
-                            'total_disetujui_tapd' => (float) $bidangProps->where('status', 'ditetapkan_tapd')->sum('nilai_disetujui_tapd'),
                             'proposals' => $bidangProps->map(fn ($p) => [
                                 'id' => $p->id,
                                 'nomor_registrasi' => $p->nomor_registrasi,
-                                'nomor_surat_desa' => $p->nomor_surat_desa,
                                 'judul_kegiatan' => $p->judul_kegiatan,
                                 'id_bidang' => $p->id_bidang,
                                 'bidang' => $p->bidang?->nama,
-                                'opd' => $opd?->nama ?? '-',
                                 'nilai_usulan' => $p->nilai_usulan !== null ? (float) $p->nilai_usulan : null,
-                                'nilai_rekomendasi' => $p->verifikasiAktif?->nilai_rekomendasi !== null ? (float) $p->verifikasiAktif->nilai_rekomendasi : null,
-                                'nilai_disetujui_tapd' => $p->nilai_disetujui_tapd !== null ? (float) $p->nilai_disetujui_tapd : null,
-                                'status' => $p->status,
-                                'is_diverifikasi' => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan']) || $p->verifikasiAktif !== null,
-                                'is_dipilih' => $p->status === 'ditetapkan_tapd',
+                                'status_analisa_spasial' => $p->status_analisa_spasial ?? 'belum_dianalisa',
+                                'status' => $p->status_analisa_spasial ?? 'belum_dianalisa',
                             ])->values()->all(),
                         ];
                     }
@@ -238,18 +178,6 @@ class BkkdAgregasiDesaController extends Controller
                 if ($statusFilter === 'belum_ada') {
                     return $item['jumlah_usulan'] === 0;
                 }
-                if ($statusFilter === 'diverifikasi') {
-                    return $item['usulan_diverifikasi'] > 0;
-                }
-                if ($statusFilter === 'belum_diverifikasi') {
-                    return $item['jumlah_usulan'] > 0 && $item['usulan_diverifikasi'] === 0;
-                }
-                if ($statusFilter === 'dipilih_tapd') {
-                    return $item['usulan_dipilih'] > 0;
-                }
-                if ($statusFilter === 'belum_dipilih') {
-                    return $item['jumlah_usulan'] > 0 && $item['usulan_dipilih'] === 0;
-                }
                 return true;
             }));
         }
@@ -260,8 +188,7 @@ class BkkdAgregasiDesaController extends Controller
             $records = array_values(array_filter($records, function ($item) use ($searchLower) {
                 return str_contains(strtolower($item['nama_desa']), $searchLower)
                     || str_contains(strtolower($item['nama_kecamatan']), $searchLower)
-                    || str_contains(strtolower($item['nama_bidang']), $searchLower)
-                    || str_contains(strtolower($item['nama_opd']), $searchLower);
+                    || str_contains(strtolower($item['nama_bidang']), $searchLower);
             }));
         }
 
@@ -280,23 +207,13 @@ class BkkdAgregasiDesaController extends Controller
                 if ($cmp !== 0) {
                     return $sortOrder === 'desc' ? -$cmp : $cmp;
                 }
-            } elseif ($sortBy === 'opd') {
-                $cmp = strcasecmp($a['nama_opd'], $b['nama_opd']);
-                if ($cmp !== 0) {
-                    return $sortOrder === 'desc' ? -$cmp : $cmp;
-                }
             } elseif ($sortBy === 'jumlah_usulan') {
                 $cmp = $a['jumlah_usulan'] <=> $b['jumlah_usulan'];
                 if ($cmp !== 0) {
                     return $sortOrder === 'desc' ? -$cmp : $cmp;
                 }
-            } elseif ($sortBy === 'usulan_diverifikasi') {
-                $cmp = $a['usulan_diverifikasi'] <=> $b['usulan_diverifikasi'];
-                if ($cmp !== 0) {
-                    return $sortOrder === 'desc' ? -$cmp : $cmp;
-                }
-            } elseif ($sortBy === 'usulan_dipilih') {
-                $cmp = $a['usulan_dipilih'] <=> $b['usulan_dipilih'];
+            } elseif ($sortBy === 'total_nilai_usulan') {
+                $cmp = $a['total_nilai_usulan'] <=> $b['total_nilai_usulan'];
                 if ($cmp !== 0) {
                     return $sortOrder === 'desc' ? -$cmp : $cmp;
                 }
@@ -331,11 +248,8 @@ class BkkdAgregasiDesaController extends Controller
                 'total_desa' => $totalDesaWilayah,
                 'desa_ada_usulan' => $desaWithProposalsCount,
                 'desa_belum_ada_usulan' => $totalDesaWilayah - $desaWithProposalsCount,
-                'desa_diverifikasi' => $desaWithVerifiedCount,
-                'desa_dipilih_tapd' => $desaWithTapdCount,
                 'total_usulan' => $totalUsulanSemua,
-                'total_usulan_diverifikasi' => $totalUsulanVerified,
-                'total_usulan_dipilih' => $totalUsulanTapd,
+                'total_nilai_usulan' => $totalNilaiSemua,
             ],
             'meta' => [
                 'current_page' => $currentPage,
@@ -363,8 +277,8 @@ class BkkdAgregasiDesaController extends Controller
         $sortBy = (string) $request->input('sort_by', 'kecamatan');
         $sortOrder = strtolower((string) $request->input('sort_order', 'asc')) === 'desc' ? 'desc' : 'asc';
 
-        $allBidang = \Illuminate\Support\Facades\Cache::remember('ref_bkkd_bidang_with_opd', 300, function () {
-            return RefBkkdBidang::with('opdDefault:id,kode,nama')->get();
+        $allBidang = Cache::remember('ref_bkkd_bidang_all', 300, function () {
+            return RefBkkdBidang::select(['id', 'nama'])->get();
         });
         $bidangMap = $allBidang->keyBy('id');
 
@@ -388,8 +302,7 @@ class BkkdAgregasiDesaController extends Controller
         $allDesas = $desaQuery->get();
 
         $propQuery = BkkdProposal::with([
-            'bidang.opdDefault:id,kode,nama',
-            'verifikasiAktif.opd:id,kode,nama',
+            'bidang:id,nama',
         ])
         ->select([
             'id',
@@ -397,10 +310,9 @@ class BkkdAgregasiDesaController extends Controller
             'id_kecamatan',
             'id_bidang',
             'nomor_registrasi',
-            'nomor_surat_desa',
             'judul_kegiatan',
             'nilai_usulan',
-            'status',
+            'status_analisa_spasial',
             'tahun_anggaran',
         ])
         ->forUser($user)
@@ -427,20 +339,14 @@ class BkkdAgregasiDesaController extends Controller
 
             if ($mode === 'desa') {
                 $jumlahUsulan = $pDesa->count();
-                $usulanDiverifikasi = $pDesa->filter(fn ($p) => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan']) || $p->verifikasiAktif !== null)->count();
-                $usulanDipilih = $pDesa->where('status', 'ditetapkan_tapd')->count();
-
                 $bidangList = $pDesa->map(fn ($p) => $p->bidang?->nama)->filter()->unique()->values()->all();
-                $opdList = $pDesa->map(fn ($p) => $p->verifikasiAktif?->opd?->nama ?? $p->bidang?->opdDefault?->nama)->filter()->unique()->values()->all();
 
                 $records[] = [
                     'nama_kecamatan' => $desa->nama_kecamatan ?? $desa->kecamatan?->nama_kecamatan ?? '',
                     'nama_desa' => $desa->nama_desa,
                     'nama_bidang' => !empty($bidangList) ? implode(', ', $bidangList) : '-',
-                    'nama_opd' => !empty($opdList) ? implode(', ', $opdList) : '-',
                     'jumlah_usulan' => $jumlahUsulan,
-                    'usulan_diverifikasi' => $usulanDiverifikasi,
-                    'usulan_dipilih' => $usulanDipilih,
+                    'total_nilai_usulan' => (float) $pDesa->sum('nilai_usulan'),
                 ];
             } else {
                 if ($pDesa->isEmpty()) {
@@ -448,30 +354,22 @@ class BkkdAgregasiDesaController extends Controller
                         'nama_kecamatan' => $desa->nama_kecamatan ?? $desa->kecamatan?->nama_kecamatan ?? '',
                         'nama_desa' => $desa->nama_desa,
                         'nama_bidang' => $selectedBidangObj?->nama ?? '-',
-                        'nama_opd' => $selectedBidangObj?->opdDefault?->nama ?? '-',
                         'jumlah_usulan' => 0,
-                        'usulan_diverifikasi' => 0,
-                        'usulan_dipilih' => 0,
+                        'total_nilai_usulan' => 0,
                     ];
                 } else {
                     $byBidang = $pDesa->groupBy('id_bidang');
                     foreach ($byBidang as $bId => $bidangProps) {
                         $firstP = $bidangProps->first();
                         $bidang = $firstP->bidang;
-                        $opd = $firstP->verifikasiAktif?->opd ?? $bidang?->opdDefault;
-
                         $jumlahUsulan = $bidangProps->count();
-                        $usulanDiverifikasi = $bidangProps->filter(fn ($p) => in_array($p->status, ['layak', 'layak_bersyarat', 'tidak_layak', 'dikembalikan']) || $p->verifikasiAktif !== null)->count();
-                        $usulanDipilih = $bidangProps->where('status', 'ditetapkan_tapd')->count();
 
                         $records[] = [
                             'nama_kecamatan' => $desa->nama_kecamatan ?? $desa->kecamatan?->nama_kecamatan ?? '',
                             'nama_desa' => $desa->nama_desa,
                             'nama_bidang' => $bidang?->nama ?? '-',
-                            'nama_opd' => $opd?->nama ?? '-',
                             'jumlah_usulan' => $jumlahUsulan,
-                            'usulan_diverifikasi' => $usulanDiverifikasi,
-                            'usulan_dipilih' => $usulanDipilih,
+                            'total_nilai_usulan' => (float) $bidangProps->sum('nilai_usulan'),
                         ];
                     }
                 }
@@ -482,10 +380,6 @@ class BkkdAgregasiDesaController extends Controller
             $records = array_values(array_filter($records, function ($item) use ($statusFilter) {
                 if ($statusFilter === 'sudah_ada') return $item['jumlah_usulan'] > 0;
                 if ($statusFilter === 'belum_ada') return $item['jumlah_usulan'] === 0;
-                if ($statusFilter === 'diverifikasi') return $item['usulan_diverifikasi'] > 0;
-                if ($statusFilter === 'belum_diverifikasi') return $item['jumlah_usulan'] > 0 && $item['usulan_diverifikasi'] === 0;
-                if ($statusFilter === 'dipilih_tapd') return $item['usulan_dipilih'] > 0;
-                if ($statusFilter === 'belum_dipilih') return $item['jumlah_usulan'] > 0 && $item['usulan_dipilih'] === 0;
                 return true;
             }));
         }
@@ -495,8 +389,7 @@ class BkkdAgregasiDesaController extends Controller
             $records = array_values(array_filter($records, function ($item) use ($searchLower) {
                 return str_contains(strtolower($item['nama_desa']), $searchLower)
                     || str_contains(strtolower($item['nama_kecamatan']), $searchLower)
-                    || str_contains(strtolower($item['nama_bidang']), $searchLower)
-                    || str_contains(strtolower($item['nama_opd']), $searchLower);
+                    || str_contains(strtolower($item['nama_bidang']), $searchLower);
             }));
         }
 
@@ -515,23 +408,13 @@ class BkkdAgregasiDesaController extends Controller
                 if ($cmp !== 0) {
                     return $sortOrder === 'desc' ? -$cmp : $cmp;
                 }
-            } elseif ($sortBy === 'opd') {
-                $cmp = strcasecmp($a['nama_opd'], $b['nama_opd']);
-                if ($cmp !== 0) {
-                    return $sortOrder === 'desc' ? -$cmp : $cmp;
-                }
             } elseif ($sortBy === 'jumlah_usulan') {
                 $cmp = $a['jumlah_usulan'] <=> $b['jumlah_usulan'];
                 if ($cmp !== 0) {
                     return $sortOrder === 'desc' ? -$cmp : $cmp;
                 }
-            } elseif ($sortBy === 'usulan_diverifikasi') {
-                $cmp = $a['usulan_diverifikasi'] <=> $b['usulan_diverifikasi'];
-                if ($cmp !== 0) {
-                    return $sortOrder === 'desc' ? -$cmp : $cmp;
-                }
-            } elseif ($sortBy === 'usulan_dipilih') {
-                $cmp = $a['usulan_dipilih'] <=> $b['usulan_dipilih'];
+            } elseif ($sortBy === 'total_nilai_usulan') {
+                $cmp = $a['total_nilai_usulan'] <=> $b['total_nilai_usulan'];
                 if ($cmp !== 0) {
                     return $sortOrder === 'desc' ? -$cmp : $cmp;
                 }
@@ -564,10 +447,8 @@ class BkkdAgregasiDesaController extends Controller
                 'Kecamatan',
                 'Desa',
                 'Bidang',
-                'OPD Teknis',
                 'Jumlah Usulan',
-                'Usulan Diverifikasi',
-                'Usulan Dipilih',
+                'Total Nilai Usulan (Rp)',
             ]);
 
             $no = 1;
@@ -577,10 +458,8 @@ class BkkdAgregasiDesaController extends Controller
                     $r['nama_kecamatan'],
                     $r['nama_desa'],
                     $r['nama_bidang'],
-                    $r['nama_opd'],
                     $r['jumlah_usulan'],
-                    $r['usulan_diverifikasi'],
-                    $r['usulan_dipilih'],
+                    number_format($r['total_nilai_usulan'], 0, ',', '.'),
                 ]);
             }
             fclose($handle);

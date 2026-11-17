@@ -91,6 +91,7 @@ class DatabaseSeeder extends Seeder
             BkkdPermissionSeeder::class,
             RefOpdSeeder::class,
             RefBkkdBidangSeeder::class,
+            BackupScheduleSeeder::class,
         ]);
     }
 }

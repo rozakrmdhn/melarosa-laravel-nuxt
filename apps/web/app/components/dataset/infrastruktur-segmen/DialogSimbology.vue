@@ -44,10 +44,12 @@ function handleResetCurrent() {
 <template>
   <UModal
     :open="open"
+    :overlay="false"
+    :modal="false"
     title="Pengaturan Gaya Layer"
     description="Sesuaikan warna garis, ketebalan, dan label teks pada peta."
     :ui="{
-      content: 'max-w-lg bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl'
+      content: 'max-w-lg bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl'
     }"
     @update:open="emit('update:open', $event)"
   >

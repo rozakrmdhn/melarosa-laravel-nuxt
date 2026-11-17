@@ -20,6 +20,7 @@ class InfrastrukturSegmenResource extends JsonResource
             'geometry'   => !empty($this->geojson) ? json_decode($this->geojson) : null,
             'properties' => [
                 'id'                 => $this->id,
+                'parent_id'          => $this->parent_id,
                 'tipe_kode'          => $this->tipe_kode,
                 'namobj'             => $this->namobj,
                 'panjang'            => $this->panjang,
@@ -48,6 +49,7 @@ class InfrastrukturSegmenResource extends JsonResource
                 'verified_kecamatan_at' => $this->verified_kecamatan_at,
                 'verified_bappeda_at'   => $this->verified_bappeda_at,
                 'tipe'               => $this->whenLoaded('tipe'),
+                'parent'             => $this->whenLoaded('parent'),
                 'plotting'           => $this->whenLoaded('plotting'),
                 'creator'            => $this->whenLoaded('creator'),
                 'verifier_kecamatan' => $this->whenLoaded('verifierKecamatan'),

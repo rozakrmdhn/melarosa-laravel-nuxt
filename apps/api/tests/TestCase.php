@@ -26,6 +26,7 @@ abstract class TestCase extends BaseTestCase
             $pdo = DB::connection()->getPdo();
             if (method_exists($pdo, 'sqliteCreateFunction')) {
                 $pdo->sqliteCreateFunction('ST_GeomFromGeoJSON', fn ($g = null) => $g);
+                $pdo->sqliteCreateFunction('ST_MakePoint', fn ($lng = 0, $lat = 0) => json_encode(['type' => 'Point', 'coordinates' => [(float) $lng, (float) $lat]]));
                 $pdo->sqliteCreateFunction('ST_SetSRID', fn ($g = null, $srid = 4326) => $g);
                 $pdo->sqliteCreateFunction('ST_Multi', fn ($g = null) => $g);
                 $pdo->sqliteCreateFunction('ST_IsValid', fn ($g = null) => 1);
@@ -74,10 +75,31 @@ abstract class TestCase extends BaseTestCase
                     $table->string('status_awal')->nullable();
                     $table->string('status_eksisting')->nullable();
                     $table->string('sumber_data')->nullable();
+                    $table->string('hierarki_jalan', 40)->default('poros_desa');
+                    $table->uuid('sumber_proposal_id')->nullable();
+                    $table->uuid('sumber_lokasi_id')->nullable();
+                    $table->uuid('validated_by')->nullable();
+                    $table->timestamp('validated_at')->nullable();
                     $table->integer('id_desa')->nullable();
                     $table->integer('id_kecamatan')->nullable();
                     $table->text('geom')->nullable();
                     $table->timestamps();
+                });
+            }
+
+            if (!Schema::hasTable('jalan_kabupaten_luarkota')) {
+                Schema::create('jalan_kabupaten_luarkota', function ($table) {
+                    $table->increments('id');
+                    $table->text('geom')->nullable();
+                    $table->string('nama_ruas')->nullable();
+                    $table->double('no_ruas')->nullable();
+                    $table->string('pangkal')->nullable();
+                    $table->string('ujung')->nullable();
+                    $table->double('panjang')->nullable();
+                    $table->string('klas_ruas')->nullable();
+                    $table->text('nama_kecamatan')->nullable();
+                    $table->boolean('selected')->nullable();
+                    $table->string('status_ruas')->nullable();
                 });
             }
         }

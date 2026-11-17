@@ -52,13 +52,18 @@ class JalanPorosDesaController extends Controller
 
         $likeOp = DB::connection()->getDriverName() === 'sqlite' ? 'like' : 'ilike';
 
-        // Text search: nama_ruas, desa, kecamatan
+        // Text search: kode_ruas, nama_ruas, desa, kecamatan
         if ($request->filled('search')) {
-            $search = '%' . trim($request->query('search')) . '%';
-            $query->where(function ($q) use ($search, $likeOp) {
+            $rawSearch = trim((string) $request->query('search'));
+            $search = '%' . $rawSearch . '%';
+            $numericSearch = ltrim($rawSearch, '#');
+            $query->where(function ($q) use ($search, $likeOp, $numericSearch) {
                 $q->where('jalan_porosdesa.nama_ruas', $likeOp, $search)
                   ->orWhere('jalan_porosdesa.desa', $likeOp, $search)
                   ->orWhere('jalan_porosdesa.kecamatan', $likeOp, $search);
+                if ($numericSearch !== '' && ctype_digit($numericSearch)) {
+                    $q->orWhere('jalan_porosdesa.kode_ruas', (int) $numericSearch);
+                }
             });
         }
 
@@ -100,6 +105,33 @@ class JalanPorosDesaController extends Controller
 
         $format = $request->query('format', 'geojson');
 
+        if ($format === 'lookup') {
+            $limit = min(max((int) $request->query('limit', 500), 1), 1000);
+            $items = (clone $query)
+                ->select([
+                    'id',
+                    'kode_ruas',
+                    'nama_ruas',
+                    'desa',
+                    'kecamatan',
+                    'id_desa',
+                    'id_kecamatan',
+                    'panjang',
+                    'kondisi',
+                    'perkerasan',
+                    'lebar',
+                ])
+                ->orderByRaw('CASE WHEN kode_ruas IS NULL THEN 1 ELSE 0 END, kode_ruas ASC')
+                ->orderBy('nama_ruas', 'asc')
+                ->limit($limit)
+                ->get();
+
+            return response()->json([
+                'ok'   => true,
+                'data' => $items,
+            ]);
+        }
+
         if ($format === 'options') {
             $kecamatanQuery = DB::table('bataswilayah_kecamatan')
                 ->select('id', 'nama_kecamatan as nama')
@@ -140,53 +172,30 @@ class JalanPorosDesaController extends Controller
         }
 
         if ($format === 'summary') {
-            $summaryQuery = DB::table('jalan_porosdesa');
-            $kondisiQuery = DB::table('jalan_porosdesa')->whereNotNull('kondisi');
-
-            $likeOp = JalanPorosDesa::likeOperator();
-
-            $applyFilters = function ($q) use ($request, $likeOp) {
-                if ($request->filled('search')) {
-                    $search = '%' . trim($request->query('search')) . '%';
-                    $q->where(function ($sub) use ($search, $likeOp) {
-                        $sub->where('nama_ruas', $likeOp, $search)
-                            ->orWhere('desa', $likeOp, $search)
-                            ->orWhere('kecamatan', $likeOp, $search);
-                    });
-                }
-                if ($request->filled('kondisi')) {
-                    $q->where('kondisi', $request->query('kondisi'));
-                }
-                if ($request->filled('perkerasan')) {
-                    $q->where('perkerasan', $request->query('perkerasan'));
-                }
-                if ($request->filled('kecamatan')) {
-                    $val = trim($request->query('kecamatan'));
-                    if (is_numeric($val)) {
-                        $q->where('id_kecamatan', (int) $val);
-                    } else {
-                        $q->where('kecamatan', $likeOp, $val);
-                    }
-                } elseif ($request->filled('id_kecamatan')) {
-                    $q->where('id_kecamatan', (int) $request->query('id_kecamatan'));
-                }
-                if ($request->filled('desa')) {
-                    $val = trim($request->query('desa'));
-                    if (is_numeric($val)) {
-                        $q->where('id_desa', (int) $val);
-                    } else {
-                        $q->where('desa', $likeOp, $val);
-                    }
-                } elseif ($request->filled('id_desa')) {
-                    $q->where('id_desa', (int) $request->query('id_desa'));
-                }
-            };
-
-            $applyFilters($summaryQuery);
-            $applyFilters($kondisiQuery);
+            // Re-use query builder already scoped by user authority, wilayah, search, and bbox
+            $summaryQuery = (clone $query)->toBase();
+            $kondisiQuery = (clone $query)->whereNotNull('jalan_porosdesa.kondisi')->toBase();
+            $perkerasanQuery = (clone $query)
+                ->whereNotNull('jalan_porosdesa.perkerasan')
+                ->where('jalan_porosdesa.perkerasan', '!=', '')
+                ->toBase();
 
             $stats = JalanPorosDesa::getSummaryStats($summaryQuery);
             $kondisiBreakdown = JalanPorosDesa::getKondisiBreakdown($kondisiQuery);
+
+            $isSqlite = \App\Helpers\SpatialHelper::isSqlite();
+            $sumPerkerasanMeter = $isSqlite
+                ? "ROUND(SUM(ST_Length(geom)), 2)"
+                : "ROUND(SUM(ST_Length(geom::geography))::numeric, 2)";
+            $sumPerkerasanKm = $isSqlite
+                ? "ROUND(SUM(ST_Length(geom)) / 1000, 3)"
+                : "ROUND((SUM(ST_Length(geom::geography)) / 1000)::numeric, 3)";
+
+            $perkerasanBreakdown = $perkerasanQuery
+                ->selectRaw("perkerasan, COUNT(*) as jumlah, {$sumPerkerasanMeter} as panjang_meter, {$sumPerkerasanKm} as panjang_km")
+                ->groupBy('perkerasan')
+                ->orderByDesc('jumlah')
+                ->get();
 
             $maxKodeRuas = (int) DB::table('jalan_porosdesa')->max('kode_ruas');
 
@@ -198,7 +207,8 @@ class JalanPorosDesaController extends Controller
                 'max_kode_ruas'       => $maxKodeRuas,
                 'next_kode_ruas'      => $maxKodeRuas + 1,
                 'kondisi'             => $kondisiBreakdown,
-                'bbox'            => [
+                'perkerasan'          => $perkerasanBreakdown,
+                'bbox'                => [
                     (float) ($stats->min_x ?? 111.4),
                     (float) ($stats->min_y ?? -7.5),
                     (float) ($stats->max_x ?? 112.2),

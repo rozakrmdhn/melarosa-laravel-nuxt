@@ -4,14 +4,14 @@ import LeftPanel from "~/components/maps/LeftPanel.vue";
 import { KECAMATAN_ENTRIES, type KecamatanEntry } from "~/constants/kecamatan";
 import BasemapPanel from "~/components/maps/BasemapPanel.vue";
 import MapBasemapBottomSheet from "~/components/maps/MapBasemapBottomSheet.vue";
-import BottomLocationBar from "~/components/maps/BottomLocationBar.vue";
 import MapMobileBottomSheet, { type SnapLevel } from "~/components/maps/MapMobileBottomSheet.vue";
-import MapShareModal from "~/components/maps/MapShareModal.vue";
-import MapShareBottomSheet from "~/components/maps/MapShareBottomSheet.vue";
 import type { ActiveLayerItem, MainTab } from "~/types/map-layers";
 import { useGeoparkSites, type GeoparkSite } from "~/composables/useGeoparkSites";
-import type { MapThumbnailOptions } from "~/composables/useMapThumbnail";
+import type { RekapRuasItem } from "~/types/rekap-jalan";
 import { parseCoordinateString } from "~/utils/gis-helpers";
+import { normalizeWilayahKey } from "~/composables/useMapRekapOverview";
+import { useRekapJalanApi } from "~/composables/useRekapJalanApi";
+import { $http } from "~/utils/helpers";
 
 definePageMeta({
   layout: false,
@@ -98,9 +98,9 @@ function parseZoomQuery(raw: any): number | null {
   return null;
 }
 
-// Spatial BBOX Martin Tile Server (gabungan data jalan_porosdesa & infrastruktur_segmen se-Bojonegoro)
+// Spatial BBOX Kabupaten Bojonegoro (union 28 kecamatan & batas data spasial Martin)
 const MARTIN_SPATIAL_BBOX: [number, number, number, number] = [
-  111.445099, -7.451684, 112.163338, -6.981707
+  111.42351, -7.46964, 112.16569, -6.981707
 ];
 
 // Inisialisasi awal koordinat dari path URL gaya Google Maps atau query bbox
@@ -155,6 +155,7 @@ const { data: layersData } = useHttp<any>("layers", {
   lazy: true,
   dedupe: "defer",
   getCachedData: (key, nuxtApp) => {
+    if (!nuxtApp.isHydrating) return undefined;
     return nuxtApp.payload.data[key] || nuxtApp.static.data[key];
   },
 });
@@ -168,10 +169,11 @@ const clickedCoordinate = ref<[number, number] | null>(
 
 // Floating panels toggles
 // Di desktop, panel kiri terbuka secara default
-const leftPanelOpen = ref(false);
+const leftPanelOpen = ref(import.meta.client ? window.innerWidth >= 768 : false);
 const locationBarOpen = ref(hasExplicitSearchOrPin);
 const selectedKecamatanFilter = ref<string | null>(null);
-const isShareModalOpen = ref(false);
+const selectedDesaFilter = ref<string | null>(null);
+const selectedStatusFilter = ref<string | null>(null);
 const isBasemapBottomSheetOpen = ref(false);
 
 // ─── OpenGraph & Social Share Dynamic Metadata (16:9 Thumbnail Banner) ─────────
@@ -254,6 +256,8 @@ function startLoadingSimulation() {
 
 // Shared state dengan PublicNavbar.vue: menandai bahwa peta telah selesai dimuat
 const isMapsReady = useState<boolean>("melarosa_maps_ready", () => false);
+// Transisi masuk Floating Left Panel (muncul anggun setelah navbar meregang ke kiri & kanan)
+const isLeftPanelMounted = ref(false);
 
 function handleMapLoaded() {
   if (progressTimer) {
@@ -274,12 +278,414 @@ function handleMapLoaded() {
 }
 
 // Mobile drawers & screen detection
-type MobileDrawerTab = "layer" | "dataset" | "geopark" | "geoportal";
+type MobileDrawerTab = "layer" | "infrastruktur" | "geopark" | "dataset";
 const mobileDrawerOpen = ref(false);
 const mobileDrawerTab = ref<MobileDrawerTab>("layer");
 const mobileSheetSnap = ref<SnapLevel>("min");
 const isMobileScreen = ref(false);
 const previousTabBeforeIdentify = ref<MainTab | null>(null);
+const showGeoparkOverlay = ref(false);
+
+function isRoadLayerItem(layer: ActiveLayerItem): boolean {
+  const hay = `${layer.id || ""} ${layer.layer_name || ""} ${layer.martinSource || ""} ${layer.title || ""} ${layer.name || ""}`.toLowerCase();
+  return hay.includes("jalan") || hay.includes("infrastruktur_segmen");
+}
+
+function handleToggleRoadsVisibility() {
+  const roadLayers = activeLayers.value.filter(isRoadLayerItem);
+  if (roadLayers.length === 0) return;
+  const anyVisible = roadLayers.some((l) => l.visible !== false);
+  const nextVisible = !anyVisible;
+  activeLayers.value = activeLayers.value.map((l) =>
+    isRoadLayerItem(l) ? { ...l, visible: nextVisible } : l
+  );
+}
+
+function handleToggleGeoparkOverlay() {
+  showGeoparkOverlay.value = !showGeoparkOverlay.value;
+}
+
+function handleLocateUser() {
+  mapCanvasRef.value?.locateUser?.();
+  if (isMobileScreen.value && mobileSheetSnap.value !== "min") {
+    mobileSheetSnap.value = "min";
+  }
+}
+
+function collectGeoJsonPoints(coords: any, out: [number, number][]) {
+  if (!Array.isArray(coords)) return;
+  if (
+    coords.length >= 2 &&
+    typeof coords[0] === "number" &&
+    typeof coords[1] === "number" &&
+    Number.isFinite(coords[0]) &&
+    Number.isFinite(coords[1])
+  ) {
+    out.push([coords[0], coords[1]]);
+    return;
+  }
+  for (const item of coords) {
+    collectGeoJsonPoints(item, out);
+  }
+}
+
+function extractGeoJsonBounds(geom?: { type?: string; coordinates?: any }): {
+  coordinate?: [number, number];
+  extent?: [number, number, number, number];
+} {
+  if (!geom || !geom.coordinates) return {};
+  const points: [number, number][] = [];
+  collectGeoJsonPoints(geom.coordinates, points);
+  const first = points[0];
+  if (!first) return {};
+
+  let minX = first[0];
+  let minY = first[1];
+  let maxX = first[0];
+  let maxY = first[1];
+  for (const [x, y] of points) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  if (minX === maxX) {
+    minX -= 0.001;
+    maxX += 0.001;
+  }
+  if (minY === maxY) {
+    minY -= 0.001;
+    maxY += 0.001;
+  }
+  const midpoint = points[Math.floor(points.length / 2)] || first;
+  return {
+    coordinate: midpoint,
+    extent: [minX, minY, maxX, maxY],
+  };
+}
+
+function formatRoadMeters(meters?: number): string {
+  const m = Number(meters || 0);
+  if (m >= 1000) {
+    return `${(m / 1000).toLocaleString("id-ID", { maximumFractionDigits: 2 })} km`;
+  }
+  return `${Math.round(m).toLocaleString("id-ID")} m`;
+}
+
+let roadSelectRequestSeq = 0;
+let lastRoadZoomedId: string | null = null;
+let lastRoadZoomedAt = 0;
+
+function mergeGeoJsonLines(geoms: Array<{ type?: string; coordinates?: any } | null | undefined>) {
+  const lines: number[][][] = [];
+  for (const g of geoms) {
+    if (!g || !g.coordinates) continue;
+    if (g.type === "LineString" && Array.isArray(g.coordinates) && g.coordinates.length >= 2) {
+      lines.push(g.coordinates);
+    } else if (g.type === "MultiLineString" && Array.isArray(g.coordinates)) {
+      for (const part of g.coordinates) {
+        if (Array.isArray(part) && part.length >= 2) {
+          lines.push(part);
+        }
+      }
+    }
+  }
+  if (lines.length === 0) return null;
+  if (lines.length === 1) {
+    return { type: "LineString", coordinates: lines[0] };
+  }
+  return { type: "MultiLineString", coordinates: lines };
+}
+
+function isPorosDesaLayerItem(layer: ActiveLayerItem): boolean {
+  const src = String(layer.martinSource || layer.layer_name || "").toLowerCase();
+  const title = String(layer.title || layer.name || "").toLowerCase();
+  return (
+    src === "jalan_porosdesa" ||
+    layer.id === "01a1589c-8bf1-7294-9cf7-41ffda7e71f6" ||
+    title.includes("poros")
+  );
+}
+
+function ensurePorosRoadLayerVisible() {
+  const porosHidden = activeLayers.value.some((l) => isPorosDesaLayerItem(l) && l.visible === false);
+  if (porosHidden) {
+    activeLayers.value = activeLayers.value.map((l) =>
+      isPorosDesaLayerItem(l) ? { ...l, visible: true } : l
+    );
+    return;
+  }
+  const hasAnyRoadVisible = activeLayers.value.some((l) => isRoadLayerItem(l) && l.visible !== false);
+  if (!hasAnyRoadVisible && activeLayers.value.some(isRoadLayerItem)) {
+    activeLayers.value = activeLayers.value.map((l) =>
+      isRoadLayerItem(l) ? { ...l, visible: true } : l
+    );
+  }
+}
+
+async function fetchRoadCenterlineGeometry(
+  ruas: RekapRuasItem,
+  desaName: string,
+  kecamatanName: string
+): Promise<{ type: string; coordinates: any } | null> {
+  const queryParams: Record<string, string> = {
+    layer_name: "jalan_porosdesa",
+  };
+  if (ruas.id !== undefined && ruas.id !== null && String(ruas.id).trim() !== "") {
+    queryParams.feature_id = String(ruas.id).trim();
+  }
+  if (ruas.kode_ruas !== undefined && ruas.kode_ruas !== null && String(ruas.kode_ruas).trim() !== "") {
+    queryParams.kode_ruas = String(ruas.kode_ruas).trim();
+  }
+  if (ruas.nama_ruas) {
+    queryParams.namobj = ruas.nama_ruas;
+  }
+  if (desaName) {
+    queryParams.desa = desaName;
+  }
+  if (kecamatanName) {
+    queryParams.kecamatan = kecamatanName;
+  }
+
+  try {
+    const res: any = await $http("layers/jalan_porosdesa/feature-geometry", {
+      query: queryParams,
+    });
+    if (res?.ok && res?.geometry?.coordinates) {
+      return res.geometry;
+    }
+  } catch {
+    // Fallback to remote rekap API host or segments/MVT below
+  }
+
+  try {
+    const config = useRuntimeConfig();
+    const rekapBase = String(config.public?.rekapApiUrl || "").replace(/\/$/, "");
+    if (rekapBase) {
+      const qs = new URLSearchParams(queryParams).toString();
+      const res: any = await $fetch(`${rekapBase}/layers/jalan_porosdesa/feature-geometry?${qs}`);
+      if (res?.ok && res?.geometry?.coordinates) {
+        return res.geometry;
+      }
+    }
+  } catch {
+    // Remote host may not expose layers endpoint
+  }
+
+  return null;
+}
+
+async function fetchSegmentsMergedGeometry(ruasId: string | number): Promise<{ type: string; coordinates: any } | null> {
+  try {
+    const rekapApi = useRekapJalanApi();
+    const segments = await rekapApi.fetchDetailSegmen(ruasId);
+    if (!Array.isArray(segments) || segments.length === 0) return null;
+    return mergeGeoJsonLines(segments.map((s) => s.geom));
+  } catch {
+    return null;
+  }
+}
+
+async function handleSelectRoadFromExplorer(payload: {
+  ruas: RekapRuasItem;
+  desaName: string;
+  kecamatanName: string;
+}) {
+  const { ruas, desaName, kecamatanName } = payload;
+  const requestId = ++roadSelectRequestSeq;
+
+  const targetKecKey = normalizeWilayahKey(kecamatanName);
+  const matchedKec = KECAMATAN_ENTRIES.find(
+    (k) => normalizeWilayahKey(k.name) === targetKecKey
+  );
+
+  ensurePorosRoadLayerVisible();
+  const porosLayer = activeLayers.value.find(isPorosDesaLayerItem);
+
+  const featureProps: Record<string, any> = {
+    nama_ruas: ruas.nama_ruas,
+    desa: desaName,
+    kecamatan: kecamatanName,
+    panjang_ruas: formatRoadMeters(ruas.panjang_master || ruas.panjang),
+    sudah_dibangun: formatRoadMeters(ruas.panjang_dibangun),
+    capaian: `${Math.round(ruas.progress || 0)}%`,
+  };
+  if (ruas.kode_ruas !== undefined && ruas.kode_ruas !== null && String(ruas.kode_ruas) !== "") {
+    featureProps.kode_ruas = ruas.kode_ruas;
+  }
+  if (ruas.kondisi || ruas.status_kondisi) {
+    featureProps.kondisi = ruas.kondisi || ruas.status_kondisi;
+  }
+  if (ruas.atribut?.jenis_perkerasan) {
+    featureProps.jenis_perkerasan = ruas.atribut.jenis_perkerasan;
+  }
+  if (ruas.tahun_pembangunan) {
+    featureProps.tahun_pembangunan = ruas.tahun_pembangunan;
+  }
+  if (ruas.sumber_dana) {
+    featureProps.sumber_dana = ruas.sumber_dana;
+  }
+
+  if (currentMainTab.value !== "layers") {
+    previousTabBeforeIdentify.value = currentMainTab.value;
+  }
+
+  mapCanvasRef.value?.renderSelectedFeature?.(null);
+  isIdentifyingFeatures.value = true;
+  clickedCoordinate.value = matchedKec?.coordinate ?? null;
+  searchedLocationLabel.value = ruas.nama_ruas;
+  identifiedFeatures.value = [];
+  locationBarOpen.value = true;
+
+  handleTabChange("layers");
+
+  if (isMobileScreen.value) {
+    mobileDrawerTab.value = "layer";
+    mobileSheetSnap.value = "peek";
+    mobileDrawerOpen.value = true;
+  } else {
+    leftPanelOpen.value = true;
+  }
+
+  let resolvedGeoJson: any = ruas.geom?.coordinates ? ruas.geom : null;
+  let mvtMatch = !resolvedGeoJson
+    ? mapCanvasRef.value?.findFeatureGeometryInMvt?.({
+        id: ruas.id,
+        kodeRuas: ruas.kode_ruas,
+        namaRuas: ruas.nama_ruas,
+        desaName,
+        kecamatanName,
+      })
+    : null;
+
+  if (!resolvedGeoJson && mvtMatch?.geojsonGeometry) {
+    resolvedGeoJson = mvtMatch.geojsonGeometry;
+  }
+
+  if (!resolvedGeoJson) {
+    const [centerlineRes, segmentsRes] = await Promise.allSettled([
+      fetchRoadCenterlineGeometry(ruas, desaName, kecamatanName),
+      fetchSegmentsMergedGeometry(ruas.id),
+    ]);
+
+    if (requestId !== roadSelectRequestSeq || !locationBarOpen.value) return;
+
+    const centerlineGeom = centerlineRes.status === "fulfilled" ? centerlineRes.value : null;
+    const segmentsGeom = segmentsRes.status === "fulfilled" ? segmentsRes.value : null;
+    resolvedGeoJson = centerlineGeom || segmentsGeom || null;
+
+    if (!resolvedGeoJson) {
+      mvtMatch = mapCanvasRef.value?.findFeatureGeometryInMvt?.({
+        id: ruas.id,
+        kodeRuas: ruas.kode_ruas,
+        namaRuas: ruas.nama_ruas,
+        desaName,
+        kecamatanName,
+      });
+      if (mvtMatch?.geojsonGeometry) {
+        resolvedGeoJson = mvtMatch.geojsonGeometry;
+      }
+    }
+  }
+
+  if (requestId !== roadSelectRequestSeq || !locationBarOpen.value) return;
+
+  const bounds = extractGeoJsonBounds(resolvedGeoJson);
+  const resolvedExtent = bounds.extent || mvtMatch?.extent;
+  const targetCoordinate = bounds.coordinate || mvtMatch?.coordinate || matchedKec?.coordinate;
+
+  if (!resolvedGeoJson) {
+    featureProps.lokasi_peta = matchedKec
+      ? `Menampilkan wilayah Kecamatan ${matchedKec.name}`
+      : "Koordinat rinci ruas belum tersedia";
+  }
+
+  const featId = `ruas-${ruas.id}`;
+  const feat: IdentifiedFeature = {
+    id: featId,
+    layerId: mvtMatch?.layerId || porosLayer?.id || "jalan_porosdesa",
+    layerTitle: porosLayer?.title || "Jalan Desa",
+    layerInstansi: porosLayer?.instansi || "Pemerintah Kabupaten Bojonegoro",
+    geometryType: resolvedGeoJson?.type || "LineString",
+    properties: featureProps,
+    coordinate: targetCoordinate,
+    extent: resolvedExtent || matchedKec?.bbox,
+    geojsonGeometry: resolvedGeoJson || undefined,
+  };
+  if (resolvedGeoJson) {
+    (feat as any)._hasFullBackendGeometry = true;
+  }
+
+  lastRoadZoomedId = featId;
+  lastRoadZoomedAt = Date.now();
+  isIdentifyingFeatures.value = false;
+  clickedCoordinate.value = targetCoordinate ?? null;
+  identifiedFeatures.value = [feat];
+  mapCanvasRef.value?.renderSelectedFeature?.(feat);
+
+  if (resolvedExtent) {
+    mapCanvasRef.value?.fitFeatureExtent?.(
+      resolvedExtent,
+      17,
+      550,
+      isMobileScreen.value ? "peek" : undefined
+    );
+  } else if (matchedKec?.bbox) {
+    mapCanvasRef.value?.fitBbox?.(
+      matchedKec.bbox,
+      14,
+      500,
+      isMobileScreen.value ? "peek" : undefined
+    );
+    // Vector tiles for this kecamatan may finish loading shortly after fitBbox
+    setTimeout(() => {
+      if (requestId !== roadSelectRequestSeq || !locationBarOpen.value) return;
+      const delayedMvt = mapCanvasRef.value?.findFeatureGeometryInMvt?.({
+        id: ruas.id,
+        kodeRuas: ruas.kode_ruas,
+        namaRuas: ruas.nama_ruas,
+        desaName,
+        kecamatanName,
+      });
+      if (!delayedMvt?.geojsonGeometry) return;
+
+      const delayedBounds = extractGeoJsonBounds(delayedMvt.geojsonGeometry);
+      const nextProps = { ...featureProps };
+      delete nextProps.lokasi_peta;
+      const upgradedFeat: IdentifiedFeature = {
+        ...feat,
+        layerId: delayedMvt.layerId || feat.layerId,
+        geometryType: delayedMvt.geojsonGeometry.type || feat.geometryType,
+        properties: nextProps,
+        coordinate: delayedBounds.coordinate || delayedMvt.coordinate || targetCoordinate,
+        extent: delayedBounds.extent || delayedMvt.extent || matchedKec.bbox,
+        geojsonGeometry: delayedMvt.geojsonGeometry,
+      };
+      (upgradedFeat as any)._hasFullBackendGeometry = true;
+      lastRoadZoomedId = upgradedFeat.id || null;
+      lastRoadZoomedAt = Date.now();
+      clickedCoordinate.value = upgradedFeat.coordinate ?? null;
+      identifiedFeatures.value = [upgradedFeat];
+      mapCanvasRef.value?.renderSelectedFeature?.(upgradedFeat);
+      const zoomExtent = delayedBounds.extent || delayedMvt.extent;
+      if (zoomExtent) {
+        mapCanvasRef.value?.fitFeatureExtent?.(
+          zoomExtent,
+          17,
+          550,
+          isMobileScreen.value ? "peek" : undefined
+        );
+      }
+    }, 850);
+  } else if (targetCoordinate) {
+    mapCanvasRef.value?.fitCoordinateWithPadding?.(
+      targetCoordinate,
+      15,
+      500,
+      isMobileScreen.value ? "peek" : undefined
+    );
+  }
+}
 
 function updateIsMobile() {
   if (typeof window !== "undefined") {
@@ -323,9 +729,6 @@ function handleToggleBasemapSheet() {
     return;
   }
   if (isMobileScreen.value) {
-    if (isShareModalOpen.value) {
-      isShareModalOpen.value = false;
-    }
     if (mobileDrawerOpen.value && mobileSheetSnap.value !== "min") {
       mobileSheetSnap.value = "min";
     }
@@ -351,23 +754,20 @@ function handleToggleLeftPanelOrMobileDrawer() {
   toggleLeftPanel();
 }
 
-async function getMapSnapshot(options?: { crop16_9?: boolean; width?: number; height?: number }): Promise<string | null> {
-  if (!mapCanvasRef.value) return null;
-  return mapCanvasRef.value.getMapSnapshot(options);
-}
-
-async function getMapThumbnail(options?: MapThumbnailOptions): Promise<string | null> {
-  if (!mapCanvasRef.value) return null;
-  return mapCanvasRef.value.getMapThumbnail(options);
-}
-
-const isCartoGridActive = ref(false);
-
-function handleToggleCartoGrid() {
-  if (mapCanvasRef.value?.toggleCartoGrid) {
-    isCartoGridActive.value = Boolean(mapCanvasRef.value.toggleCartoGrid());
+function handleOpenLayersMenu() {
+  if (isMobileScreen.value) {
+    mobileDrawerOpen.value = true;
+    if (mobileSheetSnap.value === "min") {
+      mobileSheetSnap.value = "half";
+    }
+    nextTick(() => {
+      mobileLeftPanelRef.value?.openOtherLayers?.();
+    });
   } else {
-    isCartoGridActive.value = !isCartoGridActive.value;
+    leftPanelOpen.value = true;
+    nextTick(() => {
+      desktopLeftPanelRef.value?.openOtherLayers?.();
+    });
   }
 }
 
@@ -384,32 +784,6 @@ function handleFitKabupaten() {
   );
 }
 
-function handleOpenShare() {
-  if (isMobileScreen.value) {
-    // Tutup bottom sheet peta terlebih dahulu dengan transisi lembut
-    mobileDrawerOpen.value = false;
-    isBasemapBottomSheetOpen.value = false;
-  }
-  isShareModalOpen.value = true;
-}
-
-function handleShareSheetClosed() {
-  if (isMobileScreen.value) {
-    // Beri jeda halus (60ms) setelah sheet bagikan tertutup sempurna, lalu buka kembali panel peta ke separuh layar
-    mobileSheetSnap.value = "peek";
-    setTimeout(() => {
-      mobileDrawerOpen.value = true;
-    }, 60);
-  }
-}
-
-watch(isShareModalOpen, (isOpen) => {
-  if (isOpen && isMobileScreen.value) {
-    mobileDrawerOpen.value = false;
-    isBasemapBottomSheetOpen.value = false;
-  }
-});
-
 watch([mobileDrawerOpen, mobileSheetSnap], ([open, snap]) => {
   if (open && snap !== "min" && isBasemapBottomSheetOpen.value) {
     isBasemapBottomSheetOpen.value = false;
@@ -422,6 +796,24 @@ const identifiedFeatures = ref<IdentifiedFeature[]>([]);
 const isIdentifyingFeatures = ref(false);
 
 // ─── Active GIS Layers Helper & Mapping ──────────────────────────────────────────
+function parseLayerOrder(item: any): number {
+  if (item?.order !== null && item?.order !== undefined && item?.order !== "") {
+    const numeric = Number(item.order);
+    if (!Number.isNaN(numeric)) return numeric;
+  }
+  if (item?.layer_name === "infrastruktur_segmen") return 5;
+  if (item?.layer_name === "bataswilayah_kabupaten") return 1;
+  return 2;
+}
+
+function withNormalizedStackOrder(layers: ActiveLayerItem[]): ActiveLayerItem[] {
+  const total = layers.length;
+  return layers.map((layer, idx) => ({
+    ...layer,
+    order: total - idx,
+  }));
+}
+
 function mapLayerItemToActive(item: any): ActiveLayerItem {
   const isMvt =
     (item.protocol || "").toUpperCase() === "MVT" ||
@@ -451,11 +843,12 @@ function mapLayerItemToActive(item: any): ActiveLayerItem {
     source_type: isMvt ? "martin" : (item.source_type || "external"),
     visible: true,
     opacity: typeof item.opacity === "number" ? item.opacity : 1,
-    order: typeof item.order === "number" ? item.order : (isSegmen ? 0 : isKabupaten ? 13 : 1),
+    order: parseLayerOrder(item),
     wmsUrl: isMvt ? undefined : (item.wmsUrl || item.url),
     wmsLayerName: isMvt ? undefined : (item.wmsLayerName || item.layer_name),
     mvtUrl: isMvt ? (item.mvtUrl || item.url) : undefined,
     martinSource: isMvt ? (detectedMartinSource || (isKabupaten ? "bataswilayah_kabupaten" : isSegmen ? "infrastruktur_segmen" : "jalan_porosdesa")) : undefined,
+    style_config: item.style_config || null,
     expanded: false,
     activeTool: "none",
     disableIdentify: isKabupaten || Boolean(item.disableIdentify),
@@ -488,6 +881,7 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
     opacity: 1,
     expanded: false,
     activeTool: "none",
+    order: 5,
   },
   {
     id: "01a1589c-8bf1-7294-9cf7-41ffda7e71f6",
@@ -507,6 +901,7 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
     opacity: 1,
     expanded: false,
     activeTool: "none",
+    order: 3,
   },
   {
     id: "01a15e28-a042-71a0-b111-ed7d9256e5bf",
@@ -527,7 +922,7 @@ const FALLBACK_DEFAULT_LAYERS: ActiveLayerItem[] = [
     expanded: false,
     activeTool: "none",
     disableIdentify: true,
-    order: 13,
+    order: 1,
   },
 ];
 
@@ -546,16 +941,38 @@ function applyLayersFromApi(feed: any) {
 
   const defaultVisibleItems = list.filter((item: any) => Boolean(item.default_visible) && Boolean(item.is_active));
   if (defaultVisibleItems.length > 0) {
+    // Standar GIS panel (QGIS/ArcGIS): reverse dari order ASC sehingga order terbesar (lapisan teratas peta)
+    // berada di index 0 (paling atas daftar) dan order terkecil (lapisan dasar) berada di paling bawah daftar.
     defaultVisibleItems.sort((a, b) => {
-      const isSegmenA = a.layer_name === "infrastruktur_segmen";
-      const isSegmenB = b.layer_name === "infrastruktur_segmen";
-      if (isSegmenA) return -1;
-      if (isSegmenB) return 1;
-      return (a.order ?? 0) - (b.order ?? 0);
+      const orderA = parseLayerOrder(a);
+      const orderB = parseLayerOrder(b);
+      if (orderB !== orderA) return orderB - orderA;
+      return String(a.name || a.title || "").localeCompare(String(b.name || b.title || ""), "id");
     });
 
-    activeLayers.value = defaultVisibleItems.map(mapLayerItemToActive);
+    activeLayers.value = withNormalizedStackOrder(defaultVisibleItems.map(mapLayerItemToActive));
     hasInitializedLayersFromApi.value = true;
+  } else {
+    activeLayers.value = activeLayers.value.map((fb) => {
+      const matched = list.find(
+        (item: any) =>
+          item.layer_name === fb.layer_name ||
+          (fb.martinSource && item.layer_name === fb.martinSource),
+      );
+      if (!matched) return fb;
+      const resolved = mapLayerItemToActive(matched);
+      return {
+        ...resolved,
+        visible: fb.visible,
+        opacity: fb.opacity,
+        order: fb.order ?? resolved.order,
+      };
+    });
+    hasInitializedLayersFromApi.value = true;
+  }
+
+  if (selectedKecamatanFilter.value || selectedDesaFilter.value || selectedStatusFilter.value) {
+    applyMvtFiltersToActiveLayers();
   }
 }
 
@@ -699,22 +1116,38 @@ watch(
                   : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchLabel.toLowerCase())?.name || null))
               : null));
 
+    const targetDesaParam = typeof route.query.desa === "string" && route.query.desa.trim()
+      ? route.query.desa.trim()
+      : null;
+    const targetStatusParam = typeof route.query.status === "string" && route.query.status.trim()
+      ? route.query.status.trim()
+      : null;
+
+    if (targetStatusParam !== selectedStatusFilter.value) {
+      selectedStatusFilter.value = targetStatusParam;
+      applyMvtFiltersToActiveLayers();
+    }
+
     const parsedCoords = searchLabel ? parseCoordinateString(searchLabel) : null;
 
-    if (targetKecParam) {
-      // Hanya eksekusi jika filter kecamatan belum aktif atau berbeda dari yang sedang aktif
-      if (targetKecParam.toLowerCase() !== (selectedKecamatanFilter.value || "").toLowerCase()) {
-        handleFilterWilayah(targetKecParam);
-        const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === targetKecParam.toLowerCase());
-        if (matched && matched.bbox) {
-          mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
-          clickedCoordinate.value = null;
-          mapCanvasRef.value?.dismissPulse?.();
-          searchedLocationLabel.value = `Kecamatan ${matched.name}`;
+    if (targetKecParam || targetDesaParam) {
+      // Hanya eksekusi jika filter kecamatan atau desa belum aktif atau berbeda dari yang sedang aktif
+      const kecChanged = (targetKecParam || "").toLowerCase() !== (selectedKecamatanFilter.value || "").toLowerCase();
+      const desaChanged = (targetDesaParam || "").toLowerCase() !== (selectedDesaFilter.value || "").toLowerCase();
+      if (kecChanged || desaChanged) {
+        handleFilterWilayah(targetKecParam, undefined, targetDesaParam);
+        if (targetKecParam) {
+          const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === targetKecParam.toLowerCase());
+          if (matched && matched.bbox) {
+            mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
+            clickedCoordinate.value = null;
+            mapCanvasRef.value?.dismissPulse?.();
+            searchedLocationLabel.value = targetDesaParam ? `${targetDesaParam}, Kec. ${matched.name}` : `Kecamatan ${matched.name}`;
+          }
         }
       }
-    } else if (selectedKecamatanFilter.value && !route.query.wilayah && !route.query.kecamatan) {
-      // Jika parameter wilayah/kecamatan sudah dibersihkan dari query URL, sinkronkan reset
+    } else if ((selectedKecamatanFilter.value || selectedDesaFilter.value) && !route.query.wilayah && !route.query.kecamatan && !route.query.desa) {
+      // Jika parameter wilayah/kecamatan/desa sudah dibersihkan dari query URL, sinkronkan reset
       handleFilterWilayah(null);
     } else if (pv && (searchLabel || route.query.pin)) {
       clickedCoordinate.value = pv.center;
@@ -745,12 +1178,18 @@ watch(mobileDrawerOpen, (isOpen) => {
   }
 });
 
-onMounted(async () => {
+onMounted(() => {
   if (import.meta.client) {
+    isMapsReady.value = false;
+    isLeftPanelMounted.value = false;
     startLoadingSimulation();
     setTimeout(() => {
       if (!isMapCanvasLoaded.value) {
         handleMapLoaded();
+      }
+      if (!isMapsReady.value) {
+        isMapsReady.value = true;
+        isLeftPanelMounted.value = true;
       }
     }, 4500);
   }
@@ -782,16 +1221,29 @@ onMounted(async () => {
                 ? searchedLocationLabel.value.replace(/^kecamatan\s+/i, "").replace(/\s*\(kota\)$/i, "").trim()
                 : (KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === searchedLocationLabel.value!.toLowerCase())?.name || null))
             : null));
+  const initialDesa = typeof route.query.desa === "string" && route.query.desa.trim()
+    ? route.query.desa.trim()
+    : null;
+  const initialStatus = typeof route.query.status === "string" && route.query.status.trim()
+    ? route.query.status.trim()
+    : null;
+  if (initialStatus) {
+    selectedStatusFilter.value = initialStatus;
+    applyMvtFiltersToActiveLayers();
+  }
+
   const initialCoord = searchedLocationLabel.value ? parseCoordinateString(searchedLocationLabel.value) : null;
-  if (initialKec) {
-    handleFilterWilayah(initialKec);
-    const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === initialKec.toLowerCase());
-    if (matched && matched.bbox && !route.query.bbox) {
-      setTimeout(() => {
-        mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
-        clickedCoordinate.value = null;
-        mapCanvasRef.value?.dismissPulse?.();
-      }, 350);
+  if (initialKec || initialDesa) {
+    handleFilterWilayah(initialKec, undefined, initialDesa);
+    if (initialKec) {
+      const matched = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === initialKec.toLowerCase());
+      if (matched && matched.bbox && !route.query.bbox) {
+        setTimeout(() => {
+          mapCanvasRef.value?.fitBbox(matched.bbox, 14, 500, isMobileScreen.value ? "peek" : undefined);
+          clickedCoordinate.value = null;
+          mapCanvasRef.value?.dismissPulse?.();
+        }, 350);
+      }
     }
   } else if (initialCoord && !pathView) {
     setTimeout(() => {
@@ -800,44 +1252,23 @@ onMounted(async () => {
       locationBarOpen.value = true;
     }, 350);
   }
-
-  // Fitbound awal hanya jika data spasial Martin mengembalikan bounds; tanpa objek, kamera tidak digeser
-  if (!pathView && !route.query.bbox && !hasExplicitSearchOrPin) {
-    try {
-      const [segmenRes, jalanRes] = await Promise.allSettled([
-        $fetch<any>("/martin/infrastruktur_segmen"),
-        $fetch<any>("/martin/jalan_porosdesa"),
-      ]);
-      const b1 = segmenRes.status === "fulfilled" ? segmenRes.value?.bounds : null;
-      const b2 = jalanRes.status === "fulfilled" ? jalanRes.value?.bounds : null;
-      let targetBbox: [number, number, number, number] | null = null;
-      if (Array.isArray(b1) && Array.isArray(b2) && b1.length === 4 && b2.length === 4) {
-        targetBbox = [
-          Math.min(b1[0], b2[0]),
-          Math.min(b1[1], b2[1]),
-          Math.max(b1[2], b2[2]),
-          Math.max(b1[3], b2[3]),
-        ];
-      } else if (Array.isArray(b1) && b1.length === 4) {
-        targetBbox = b1 as [number, number, number, number];
-      } else if (Array.isArray(b2) && b2.length === 4) {
-        targetBbox = b2 as [number, number, number, number];
-      }
-      if (targetBbox) {
-        const bbox = targetBbox;
-        nextTick(() => {
-          mapCanvasRef.value?.fitBbox(bbox, 15, 600);
-        });
-      }
-    } catch {}
-  }
 });
 
 onUnmounted(() => {
-  if (progressTimer) clearInterval(progressTimer);
-  if (urlUpdateTimer) clearTimeout(urlUpdateTimer);
-  window.removeEventListener("popstate", handlePopState);
-  window.removeEventListener("resize", updateIsMobile);
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+  if (urlUpdateTimer) {
+    clearTimeout(urlUpdateTimer);
+    urlUpdateTimer = null;
+  }
+  isMapsReady.value = false;
+  isLeftPanelMounted.value = false;
+  if (import.meta.client) {
+    window.removeEventListener("popstate", handlePopState);
+    window.removeEventListener("resize", updateIsMobile);
+  }
 });
 
 function handleMapClick(coordinate: [number, number]) {
@@ -933,6 +1364,9 @@ function handleSelectKecamatan(payload: {
     );
     clickedCoordinate.value = payload.coordinate;
   }
+
+  // Terapkan filter wilayah kecamatan & spatial extent ke seluruh layer MVT
+  handleFilterWilayah(matchedKec ? matchedKec.name : payload.name, targetBbox);
 
   searchedLocationLabel.value = payload.name;
   if (isMobileScreen.value) {
@@ -1035,26 +1469,8 @@ function handleIdentifyFeatures(features: IdentifiedFeature[]) {
       mobileDrawerOpen.value = true;
     }
 
-    // Pasang highlight style trayek UI modern untuk fitur teratas
+    // Pasang highlight style trayek UI modern untuk fitur teratas secara instan tanpa fitBounds
     mapCanvasRef.value?.renderSelectedFeature?.(topFeature);
-
-    // SATU KALI FITBOUND TUNGGAL:
-    // Prioritaskan extent geometri fitur teratas layer aktif agar tidak terjadi pergeseran kamera ganda
-    if (topFeature.extent) {
-      mapCanvasRef.value?.fitFeatureExtent(
-        topFeature.extent,
-        undefined,
-        550,
-        isMobileScreen.value ? "peek" : undefined
-      );
-    } else if (clickedCoordinate.value) {
-      mapCanvasRef.value?.fitCoordinateWithPadding(
-        clickedCoordinate.value,
-        undefined,
-        500,
-        isMobileScreen.value ? "peek" : undefined
-      );
-    }
   } else {
     // Klik area kosong: tidak ada objek fitur, kamera tidak digeser
     mapCanvasRef.value?.renderSelectedFeature?.(null);
@@ -1062,12 +1478,15 @@ function handleIdentifyFeatures(features: IdentifiedFeature[]) {
 }
 
 function handleSelectFeature(feature: IdentifiedFeature) {
+  if (lastRoadZoomedId && feature?.id === lastRoadZoomedId && Date.now() - lastRoadZoomedAt < 400) {
+    return;
+  }
   const namobj = extractNamobj(feature?.properties);
   if (namobj) {
     searchedLocationLabel.value = namobj;
   }
 
-  // Update highlight style trayek UI modern sesuai fitur yang dipilih dari daftar
+  // Update highlight style trayek UI modern sesuai fitur yang dipilih dari daftar secara instan tanpa fitBounds
   mapCanvasRef.value?.renderSelectedFeature?.(feature);
 
   if (isMobileScreen.value) {
@@ -1075,31 +1494,19 @@ function handleSelectFeature(feature: IdentifiedFeature) {
     mobileSheetSnap.value = "peek";
     mobileDrawerOpen.value = true;
   }
-
-  if (feature?.extent) {
-    mapCanvasRef.value?.fitFeatureExtent(
-      feature.extent,
-      undefined,
-      500,
-      isMobileScreen.value ? "peek" : undefined
-    );
-  } else if (feature?.coordinate) {
-    mapCanvasRef.value?.fitCoordinateWithPadding(
-      feature.coordinate,
-      undefined,
-      450,
-      isMobileScreen.value ? "peek" : undefined
-    );
-  }
 }
 
 let isClosingInspector = false;
 
 function handleClearPin() {
+  roadSelectRequestSeq++;
+  isIdentifyingFeatures.value = false;
+  previousTabBeforeIdentify.value = null;
   clickedCoordinate.value = null;
   searchedLocationLabel.value = null;
   identifiedFeatures.value = [];
   locationBarOpen.value = false;
+  mapCanvasRef.value?.dismissPulse?.();
   mapCanvasRef.value?.renderSelectedFeature?.(null);
   if (import.meta.client) {
     const url = new URL(window.location.href);
@@ -1113,6 +1520,8 @@ function handleClearPin() {
 function handleCloseInspector() {
   if (isClosingInspector) return;
   isClosingInspector = true;
+  roadSelectRequestSeq++;
+  isIdentifyingFeatures.value = false;
   try {
     locationBarOpen.value = false;
     clickedCoordinate.value = null;
@@ -1121,13 +1530,20 @@ function handleCloseInspector() {
     mapCanvasRef.value?.dismissPulse?.();
     mapCanvasRef.value?.renderSelectedFeature?.(null);
 
-    // Otomatis kembalikan ke tab sebelumnya (Dataset atau Geopark) saat inspector ditutup
+    // Otomatis kembalikan ke tab sebelumnya saat panel info lokasi ditutup
     if (previousTabBeforeIdentify.value) {
       const prev = previousTabBeforeIdentify.value;
       previousTabBeforeIdentify.value = null;
       handleTabChange(prev);
       if (isMobileScreen.value) {
-        mobileDrawerTab.value = prev === "geopark" ? "geopark" : prev === "dataset" ? "dataset" : "layer";
+        mobileDrawerTab.value =
+          prev === "geopark"
+            ? "geopark"
+            : prev === "infrastruktur"
+              ? "infrastruktur"
+              : prev === "dataset"
+                ? "dataset"
+                : "layer";
       }
     }
 
@@ -1215,7 +1631,8 @@ function updateMapQuery(newParams: Record<string, string | null | undefined>, re
 const currentMainTab = computed<MainTab>(() => {
   const raw = String(route.query.tab || "").toLowerCase();
   const siteQuery = route.query.geosite || route.query.site;
-  if (raw === "geosite" || raw === "geopark" || Boolean(siteQuery)) return "geopark";
+  if (raw === "geosite" || raw === "geopark" || raw === "wisata" || Boolean(siteQuery)) return "geopark";
+  if (raw === "infrastruktur" || raw === "wilayah" || raw === "desa") return "infrastruktur";
   if (raw === "dataset" || raw === "geoportal") return "dataset";
   return "layers";
 });
@@ -1230,7 +1647,17 @@ function handleTabChange(tab: MainTab) {
   if (tab !== "layers") {
     previousTabBeforeIdentify.value = null;
   }
-  const queryTab = tab === "layers" ? undefined : tab === "geopark" ? "geosite" : tab;
+  if (isMobileScreen.value) {
+    mobileDrawerTab.value =
+      tab === "geopark"
+        ? "geopark"
+        : tab === "infrastruktur"
+          ? "infrastruktur"
+          : tab === "dataset"
+            ? "dataset"
+            : "layer";
+  }
+  const queryTab = tab === "layers" ? undefined : tab === "geopark" ? "wisata" : tab;
   updateMapQuery({
     tab: queryTab,
     geosite: undefined,
@@ -1255,9 +1682,11 @@ function handleMobileTabClick(tab: MobileDrawerTab) {
   const mainTab: MainTab =
     tab === "geopark"
       ? "geopark"
-      : tab === "dataset" || tab === "geoportal"
-        ? "dataset"
-        : "layers";
+      : tab === "infrastruktur"
+        ? "infrastruktur"
+        : tab === "dataset"
+          ? "dataset"
+          : "layers";
   handleTabChange(mainTab);
   mobileLeftPanelRef.value?.resetSubViews(mainTab);
   desktopLeftPanelRef.value?.resetSubViews(mainTab);
@@ -1270,9 +1699,11 @@ function openMobileTab(tab: MobileDrawerTab) {
   const mainTab: MainTab =
     tab === "geopark"
       ? "geopark"
-      : tab === "dataset" || tab === "geoportal"
-        ? "dataset"
-        : "layers";
+      : tab === "infrastruktur"
+        ? "infrastruktur"
+        : tab === "dataset"
+          ? "dataset"
+          : "layers";
   handleTabChange(mainTab);
   mobileLeftPanelRef.value?.resetSubViews(mainTab);
   desktopLeftPanelRef.value?.resetSubViews(mainTab);
@@ -1346,18 +1777,22 @@ function applyRouteQueryToViews() {
   const rawTab = String(q.tab || "").toLowerCase();
   const siteQuery = q.geosite || q.site;
   const mainTab: MainTab =
-    rawTab === "geosite" || rawTab === "geopark" || Boolean(siteQuery)
+    rawTab === "geosite" || rawTab === "geopark" || rawTab === "wisata" || Boolean(siteQuery)
       ? "geopark"
-      : rawTab === "dataset" || rawTab === "geoportal"
-        ? "dataset"
-        : "layers";
+      : rawTab === "infrastruktur" || rawTab === "wilayah" || rawTab === "desa"
+        ? "infrastruktur"
+        : rawTab === "dataset" || rawTab === "geoportal"
+          ? "dataset"
+          : "layers";
 
   mobileDrawerTab.value =
     mainTab === "geopark"
       ? "geopark"
-      : mainTab === "dataset"
-        ? "dataset"
-        : "layer";
+      : mainTab === "infrastruktur"
+        ? "infrastruktur"
+        : mainTab === "dataset"
+          ? "dataset"
+          : "layer";
 
   // Check sub-views
   if (siteQuery) {
@@ -1510,11 +1945,104 @@ function handleUpdateLayerFilter(payload: { layerId: string; kecamatan: string |
   }
 }
 
-function handleFilterWilayah(kecamatanName: string | null) {
+function convertBbox4326To3857(bbox: [number, number, number, number]): [number, number, number, number] {
+  const minX = (bbox[0] * 20037508.34) / 180;
+  let minY = Math.log(Math.tan(((90 + bbox[1]) * Math.PI) / 360)) / (Math.PI / 180);
+  minY = (minY * 20037508.34) / 180;
+
+  const maxX = (bbox[2] * 20037508.34) / 180;
+  let maxY = Math.log(Math.tan(((90 + bbox[3]) * Math.PI) / 360)) / (Math.PI / 180);
+  maxY = (maxY * 20037508.34) / 180;
+
+  return [minX, minY, maxX, maxY];
+}
+
+function isMvtLayerItem(layer: ActiveLayerItem): boolean {
+  return Boolean(
+    (layer.protocol || "").toUpperCase() === "MVT" ||
+    layer.source_type === "martin" ||
+    layer.mvtUrl ||
+    layer.martinSource ||
+    (layer.layer_name &&
+      [
+        "infrastruktur_segmen",
+        "jalan_porosdesa",
+        "jalan_kabupaten_luarkota",
+        "bataswilayah_desa",
+        "bataswilayah_kecamatan",
+      ].includes(layer.layer_name))
+  );
+}
+
+function applyMvtFiltersToActiveLayers(customExtent3857?: [number, number, number, number] | null) {
+  let filterExtent3857 = customExtent3857 ?? null;
+  if (!filterExtent3857 && selectedKecamatanFilter.value) {
+    const cleanKec = selectedKecamatanFilter.value.replace(/^Kecamatan\s+/i, "").trim().toLowerCase();
+    const matchedKec = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === cleanKec);
+    if (matchedKec?.bbox && matchedKec.bbox.length === 4) {
+      filterExtent3857 = convertBbox4326To3857(matchedKec.bbox);
+    }
+  }
+
+  activeLayers.value = activeLayers.value.map((layer) => {
+    if (isMvtLayerItem(layer)) {
+      return {
+        ...layer,
+        filterKecamatan: selectedKecamatanFilter.value,
+        filterDesa: selectedDesaFilter.value,
+        filterStatus: selectedStatusFilter.value,
+        filterExtent: filterExtent3857,
+      };
+    }
+    return layer;
+  });
+}
+
+function fitMapToDesaFilter(desaName: string, kecamatanName?: string | null, attempt = 0) {
+  if (!import.meta.client) return;
+  const desaExtent = mapCanvasRef.value?.findDesaExtentInMvt?.(desaName, kecamatanName);
+  if (desaExtent) {
+    mapCanvasRef.value?.fitBbox?.(
+      desaExtent,
+      15,
+      500,
+      isMobileScreen.value ? "peek" : undefined
+    );
+    return;
+  }
+  if (attempt < 3) {
+    setTimeout(() => {
+      if (selectedDesaFilter.value && selectedDesaFilter.value.toLowerCase() === desaName.toLowerCase()) {
+        fitMapToDesaFilter(desaName, kecamatanName, attempt + 1);
+      }
+    }, 450);
+  }
+}
+
+function handleFilterWilayah(
+  kecamatanName: string | null,
+  customBbox?: [number, number, number, number] | null,
+  desaName?: string | null
+) {
   selectedKecamatanFilter.value = kecamatanName;
+  selectedDesaFilter.value = desaName || null;
+
+  let filterExtent3857: [number, number, number, number] | null = null;
+  if (kecamatanName) {
+    const cleanKec = kecamatanName.replace(/^Kecamatan\s+/i, "").trim().toLowerCase();
+    const matchedKec = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === cleanKec);
+    const targetBbox = customBbox || matchedKec?.bbox;
+    if (targetBbox && targetBbox.length === 4) {
+      filterExtent3857 = convertBbox4326To3857(targetBbox);
+    }
+  } else if (customBbox && customBbox.length === 4) {
+    filterExtent3857 = convertBbox4326To3857(customBbox);
+  }
+
   updateMapQuery({
     wilayah: kecamatanName || undefined,
     kecamatan: kecamatanName || undefined,
+    desa: desaName || undefined,
     search: kecamatanName ? (route.query.search as string) : (route.query.search && /^kecamatan/i.test(String(route.query.search)) ? undefined : (route.query.search as string)),
     name: kecamatanName ? (route.query.name as string) : (route.query.name && /^kecamatan/i.test(String(route.query.name)) ? undefined : (route.query.name as string)),
     q: kecamatanName ? (route.query.q as string) : (route.query.q && /^kecamatan/i.test(String(route.query.q)) ? undefined : (route.query.q as string)),
@@ -1532,6 +2060,9 @@ function handleFilterWilayah(kecamatanName: string | null) {
       const url = new URL(window.location.href);
       url.searchParams.delete("wilayah");
       url.searchParams.delete("kecamatan");
+      if (!desaName) {
+        url.searchParams.delete("desa");
+      }
       const s = url.searchParams.get("search");
       if (s && (/^kecamatan\s+/i.test(s) || KECAMATAN_ENTRIES.some((k) => k.name.toLowerCase() === s.toLowerCase()))) {
         url.searchParams.delete("search");
@@ -1547,27 +2078,22 @@ function handleFilterWilayah(kecamatanName: string | null) {
       window.history.replaceState(window.history.state, "", url.toString());
     }
   }
-  activeLayers.value = activeLayers.value.map((layer) => {
-    const isMvt =
-      (layer.protocol || "").toUpperCase() === "MVT" ||
-      layer.source_type === "martin" ||
-      (layer.layer_name && ["infrastruktur_segmen", "jalan_porosdesa"].includes(layer.layer_name));
-    if (isMvt) {
-      return {
-        ...layer,
-        filterKecamatan: kecamatanName,
-      };
-    }
-    return layer;
-  });
+  applyMvtFiltersToActiveLayers(filterExtent3857);
+
+  if (desaName && !customBbox) {
+    fitMapToDesaFilter(desaName, kecamatanName);
+  }
 }
 
 function handleReorderLayers(newLayers: ActiveLayerItem[]) {
-  activeLayers.value = [...newLayers];
+  // Posisi di panel: index 0 adalah paling atas (order tertinggi / depan peta), index terakhir paling bawah (dasar)
+  activeLayers.value = withNormalizedStackOrder(newLayers);
 }
 
 function handleRemoveLayer(layerId: string) {
-  activeLayers.value = (activeLayers.value || []).filter((l) => l.id !== layerId);
+  activeLayers.value = withNormalizedStackOrder(
+    (activeLayers.value || []).filter((l) => l.id !== layerId)
+  );
 }
 
 function handleSelectDataset(dataset: any) {
@@ -1578,49 +2104,15 @@ function handleSelectDataset(dataset: any) {
     existing.visible = true;
     existing.expanded = true;
   } else {
-    // Sisipkan layer baru di posisi teratas tumpukan
-    activeLayers.value.unshift(mapLayerItemToActive(dataset));
+    // Sisipkan layer baru di posisi teratas tumpukan GIS (paling depan di peta)
+    const newActiveItem = mapLayerItemToActive(dataset);
+    activeLayers.value = withNormalizedStackOrder([newActiveItem, ...activeLayers.value]);
   }
 
   leftPanelOpen.value = true;
 }
 
-// Transisi masuk Floating Left Panel (muncul anggun setelah navbar meregang ke kiri & kanan)
-const isLeftPanelMounted = ref(false);
 
-onMounted(() => {
-  if (import.meta.client) {
-    isMapsReady.value = false;
-    isLeftPanelMounted.value = false;
-    updateIsMobile();
-    window.addEventListener("resize", updateIsMobile, { passive: true });
-    startLoadingSimulation();
-
-    // Fallback keselamatan jika event map loaded tertahan lebih dari 4 detik
-    setTimeout(() => {
-      if (!isMapsReady.value) {
-        isMapsReady.value = true;
-        isLeftPanelMounted.value = true;
-      }
-    }, 4500);
-  }
-});
-
-onUnmounted(() => {
-  if (import.meta.client) {
-    window.removeEventListener("resize", updateIsMobile);
-  }
-  isMapsReady.value = false;
-  isLeftPanelMounted.value = false;
-  if (progressTimer) {
-    clearInterval(progressTimer);
-    progressTimer = null;
-  }
-  if (urlUpdateTimer) {
-    clearTimeout(urlUpdateTimer);
-    urlUpdateTimer = null;
-  }
-});
 </script>
 
 <template>
@@ -1640,11 +2132,13 @@ onUnmounted(() => {
         :active-tab="currentMainTab"
         :active-layers="activeLayers"
         :selected-kecamatan-filter="selectedKecamatanFilter"
+        :selected-desa-filter="selectedDesaFilter"
         :clicked-coordinate="clickedCoordinate"
         :location-label="searchedLocationLabel"
         :identified-features="identifiedFeatures"
         :is-identifying="isIdentifyingFeatures"
         :inspector-open="locationBarOpen"
+        :geopark-overlay-visible="showGeoparkOverlay"
         @tab-change="handleTabChange"
         @open-layer-detail="handleOpenLayerDetail"
         @close-layer-detail="handleCloseLayerDetail"
@@ -1664,7 +2158,10 @@ onUnmounted(() => {
         @clear-pin="handleClearPin"
         @select-feature="handleSelectFeature"
         @select-coordinate="handleSelectCoordinate"
-        @share="handleOpenShare"
+        @toggle-roads-visibility="handleToggleRoadsVisibility"
+        @toggle-geopark-overlay="handleToggleGeoparkOverlay"
+        @locate-user="handleLocateUser"
+        @select-road="handleSelectRoadFromExplorer"
       />
     </aside>
 
@@ -1682,12 +2179,14 @@ onUnmounted(() => {
           :initial-center="initialCenter"
           :initial-bbox="initialBbox"
           :initial-zoom="initialZoom"
+          :default-bbox="MARTIN_SPATIAL_BBOX"
+          :left-panel-open="leftPanelOpen"
           :active-layers="activeLayers"
           :mobile-drawer-open="mobileDrawerOpen"
           :mobile-sheet-snap="mobileSheetSnap"
           :active-tab="currentMainTab"
           :selected-geopark-site="selectedGeoparkSite"
-          :geopark-sites="currentMainTab === 'geopark' ? geoparkSites : []"
+          :geopark-sites="(currentMainTab === 'geopark' || showGeoparkOverlay) ? geoparkSites : []"
           @select-geopark="handleOpenGeoparkDetail"
           @map-click="handleMapClick"
           @canvas-tap-dismiss="handleCanvasTapDismiss"
@@ -1695,7 +2194,6 @@ onUnmounted(() => {
           @identifying-features="isIdentifyingFeatures = $event"
           @update:viewport="handleViewportUpdate"
           @dismiss-popup="handleCloseInspector"
-          @share="handleOpenShare"
           @loaded="handleMapLoaded"
         />
         <template #fallback>
@@ -1726,7 +2224,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <p class="text-[10px] font-mono tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+              <p class="text-[11px] font-medium tracking-wide text-slate-400 dark:text-slate-500 uppercase">
                 WebGIS Kabupaten Bojonegoro
               </p>
             </div>
@@ -1770,7 +2268,7 @@ onUnmounted(() => {
                   :style="{ width: `${loadingProgress}%` }"
                 />
               </div>
-              <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 dark:text-slate-500 px-0.5">
+              <div class="flex items-center justify-between text-[11px] font-medium text-slate-400 dark:text-slate-500 px-0.5">
                 <span>Inisialisasi</span>
                 <span class="font-bold text-blue-600 dark:text-blue-400 tabular-nums">
                   {{ loadingProgress }}%
@@ -1778,7 +2276,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <p class="text-[10px] font-mono tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+            <p class="text-[11px] font-medium tracking-wide text-slate-400 dark:text-slate-500 uppercase">
               WebGIS Kabupaten Bojonegoro
             </p>
           </div>
@@ -1794,7 +2292,7 @@ onUnmounted(() => {
             : mobileDrawerOpen && mobileSheetSnap === 'peek'
               ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4'
               : mobileDrawerOpen && mobileSheetSnap === 'min'
-                ? 'bottom-[calc(150px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
+                ? 'bottom-[calc(156px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
                 : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
         ]"
       >
@@ -1816,24 +2314,20 @@ onUnmounted(() => {
 
           <div class="w-full h-px bg-gray-200/80 dark:bg-slate-800" aria-hidden="true" />
 
-          <!-- Tombol Toggle Grid Kartografi & Koordinat Tepi (di atas toggle basemap) -->
-          <UTooltip :text="isCartoGridActive ? 'Sembunyikan Grid Kartografi & Koordinat' : 'Tampilkan Grid Kartografi & Koordinat Tepi'">
+          <!-- Tombol Layer (mengarahkan ke Menu Lainnya di Tab Jelajah) -->
+          <UTooltip text="Kelola &amp; Urutkan Layer Peta">
             <button
               type="button"
-              class="w-full h-11 min-h-[44px] min-w-[44px] flex items-center justify-center transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 active:scale-90"
-              :class="isCartoGridActive
-                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/70 dark:bg-blue-950/50 hover:bg-blue-100/70 dark:hover:bg-blue-900/50'
-                : 'text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100/80 dark:hover:bg-slate-800/80'"
-              :aria-pressed="isCartoGridActive"
-              aria-label="Toggle Grid Kartografi & Koordinat Tepi"
-              @click="handleToggleCartoGrid"
+              class="w-full h-11 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100/80 dark:hover:bg-slate-800/80 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 active:scale-90"
+              aria-label="Kelola dan Urutkan Layer Peta"
+              @click="handleOpenLayersMenu"
             >
-              <UIcon name="i-lucide-grid-3x3" class="size-4 stroke-[2.25]" />
+              <UIcon name="i-lucide-layers" class="size-4 stroke-[2.25]" />
             </button>
           </UTooltip>
         </div>
 
-        <!-- Basemap Panel (di bawah Grid Kartografi) -->
+        <!-- Basemap Panel -->
         <BasemapPanel
           v-model:current-basemap="currentBasemap"
           :is-mobile="isMobileScreen"
@@ -1852,89 +2346,73 @@ onUnmounted(() => {
       @backdrop-click="handleCanvasTapDismiss"
       :title="
         locationBarOpen && clickedCoordinate
-          ? 'Identifikasi Fitur'
-          : mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
-            ? 'Katalog Dataset'
+          ? 'Info Lokasi & Jalan'
+          : mobileDrawerTab === 'infrastruktur'
+            ? 'Infrastruktur Bojonegoro'
             : mobileDrawerTab === 'geopark'
-              ? 'Geopark Bojonegoro'
-              : 'Panel Lapisan Peta'
-      "
-      :subtitle="
-        locationBarOpen && clickedCoordinate
-          ? (searchedLocationLabel || `${clickedCoordinate[1].toFixed(5)}, ${clickedCoordinate[0].toFixed(5)}`)
-          : mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
-            ? 'Katalog Layer Resmi JIGN Bojonegoro'
-            : mobileDrawerTab === 'geopark'
-              ? 'Warisan Geologi, Hayati & Cagar Alam'
-              : `${activeLayers.length} Layer Aktif · Bojonegoro`
+              ? 'Wisata Bojonegoro'
+              : mobileDrawerTab === 'dataset'
+                ? 'Lapisan Peta Tambahan'
+                : 'Peta Bojonegoro'
       "
       :icon="
         locationBarOpen && clickedCoordinate
-          ? 'i-lucide-crosshair'
-          : mobileDrawerTab === 'dataset' || mobileDrawerTab === 'geoportal'
-            ? 'i-lucide-database'
+          ? 'i-ion-location'
+          : mobileDrawerTab === 'infrastruktur'
+            ? 'i-ion-construct'
             : mobileDrawerTab === 'geopark'
-              ? 'i-lucide-mountain-snow'
-              : 'i-lucide-layers'
+              ? 'i-ion-earth'
+              : mobileDrawerTab === 'dataset'
+                ? 'i-ion-layers'
+                : 'i-ion-map'
       "
     >
-      <!-- Tab Switcher: 3 tab teks murni radius 100% tanpa garis atas/bawah & tombol quick share -->
+      <!-- Tab Switcher: 3 tab teks murni radius 100% tanpa garis atas/bawah -->
       <template #tabs>
-        <div class="px-2.5 sm:px-3 pt-1 pb-1.5 bg-transparent flex items-center gap-1.5">
-          <div class="flex-1 grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10" role="tablist" aria-label="Navigasi Panel Mobile">
-            <!-- Tab 1: Peta -->
+        <div class="px-2.5 sm:px-3 pt-1 pb-1.5 bg-transparent">
+          <div class="w-full grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10" role="tablist" aria-label="Navigasi Panel Mobile">
+            <!-- Tab 1: Jelajah -->
             <button
               type="button"
               role="tab"
               :aria-selected="currentMainTab === 'layers'"
-              class="py-2 px-2 rounded-full text-sm sm:text-base font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              class="py-2 px-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
               :class="currentMainTab === 'layers'
                 ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
               @click="handleMobileTabClick('layer')"
             >
-              Peta
+              Jelajah
             </button>
 
-            <!-- Tab 2: Dataset -->
+            <!-- Tab 2: Infrastruktur -->
             <button
               type="button"
               role="tab"
-              :aria-selected="currentMainTab === 'dataset'"
-              class="py-2 px-2 rounded-full text-sm sm:text-base font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
-              :class="currentMainTab === 'dataset'
+              :aria-selected="currentMainTab === 'infrastruktur' || currentMainTab === 'dataset'"
+              class="py-2 px-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
+              :class="currentMainTab === 'infrastruktur' || currentMainTab === 'dataset'
                 ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
-              @click="handleMobileTabClick('dataset')"
+              @click="handleMobileTabClick('infrastruktur')"
             >
-              Dataset
+              Infrastruktur
             </button>
 
-            <!-- Tab 3: Geosite -->
+            <!-- Tab 3: Wisata -->
             <button
               type="button"
               role="tab"
               :aria-selected="currentMainTab === 'geopark'"
-              class="py-2 px-2 rounded-full text-sm sm:text-base font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center"
+              class="py-2 px-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
               :class="currentMainTab === 'geopark'
                 ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
               @click="handleMobileTabClick('geopark')"
             >
-              Geosite
+              Wisata
             </button>
           </div>
-
-          <!-- Tombol Cepat Bagikan Peta Mobile -->
-          <button
-            type="button"
-            class="size-11 rounded-full flex items-center justify-center shrink-0 bg-slate-200/60 dark:bg-white/5 hover:bg-blue-50 dark:hover:bg-blue-950/60 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200/70 dark:border-white/10 transition-all cursor-pointer min-h-[44px] min-w-[44px] active:scale-95 shadow-2xs"
-            title="Bagikan Tautan Peta dengan Pratinjau Thumbnail OG"
-            aria-label="Bagikan peta"
-            @click="handleOpenShare"
-          >
-            <UIcon name="i-lucide-share-2" class="size-4" />
-          </button>
         </div>
       </template>
 
@@ -1946,11 +2424,13 @@ onUnmounted(() => {
           :active-layers="activeLayers"
           :active-tab="currentMainTab"
           :selected-kecamatan-filter="selectedKecamatanFilter"
+        :selected-desa-filter="selectedDesaFilter"
           :clicked-coordinate="clickedCoordinate"
           :location-label="searchedLocationLabel"
           :identified-features="identifiedFeatures"
           :is-identifying="isIdentifyingFeatures"
           :inspector-open="locationBarOpen"
+          :geopark-overlay-visible="showGeoparkOverlay"
           @tab-change="handleTabChange"
           @open-layer-detail="handleOpenLayerDetail"
           @close-layer-detail="handleCloseLayerDetail"
@@ -1971,7 +2451,10 @@ onUnmounted(() => {
           @clear-pin="handleClearPin"
           @select-feature="handleSelectFeature"
           @select-coordinate="handleSelectCoordinate"
-          @share="handleOpenShare"
+          @toggle-roads-visibility="handleToggleRoadsVisibility"
+          @toggle-geopark-overlay="handleToggleGeoparkOverlay"
+          @locate-user="handleLocateUser"
+          @select-road="handleSelectRoadFromExplorer"
           @search-focus="handleMobileSearchFocus"
           @search-close="handleMobileSearchClose"
         />
@@ -1982,37 +2465,6 @@ onUnmounted(() => {
     <MapBasemapBottomSheet
       v-model:open="isBasemapBottomSheetOpen"
       v-model:current-basemap="currentBasemap"
-    />
-
-
-    <!-- ═══ 10. FITUR BAGIKAN PETA: DESKTOP MODAL & MOBILE BOTTOM SHEET MANDIRI ═══ -->
-    <!-- Desktop Modal Dialog -->
-    <MapShareModal
-      v-if="!isMobileScreen"
-      v-model:open="isShareModalOpen"
-      :current-basemap="currentBasemap"
-      :clicked-coordinate="clickedCoordinate"
-      :location-label="searchedLocationLabel"
-      :active-layers="activeLayers"
-      :map-center="clickedCoordinate || initialCenter"
-      :map-zoom="initialZoom"
-      :get-map-snapshot="getMapSnapshot"
-      :get-map-thumbnail="getMapThumbnail"
-    />
-
-    <!-- Mobile Bottom Sheet Mandiri (Tinggi Separuh Layar ~52vh, Expandable ke Full) -->
-    <MapShareBottomSheet
-      v-if="isMobileScreen"
-      v-model:open="isShareModalOpen"
-      :current-basemap="currentBasemap"
-      :clicked-coordinate="clickedCoordinate"
-      :location-label="searchedLocationLabel"
-      :active-layers="activeLayers"
-      :map-center="clickedCoordinate || initialCenter"
-      :map-zoom="initialZoom"
-      :get-map-snapshot="getMapSnapshot"
-      :get-map-thumbnail="getMapThumbnail"
-      @after-close="handleShareSheetClosed"
     />
   </div>
 </template>

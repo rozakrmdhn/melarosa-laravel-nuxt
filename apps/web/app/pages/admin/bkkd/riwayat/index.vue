@@ -16,8 +16,6 @@ useSeoMeta({
 const toast = useToast();
 const api = useBkkdApi();
 
-const activeTab = ref<'proposal' | 'verifikasi'>('proposal');
-
 // Filters
 const selectedTahun = ref<number | 'ALL'>('ALL');
 const filterKecamatan = ref<number | null>(null);
@@ -36,28 +34,16 @@ const aksiProposalOptions = [
   { label: 'Semua Aksi', value: 'ALL' },
   { label: 'Usulan Dibuat (created)', value: 'created' },
   { label: 'Data Diperbarui (updated)', value: 'updated' },
-  { label: 'Status Berubah (status_changed)', value: 'status_changed' },
-  { label: 'Ditetapkan TAPD (ditetapkan_tapd)', value: 'ditetapkan_tapd' },
-  { label: 'Penetapan Dibatalkan (batalkan_tapd)', value: 'batalkan_tapd' },
-  { label: 'Lampiran Ditambahkan (lampiran_added)', value: 'lampiran_added' },
-  { label: 'Lampiran Dihapus (lampiran_removed)', value: 'lampiran_removed' },
+  { label: 'Dihapus Sementara (deleted)', value: 'deleted' },
+  { label: 'Dipulihkan (restored)', value: 'restored' },
 ];
 
-const aksiVerifikasiOptions = [
-  { label: 'Semua Aksi', value: 'ALL' },
-  { label: 'Telaah Pertama Kali (verifikasi_created)', value: 'verifikasi_created' },
-  { label: 'Koreksi Telaah OPD (verifikasi_koreksi)', value: 'verifikasi_koreksi' },
-];
-
-const currentAksiOptions = computed(() =>
-  activeTab.value === 'proposal' ? aksiProposalOptions : aksiVerifikasiOptions
-);
+const currentAksiOptions = computed(() => aksiProposalOptions);
 
 async function loadData() {
   loading.value = true;
   try {
     const params: Record<string, any> = {
-      tipe: activeTab.value,
       page: page.value,
       per_page: perPage.value,
     };
@@ -90,7 +76,7 @@ async function loadData() {
   }
 }
 
-watch([activeTab, selectedTahun, filterKecamatan, filterDesa, filterAksi], () => {
+watch([selectedTahun, filterKecamatan, filterDesa, filterAksi], () => {
   page.value = 1;
   loadData();
 });
@@ -110,32 +96,9 @@ onMounted(() => {
           <span>Riwayat Perubahan & Audit Trail BKKD</span>
         </h1>
         <p class="text-xs text-gray-500 mt-1">
-          Log jejak audit dan snapshot sebelum vs sesudah perubahan data usulan proposal serta hasil telaah verifikasi OPD.
+          Log jejak audit dan snapshot sebelum vs sesudah perubahan data usulan proposal serta analisa spasial.
         </p>
       </div>
-    </div>
-
-    <!-- Tab Selector -->
-    <div class="flex items-center gap-2 border-b border-gray-200 dark:border-white/[0.08]">
-      <button
-        type="button"
-        class="px-4 py-2 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5"
-        :class="activeTab === 'proposal' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700'"
-        @click="activeTab = 'proposal'; filterAksi = 'ALL'"
-      >
-        <UIcon name="i-lucide-file-text" class="w-4 h-4" />
-        <span>Riwayat Perubahan Proposal Usulan</span>
-      </button>
-
-      <button
-        type="button"
-        class="px-4 py-2 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5"
-        :class="activeTab === 'verifikasi' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700'"
-        @click="activeTab = 'verifikasi'; filterAksi = 'ALL'"
-      >
-        <UIcon name="i-lucide-clipboard-check" class="w-4 h-4" />
-        <span>Riwayat Koreksi Verifikasi OPD</span>
-      </button>
     </div>
 
     <!-- Filter Bar -->

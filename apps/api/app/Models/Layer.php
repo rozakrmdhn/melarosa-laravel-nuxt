@@ -30,6 +30,7 @@ class Layer extends Model
         'attribution',
         'description',
         'csw_metadata',
+        'style_config',
         'source_type',
         'is_synced',
         'last_synced_at',
@@ -42,6 +43,7 @@ class Layer extends Model
         'order' => 'integer',
         'is_synced' => 'boolean',
         'csw_metadata' => 'array',
+        'style_config' => 'array',
         'last_synced_at' => 'datetime',
     ];
 
@@ -54,19 +56,42 @@ class Layer extends Model
     }
 
     /**
-     * Scope only geoportal layers.
+     * Scope only Geoportal Bojonegoro layers (WMS Service Geoportal).
      */
     public function scopeGeoportal(Builder $query): Builder
     {
-        return $query->where('source_type', 'geoportal');
+        $like = \Illuminate\Support\Facades\DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+        return $query->where(function (Builder $sub) use ($like) {
+            $sub->where('source_type', 'geoportal')
+                ->orWhere('url', $like, '%geoportal.bojonegorokab.go.id%');
+        });
     }
 
     /**
-     * Scope only internal layers.
+     * Scope only internal layers (Martin Tile Server MVT).
      */
     public function scopeInternal(Builder $query): Builder
     {
-        return $query->where('source_type', '!=', 'geoportal');
+        $like = \Illuminate\Support\Facades\DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+        return $query->where(function (Builder $sub) use ($like) {
+            $sub->where('source_type', 'internal')
+                ->orWhere('source_type', 'martin')
+                ->orWhere('protocol', $like, 'mvt')
+                ->orWhere('url', $like, '%/martin/%');
+        });
+    }
+
+    /**
+     * Scope only external layers (WMS Service diluar Geoportal).
+     */
+    public function scopeExternal(Builder $query): Builder
+    {
+        $like = \Illuminate\Support\Facades\DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+        return $query->where(function (Builder $sub) use ($like) {
+            $sub->where('url', 'not ' . $like, '%geoportal.bojonegorokab.go.id%')
+                ->where('url', 'not ' . $like, '%/martin/%')
+                ->where('protocol', 'not ' . $like, 'mvt');
+        });
     }
 
     /**

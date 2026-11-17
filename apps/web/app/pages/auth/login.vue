@@ -1,194 +1,305 @@
-﻿<script lang="ts" setup>
+<script lang="ts" setup>
 definePageMeta({
   middleware: ["guest"],
 });
 
 useSeoMeta({
-  title: "Masuk | Sistem Informasi Geospasial Kabupaten Bojonegoro",
-  description: "Portal masuk Sistem Informasi Geospasial (WebGIS) Kabupaten Bojonegoro untuk pengelolaan batas wilayah dan infrastruktur jalan.",
+  title: "Masuk Portal",
+  description:
+    "Portal masuk Melarosa GIS Kabupaten Bojonegoro untuk pengelolaan batas wilayah administrasi dan jaringan jalan poros desa.",
 });
+
+type PreviewKey = "rdtr" | "network";
+
+interface MapSpecimen {
+  key: PreviewKey;
+  tabLabel: string;
+  title: string;
+  description: string;
+  imageSrc: string;
+  imageWidth: number;
+  imageHeight: number;
+  imageAlt: string;
+  ctaLabel: string;
+  ctaTo: string;
+}
+
+const mapSpecimens: MapSpecimen[] = [
+  {
+    key: "rdtr",
+    tabLabel: "Peta Isometrik",
+    title: "Peta Piksel Isometrik & Model 3D RDTR Bojonegoro",
+    description:
+      "Visualisasi bangunan, koridor jalan, Sungai Bengawan Solo, dan zona RTH skala detail 1:5.000.",
+    imageSrc: "/tiles/bojonegoro-isometric/master_preview.png",
+    imageWidth: 2048,
+    imageHeight: 1024,
+    imageAlt:
+      "Pratinjau peta piksel isometrik Kota Bojonegoro dan Sungai Bengawan Solo",
+    ctaLabel: "Buka Peta 3D",
+    ctaTo: "/maps/isometric",
+  },
+  {
+    key: "network",
+    tabLabel: "Jaringan Jalan",
+    title: "WebGIS Infrastruktur Jalan Poros & Batas Wilayah",
+    description:
+      "Penelusuran status ruas jalan penghubung antardesa, batas kecamatan, dan sebaran situs Geopark.",
+    imageSrc: "/images/hero-bojonegoro-connectivity.jpg",
+    imageWidth: 1376,
+    imageHeight: 768,
+    imageAlt:
+      "Peta topografi jaringan konektivitas jalan dan aliran sungai Kabupaten Bojonegoro",
+    ctaLabel: "Buka WebGIS 2D",
+    ctaTo: "/maps",
+  },
+];
+
+const activePreviewKey = ref<PreviewKey>("rdtr");
+
+const activeSpecimen = computed<MapSpecimen>(
+  () =>
+    mapSpecimens.find((item) => item.key === activePreviewKey.value) ??
+    mapSpecimens[0]!
+);
 </script>
 
 <template>
-  <div class="min-h-screen w-full flex flex-col lg:flex-row bg-white dark:bg-[#070b14]">
-    <!-- ══════════════════════════════════════════════════════════════════════════
-         PANEL KIRI: FORM LOGIN
-         ══════════════════════════════════════════════════════════════════════════ -->
-    <div
-      class="w-full lg:w-1/2 xl:w-[48%] min-h-screen flex flex-col justify-between p-6 sm:p-10 lg:p-12 xl:p-14 bg-white dark:bg-[#0b0f19] border-r border-gray-100 dark:border-white/[0.06] z-10"
+  <div
+    class="min-h-dvh w-full flex flex-col lg:grid lg:grid-cols-[minmax(0,46fr)_minmax(0,54fr)] bg-[#F7F8F5] dark:bg-[#070b14] text-[#17251F] dark:text-slate-100 selection:bg-[#176B4D] selection:text-white"
+  >
+    <!-- Panel Kiri: Ruang Masuk Portal Operator -->
+    <section
+      class="w-full flex flex-col justify-between bg-white dark:bg-[#0c1522] border-b lg:border-b-0 lg:border-r border-[#DFE5DE] dark:border-white/10"
     >
-      <!-- Top Bar Form: Logo & Navigasi -->
-      <div class="flex items-center justify-between gap-4">
-        <!-- Logo Branding -->
-        <NuxtLink to="/" class="flex items-center gap-3 group">
+      <header
+        class="px-5 sm:px-8 lg:px-12 pt-5 pb-4 flex items-center justify-between gap-3"
+      >
+        <NuxtLink
+          to="/"
+          class="inline-flex items-center gap-3 min-h-[44px] min-w-0 rounded-xl pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] group"
+        >
           <img
             src="/logo-kabupaten.png"
-            alt="Logo Kabupaten Bojonegoro"
-            class="h-10 w-auto object-contain drop-shadow-sm group-hover:scale-105 transition-transform"
+            alt="Lambang Pemerintah Kabupaten Bojonegoro"
+            width="403"
+            height="599"
+            class="h-10 w-auto shrink-0 object-contain"
           />
           <div class="min-w-0">
-            <div class="text-sm font-bold text-gray-900 dark:text-white leading-tight flex items-center gap-1.5">
-              <span>SIGD Bojonegoro</span>
+            <div
+              class="text-sm sm:text-base font-bold tracking-tight text-[#17251F] dark:text-white leading-tight truncate"
+            >
+              Melarosa GIS
             </div>
-            <div class="text-[11px] text-gray-500 dark:text-gray-400 font-medium truncate">
-              Pemerintah Kabupaten Bojonegoro
+            <div
+              class="text-xs font-medium text-[#4E5D55] dark:text-[#CBD5E1] truncate"
+            >
+              Kabupaten Bojonegoro
             </div>
           </div>
         </NuxtLink>
 
-        <!-- Right Action: Beranda & Theme Toggle -->
-        <div class="flex items-center gap-1.5">
-          <UButton
+        <div class="flex items-center gap-2 shrink-0">
+          <NuxtLink
             to="/"
-            icon="i-heroicons-arrow-left"
-            label="Beranda"
-            variant="ghost"
-            color="neutral"
-            size="xs"
-            class="text-gray-500 hover:text-gray-900 dark:hover:text-white"
+            class="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-xl border border-[#DFE5DE] dark:border-white/15 bg-[#F7F8F5] dark:bg-white/5 hover:border-[#839188] dark:hover:border-white/30 text-xs sm:text-sm font-semibold text-[#17251F] dark:text-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+          >
+            <UIcon
+              name="i-lucide-arrow-left"
+              class="size-4 shrink-0"
+              aria-hidden="true"
+            />
+            <span>Beranda</span>
+          </NuxtLink>
+
+          <UColorModeButton
+            aria-label="Ubah mode warna tampilan"
+            class="min-h-[44px] min-w-[44px] rounded-xl border border-[#DFE5DE] dark:border-white/15 bg-[#F7F8F5] dark:bg-white/5 text-[#17251F] dark:text-slate-100 hover:border-[#839188] dark:hover:border-white/30 flex items-center justify-center cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
           />
-          <UColorModeButton size="xs" />
         </div>
-      </div>
+      </header>
 
-      <!-- Main Login Container (Centered) -->
-      <div class="max-w-sm w-full mx-auto my-auto py-8 sm:py-12">
-        <div class="mb-7">
-          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">
-            Masuk ke Akun
-          </h1>
-          <p class="mt-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-            Masukkan kredensial akun Anda untuk mengakses portal manajemen data geospasial Kabupaten Bojonegoro.
-          </p>
+      <main
+        class="flex-1 flex flex-col justify-center px-5 sm:px-8 lg:px-12 py-5 sm:py-7"
+      >
+        <div class="w-full max-w-[420px] mx-auto">
+          <div class="mb-5">
+            <p
+              class="text-xs sm:text-sm font-semibold text-[#176B4D] dark:text-[#34D399]"
+            >
+              Portal Pengelola Data Spasial
+            </p>
+            <h1
+              class="mt-1 text-2xl sm:text-[1.875rem] font-bold tracking-tight text-[#17251F] dark:text-white leading-[1.18]"
+            >
+              Masuk ke Portal Melarosa
+            </h1>
+            <p
+              class="mt-2 text-xs sm:text-sm text-[#4E5D55] dark:text-[#CBD5E1] leading-relaxed"
+            >
+              Gunakan akun perangkat daerah atau kecamatan untuk mengelola batas
+              wilayah administrasi, ruas jalan poros desa, dan lapisan data
+              Kabupaten Bojonegoro.
+            </p>
+          </div>
+
+          <AuthLogin />
         </div>
+      </main>
 
-        <!-- Form Login Component -->
-        <AuthLogin />
-      </div>
-
-      <!-- Bottom Footer: Hak Cipta -->
-      <div class="pt-6 border-t border-gray-100 dark:border-white/[0.05] text-[11px] text-gray-400 dark:text-gray-500 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer
+        class="px-5 sm:px-8 lg:px-12 py-4 border-t border-[#DFE5DE] dark:border-white/10 text-xs text-[#4E5D55] dark:text-[#94A3B8]"
+      >
         <span>© 2026 Pemerintah Kabupaten Bojonegoro</span>
-        <span class="font-mono text-[10px]">Sistem Informasi Geospasial v1.0</span>
-      </div>
-    </div>
+      </footer>
+    </section>
 
-    <!-- ══════════════════════════════════════════════════════════════════════════
-         PANEL KANAN: DESKRIPSI SISTEM INFORMASI GEOSPASIAL KABUPATEN BOJONEGORO
-         ══════════════════════════════════════════════════════════════════════════ -->
-    <div
-      class="hidden lg:flex lg:w-1/2 xl:w-[52%] min-h-screen flex-col justify-between p-10 lg:p-14 xl:p-16 relative overflow-hidden bg-gradient-to-br from-[#061816] via-[#081f1c] to-[#040e0c]"
+    <!-- Panel Kanan: Pratinjau Kartografis Bojonegoro & Akses Peta Publik -->
+    <aside
+      aria-label="Pratinjau Peta Bojonegoro"
+      class="relative w-full flex flex-col justify-between px-5 sm:px-8 lg:px-12 xl:px-14 py-6 sm:py-8 lg:py-8 overflow-hidden bg-[#F7F8F5] dark:bg-[#070b14]"
     >
-      <!-- Background Cartographic Grid Accent (Subtle & Authentic GIS) -->
-      <div class="absolute inset-0 opacity-15 pointer-events-none">
-        <!-- SVG Grid & Coordinate Pattern -->
-        <svg class="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="gis-grid" width="48" height="48" patternUnits="userSpaceOnUse">
-              <path d="M 48 0 L 0 0 0 48" fill="none" stroke="currentColor" stroke-width="0.75" class="text-blue-400" />
-              <circle cx="0" cy="0" r="1.5" fill="currentColor" class="text-blue-400" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#gis-grid)" />
-        </svg>
-      </div>
+      <!-- Grid kartografis dua tingkat (96px & 24px) selaras dengan identitas lembar peta Melarosa -->
+      <div
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-0 dark:hidden"
+        style="
+          background-image:
+            linear-gradient(to right, rgba(23, 107, 77, 0.11) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(23, 107, 77, 0.11) 1px, transparent 1px),
+            linear-gradient(to right, rgba(23, 37, 31, 0.045) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(23, 37, 31, 0.045) 1px, transparent 1px);
+          background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+        "
+      />
+      <div
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-0 hidden dark:block"
+        style="
+          background-image:
+            linear-gradient(to right, rgba(52, 211, 153, 0.09) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(52, 211, 153, 0.09) 1px, transparent 1px),
+            linear-gradient(to right, rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+          background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+        "
+      />
 
-      <!-- Top Header Badge -->
-      <div class="relative z-10 flex items-center justify-between">
-        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-300 text-xs font-medium backdrop-blur-sm">
-          <img src="/logo-kabupaten.png" alt="Logo Bojonegoro" class="h-4 w-auto object-contain" />
-          <span>Sistem Informasi Geospasial Daerah (SIGD)</span>
+      <div
+        class="relative z-10 w-full max-w-2xl mx-auto my-auto flex flex-col gap-5"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-end justify-between gap-3"
+        >
+          <div class="min-w-0">
+            <p
+              class="text-xs font-semibold text-[#176B4D] dark:text-[#34D399]"
+            >
+              Akses Terbuka Publik
+            </p>
+            <h2
+              class="mt-1 text-xl sm:text-2xl font-bold tracking-tight text-[#17251F] dark:text-white leading-snug"
+            >
+              Jelajahi Peta Bojonegoro
+            </h2>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="Pilih pratinjau peta Bojonegoro"
+            class="inline-flex p-1 rounded-xl border border-[#B8C4BC] dark:border-white/15 bg-white dark:bg-[#0c1522] self-start sm:self-auto shrink-0"
+          >
+            <button
+              v-for="specimen in mapSpecimens"
+              :key="specimen.key"
+              type="button"
+              role="tab"
+              :aria-selected="activePreviewKey === specimen.key"
+              :class="
+                activePreviewKey === specimen.key
+                  ? 'bg-[#17251F] text-white dark:bg-[#F8FAFC] dark:text-[#0c1522]'
+                  : 'text-[#4E5D55] dark:text-[#CBD5E1] hover:text-[#17251F] dark:hover:text-white'
+              "
+              class="min-h-[44px] px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+              @click="activePreviewKey = specimen.key"
+            >
+              {{ specimen.tabLabel }}
+            </button>
+          </div>
         </div>
 
-        <div class="font-mono text-[11px] text-blue-400/80 bg-blue-950/40 px-2.5 py-1 rounded border border-blue-500/20">
-          7°09′S 111°53′E
-        </div>
-      </div>
+        <article
+          role="tabpanel"
+          class="rounded-2xl overflow-hidden border border-[#B8C4BC] dark:border-white/15 bg-white dark:bg-[#0c1522] shadow-sm"
+        >
+          <div class="relative w-full aspect-[16/9] bg-[#E8EDE6] dark:bg-[#08101c] overflow-hidden">
+            <img
+              :src="activeSpecimen.imageSrc"
+              :alt="activeSpecimen.imageAlt"
+              :width="activeSpecimen.imageWidth"
+              :height="activeSpecimen.imageHeight"
+              fetchpriority="high"
+              class="w-full h-full object-cover transition-transform duration-300 motion-reduce:transition-none"
+            />
+          </div>
 
-      <!-- Center Hero Overview -->
-      <div class="relative z-10 my-auto py-8 space-y-7 max-w-xl">
-        <div class="space-y-3">
-          <h2 class="text-2xl sm:text-3xl xl:text-4xl font-extrabold text-white tracking-tight leading-tight">
-            Sistem Informasi Geospasial Kabupaten Bojonegoro
-          </h2>
-          <p class="text-sm xl:text-base text-gray-300/90 leading-relaxed">
-            Platform berbasis WebGIS untuk pemetaan digital, pengelolaan batas administrasi wilayah, serta inventarisasi jaringan jalan poros desa secara terpadu, presisi, dan transparan di Kabupaten Bojonegoro.
-          </p>
-        </div>
-
-        <!-- 3 Pilar Data Geospasial (Ringkas & Sederhana) -->
-        <div class="grid grid-cols-1 gap-3.5 pt-2">
-          <!-- Pilar 1: Batas Wilayah -->
-          <div class="flex items-start gap-3.5 p-3.5 rounded-xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-sm">
-            <div class="size-9 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
-              <UIcon name="i-heroicons-building-office-2" class="size-4.5" />
-            </div>
-            <div class="min-w-0">
-              <h3 class="text-sm font-bold text-white">
-                Analisa Spasial
+          <div
+            class="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-[#DFE5DE] dark:border-white/10"
+          >
+            <div class="min-w-0 space-y-1">
+              <h3
+                class="text-sm sm:text-base font-bold text-[#17251F] dark:text-white"
+              >
+                {{ activeSpecimen.title }}
               </h3>
-              <p class="text-xs text-gray-300/80 mt-0.5 leading-relaxed">
-                Pemetaan spasial terverifikasi mencakup 28 wilayah kecamatan dan 430 desa/kelurahan di Kabupaten Bojonegoro.
+              <p
+                class="text-xs sm:text-sm text-[#4E5D55] dark:text-[#CBD5E1] leading-relaxed"
+              >
+                {{ activeSpecimen.description }}
               </p>
             </div>
+
+            <NuxtLink
+              :to="activeSpecimen.ctaTo"
+              class="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-xl border border-[#839188] dark:border-[#64748B] bg-[#F7F8F5] dark:bg-white/5 hover:border-[#176B4D] dark:hover:border-[#34D399] text-xs sm:text-sm font-semibold text-[#17251F] dark:text-white transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            >
+              <UIcon
+                name="i-lucide-map"
+                class="size-4 text-[#176B4D] dark:text-[#34D399] shrink-0"
+                aria-hidden="true"
+              />
+              <span>{{ activeSpecimen.ctaLabel }}</span>
+            </NuxtLink>
+          </div>
+        </article>
+
+        <dl
+          class="rounded-2xl border border-[#DFE5DE] dark:border-white/10 bg-white dark:bg-[#0c1522] divide-y divide-[#DFE5DE] dark:divide-white/10"
+        >
+          <div
+            class="px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 sm:gap-4"
+          >
+            <dt class="text-xs sm:text-sm font-semibold text-[#17251F] dark:text-white">
+              Cakupan Administrasi
+            </dt>
+            <dd class="text-xs sm:text-sm text-[#4E5D55] dark:text-[#CBD5E1]">
+              28 kecamatan dan 430 desa serta kelurahan di Kabupaten Bojonegoro.
+            </dd>
           </div>
 
-          <!-- Pilar 2: Jalan Poros Desa -->
-          <div class="flex items-start gap-3.5 p-3.5 rounded-xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-sm">
-            <div class="size-9 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
-              <UIcon name="i-heroicons-arrows-pointing-out" class="size-4.5" />
-            </div>
-            <div class="min-w-0">
-              <h3 class="text-sm font-bold text-white">
-                Peta Interaktif
-              </h3>
-              <p class="text-xs text-gray-300/80 mt-0.5 leading-relaxed">
-                Inventarisasi ruas, status kelayakan, dan konektivitas infrastruktur jalan poros penghubung antar desa.
-              </p>
-            </div>
+          <div
+            class="px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 sm:gap-4"
+          >
+            <dt class="text-xs sm:text-sm font-semibold text-[#17251F] dark:text-white">
+              Dataset Jalan & Geopark
+            </dt>
+            <dd class="text-xs sm:text-sm text-[#4E5D55] dark:text-[#CBD5E1]">
+              1.187 ruas jalan poros desa serta 31 situs Geopark Nasional terdata.
+            </dd>
           </div>
-
-          <!-- Pilar 3: Satu Data Spasial -->
-          <div class="flex items-start gap-3.5 p-3.5 rounded-xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-sm">
-            <div class="size-9 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-              <UIcon name="i-heroicons-circle-stack" class="size-4.5" />
-            </div>
-            <div class="min-w-0">
-              <h3 class="text-sm font-bold text-white">
-                Satu Data Geospasial Terpadu
-              </h3>
-              <p class="text-xs text-gray-300/80 mt-0.5 leading-relaxed">
-                Standardisasi data spasial tematik untuk percepatan perencanaan pembangunan dan pengambilan kebijakan daerah.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Ringkasan Statistik Spasial -->
-        <div class="pt-3 flex flex-wrap items-center gap-6 border-t border-white/[0.08] text-xs text-gray-300">
-          <div class="flex items-center gap-2">
-            <span class="size-2 rounded-full bg-blue-400" />
-            <span class="font-bold text-white">28</span>
-            <span class="text-gray-400">Kecamatan</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="size-2 rounded-full bg-blue-400" />
-            <span class="font-bold text-white">430</span>
-            <span class="text-gray-400">Desa & Kelurahan</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="size-2 rounded-full bg-blue-400" />
-            <span class="font-bold text-white">WebGIS</span>
-            <span class="text-gray-400">Interaktif</span>
-          </div>
-        </div>
+        </dl>
       </div>
-
-      <!-- Bottom Motto / Kutipan Pemkab -->
-      <div class="relative z-10 pt-4 border-t border-white/[0.08] text-xs text-gray-400/80 italic flex items-center justify-between">
-        <span>"Mewujudkan Satu Data Geospasial Kabupaten Bojonegoro."</span>
-        <UIcon name="i-heroicons-shield-check" class="size-4 text-blue-400/60" />
-      </div>
-    </div>
+    </aside>
   </div>
 </template>

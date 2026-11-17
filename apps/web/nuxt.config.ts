@@ -107,6 +107,7 @@ export default defineNuxtConfig({
 
   security: {
     headers: {
+      strictTransportSecurity: false,
       crossOriginEmbedderPolicy: 'unsafe-none',
       crossOriginOpenerPolicy: 'same-origin-allow-popups',
       referrerPolicy: 'strict-origin-when-cross-origin',
@@ -115,6 +116,7 @@ export default defineNuxtConfig({
         geolocation: ['self'],
       },
       contentSecurityPolicy: {
+        "upgrade-insecure-requests": false,
         "img-src": [
           "'self'",
           "data:",

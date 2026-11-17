@@ -1,14 +1,17 @@
 import type {
   BkkdAgregasiDesaItem,
   BkkdAgregasiDesaSummary,
+  BkkdJalanPorosOption,
   BkkdProposal,
+  BkkdProposalLokasi,
   BkkdProposalSummary,
-  BkkdRekapitulasiDesaItem,
-  BkkdRekapitulasiSummary,
   BkkdRiwayat,
-  BkkdVerifikasi,
+  BkkdRoutePreviewItem,
+  HierarkiJalanBkkd,
+  JaringanJalanRuasFeature,
   RefBkkdBidang,
   RefOpd,
+  StatusAnalisaSpasialBkkd,
 } from '~/types/bkkd';
 
 interface ApiResponse<T> {
@@ -80,26 +83,6 @@ export function useBkkdApi() {
     });
   }
 
-  async function ajukanOpd(id: string) {
-    return $http<ApiResponse<BkkdProposal>>(`admin/bkkd/proposal/${id}/ajukan`, {
-      method: 'POST',
-    });
-  }
-
-  async function batalkanProposal(id: string, alasan: string) {
-    return $http<ApiResponse<BkkdProposal>>(`admin/bkkd/proposal/${id}/batalkan`, {
-      method: 'POST',
-      body: { alasan, alasan_pembatalan: alasan },
-    });
-  }
-
-  async function gantiProposalPapbd(proposalId: string, payload: Record<string, any>) {
-    return $http<ApiResponse<BkkdProposal>>(`admin/bkkd/proposal/${proposalId}/ganti-papbd`, {
-      method: 'POST',
-      body: payload,
-    });
-  }
-
   // ─── Import Excel Proposal ──────────────────────────────────────────────────
   async function importProposalExcel(payload: { rows?: any[]; file?: File }) {
     if (payload.file) {
@@ -121,131 +104,10 @@ export function useBkkdApi() {
     return `${apiBase}/admin/bkkd/proposal/import/template`;
   }
 
-  // ─── Lampiran Berkas ───────────────────────────────────────────────────────
-  async function uploadLampiran(proposalId: string, file: File, jenisDokumen: string) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('jenis_dokumen', jenisDokumen);
-
-    return $http<ApiResponse<any>>(`admin/bkkd/proposal/${proposalId}/lampiran`, {
-      method: 'POST',
-      body: formData,
-    });
-  }
-
-  async function tambahLampiranLink(
-    proposalId: string,
-    payload: { jenis_dokumen: string; url_link: string; nama_asli?: string }
-  ) {
-    return $http<ApiResponse<any>>(`admin/bkkd/proposal/${proposalId}/lampiran`, {
-      method: 'POST',
-      body: {
-        tipe_sumber: 'link',
-        jenis_dokumen: payload.jenis_dokumen,
-        url_link: payload.url_link,
-        nama_asli: payload.nama_asli || undefined,
-      },
-    });
-  }
-
-  async function deleteLampiran(proposalId: string, lampiranId: string) {
-    return $http<ApiResponse<null>>(`admin/bkkd/proposal/${proposalId}/lampiran/${lampiranId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  function getLampiranDownloadUrl(proposalId: string, lampiranId: string): string {
-    const apiBase = config.public.apiBaseUrl || '/api/v1';
-    return `${apiBase}/admin/bkkd/proposal/${proposalId}/lampiran/${lampiranId}/download`;
-  }
-
   async function getProposalRiwayat(proposalId: string) {
     return $http<ApiResponse<BkkdRiwayat[]>>(`admin/bkkd/proposal/${proposalId}/riwayat`, {
       method: 'GET',
     });
-  }
-
-  // ─── Verifikasi OPD ────────────────────────────────────────────────────────
-  async function fetchVerifikasiList(params?: Record<string, any>) {
-    return $http<ApiResponse<BkkdVerifikasi[]>>('admin/bkkd/verifikasi', {
-      method: 'GET',
-      query: params,
-    });
-  }
-
-  async function submitVerifikasi(proposalId: string, payload: Record<string, any>) {
-    return $http<ApiResponse<BkkdVerifikasi>>(`admin/bkkd/proposal/${proposalId}/verifikasi`, {
-      method: 'POST',
-      body: payload,
-    });
-  }
-
-  async function submitVerifikasiKolektif(payload: Record<string, any>) {
-    return $http<ApiResponse<{ dokumen: BkkdVerifikasiDokumen; total_desa: number }>>('admin/bkkd/verifikasi/kolektif', {
-      method: 'POST',
-      body: payload,
-    });
-  }
-
-  async function fetchDokumenVerifikasiList(params?: Record<string, any>) {
-    return $http<ApiResponse<BkkdVerifikasiDokumen[]>>('admin/bkkd/verifikasi/dokumen', {
-      method: 'GET',
-      query: params,
-    });
-  }
-
-  function getDokumenVerifikasiDownloadUrl(dokumenId: string): string {
-    const apiBase = config.public.apiBaseUrl || '/api/v1';
-    return `${apiBase}/admin/bkkd/verifikasi/dokumen/${dokumenId}/download`;
-  }
-
-  async function updateVerifikasi(id: string, payload: Record<string, any>) {
-    return $http<ApiResponse<BkkdVerifikasi>>(`admin/bkkd/verifikasi/${id}`, {
-      method: 'PUT',
-      body: payload,
-    });
-  }
-
-  function getVerifikasiDownloadUrl(verifikasiId: string): string {
-    const apiBase = config.public.apiBaseUrl || '/api/v1';
-    return `${apiBase}/admin/bkkd/verifikasi/${verifikasiId}/download`;
-  }
-
-  async function getVerifikasiRiwayat(verifikasiId: string) {
-    return $http<ApiResponse<BkkdRiwayat[]>>(`admin/bkkd/verifikasi/${verifikasiId}/riwayat`, {
-      method: 'GET',
-    });
-  }
-
-  // ─── Rekapitulasi Desa & Penetapan TAPD ────────────────────────────────────
-  async function fetchRekapitulasiDesa(params?: Record<string, any>) {
-    return $http<ApiResponse<BkkdRekapitulasiDesaItem[]> & { summary?: BkkdRekapitulasiSummary }>(
-      'admin/bkkd/rekapitulasi-desa',
-      {
-        method: 'GET',
-        query: params,
-      }
-    );
-  }
-
-  async function tetapkanTapd(proposalId: string, payload: { nilai_disetujui_tapd: number; catatan_tapd?: string; tanggal_penetapan_tapd?: string }) {
-    return $http<ApiResponse<BkkdProposal>>(`admin/bkkd/rekapitulasi-desa/${proposalId}/tetapkan-tapd`, {
-      method: 'POST',
-      body: payload,
-    });
-  }
-
-  async function batalkanTapd(proposalId: string, alasan?: string) {
-    return $http<ApiResponse<BkkdProposal>>(`admin/bkkd/rekapitulasi-desa/${proposalId}/batalkan-tapd`, {
-      method: 'POST',
-      body: { alasan },
-    });
-  }
-
-  function getRekapitulasiExportUrl(params?: Record<string, any>): string {
-    const apiBase = config.public.apiBaseUrl || '/api/v1';
-    const query = new URLSearchParams(params).toString();
-    return `${apiBase}/admin/bkkd/rekapitulasi-desa/export${query ? '?' + query : ''}`;
   }
 
   // ─── Agregasi Wilayah Desa ────────────────────────────────────────────────
@@ -288,6 +150,230 @@ export function useBkkdApi() {
     });
   }
 
+  // ─── Multi-Lokasi LineString & Analisa Spasial ─────────────────────────────
+  async function fetchRefJalanPoros(idDesa: number, mode?: 'hybrid' | 'full') {
+    return $http<
+      ApiResponse<BkkdJalanPorosOption[]> & {
+        layers?: {
+          mode?: string;
+          martin_sources?: Record<string, string>;
+          batas_desa_bbox?: number[] | null;
+          jalan_poros_desa?: any;
+          jaringan_jalan_ruas?: any;
+          jalan_kabupaten?: any;
+          infrastruktur_segmen?: any;
+          batas_desa?: any;
+        };
+      }
+    >('admin/bkkd/ref-jalan-poros', {
+      method: 'GET',
+      query: mode ? { id_desa: idDesa, mode } : { id_desa: idDesa },
+    });
+  }
+
+  async function generateRoutePreview(payload: {
+    id_desa: number;
+    id_proposal?: string | null;
+    tahun_anggaran?: number;
+    tagging_usulan?: 'RKPD' | 'PRKPD';
+    nama_lokasi?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    latitude_akhir?: number | null;
+    longitude_akhir?: number | null;
+    id_jalan_poros?: string | null;
+    id_lokasi?: string | null;
+    single_location_mode?: boolean;
+    panjang_rencana_m?: number | null;
+    lebar_m?: number | null;
+    sumber_rute?: string;
+    preserve_manual_geometry?: boolean;
+    skip_ors?: boolean;
+    geojson?: any;
+    waypoints?: { lat: number; lng: number; label?: string; is_route: boolean; use_ors: boolean }[];
+  }) {
+    return $http<
+      ApiResponse<BkkdRoutePreviewItem | null> & {
+        lokasi_list: BkkdRoutePreviewItem[];
+        jumlah_lokasi: number;
+        total_panjang_gis: number;
+        status_analisa_spasial: StatusAnalisaSpasialBkkd;
+      }
+    >('admin/bkkd/generate-route', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async function fetchProposalLokasi(proposalId: string, mode?: 'hybrid' | 'full') {
+    return $http<
+      ApiResponse<BkkdProposalLokasi[]> & {
+        geojson: any;
+        layers?: {
+          mode?: string;
+          martin_sources?: Record<string, string>;
+          batas_desa_bbox?: number[] | null;
+          usulan_tahun_lalu?: any;
+          infrastruktur_segmen?: any;
+          jalan_poros_desa?: any;
+          jaringan_jalan_ruas?: any;
+          jalan_kabupaten?: any;
+          batas_desa?: any;
+        };
+        jalan_poros_options?: BkkdJalanPorosOption[];
+        summary: any;
+      }
+    >(`admin/bkkd/proposal/${proposalId}/lokasi`, {
+      method: 'GET',
+      query: mode ? { mode } : undefined,
+    });
+  }
+
+  async function createProposalLokasi(proposalId: string, payload: Record<string, any>) {
+    return $http<ApiResponse<BkkdProposalLokasi>>(`admin/bkkd/proposal/${proposalId}/lokasi`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async function updateProposalLokasi(proposalId: string, lokasiId: string, payload: Record<string, any>) {
+    return $http<ApiResponse<BkkdProposalLokasi>>(`admin/bkkd/proposal/${proposalId}/lokasi/${lokasiId}`, {
+      method: 'PUT',
+      body: payload,
+    });
+  }
+
+  async function deleteProposalLokasi(proposalId: string, lokasiId: string) {
+    return $http<ApiResponse<null>>(`admin/bkkd/proposal/${proposalId}/lokasi/${lokasiId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async function reanalyzeProposalSpatial(proposalId: string) {
+    return $http<ApiResponse<{ status_analisa_spasial: string; jumlah_lokasi: number; total_panjang_gis: number }>>(
+      `admin/bkkd/proposal/${proposalId}/analisa-spasial`,
+      { method: 'POST' }
+    );
+  }
+
+  async function syncPendingSpatialAnalysis(payload?: {
+    tahun_anggaran?: number;
+    only_pending?: boolean;
+    limit?: number;
+  }) {
+    return $http<ApiResponse<{ processed_proposals: number; processed_locations: number }>>(
+      'admin/bkkd/analisa-spasial/sync-pending',
+      {
+        method: 'POST',
+        body: payload || {},
+      }
+    );
+  }
+
+  async function simpanKonfirmasiDesa(proposalId: string, payload: { catatan_konfirmasi_desa: string }) {
+    return $http<ApiResponse<{ catatan_konfirmasi_desa: string; dikonfirmasi_oleh?: string; dikonfirmasi_pada?: string }>>(
+      `admin/bkkd/proposal/${proposalId}/konfirmasi-desa`,
+      {
+        method: 'POST',
+        body: payload,
+      }
+    );
+  }
+
+  async function fetchAnalisaSpasialList(params?: Record<string, any>) {
+    return $http<ApiResponse<BkkdProposal[]>>('admin/bkkd/analisa-spasial', {
+      method: 'GET',
+      query: params,
+    });
+  }
+
+  // ─── Master Jaringan Jalan Kabupaten & Validasi Promosi Proposal ──────────
+  async function fetchJaringanJalanRuas(params?: Record<string, any>) {
+    return $http<
+      ApiResponse<JaringanJalanRuasFeature[]> & {
+        geojson?: { type: 'FeatureCollection'; features: JaringanJalanRuasFeature[] };
+        summary?: {
+          total_ruas: number;
+          total_panjang_m: number;
+          jumlah_poros_desa: number;
+          jumlah_lingkungan: number;
+          jumlah_usaha_tani: number;
+          jumlah_kabupaten: number;
+        };
+      }
+    >('admin/bkkd/jaringan-jalan', {
+      method: 'GET',
+      query: params,
+    });
+  }
+
+  async function fetchKandidatRuas(params?: Record<string, any>) {
+    return $http<
+      ApiResponse<
+        Array<
+          BkkdProposalLokasi & {
+            proposal?: {
+              id: string;
+              nomor_registrasi: string;
+              tahun_anggaran: number;
+              tagging_usulan: 'PRKPD' | 'RKPD';
+              judul_kegiatan: string;
+              id_kecamatan: number;
+              nama_kecamatan?: string | null;
+              id_desa: number;
+              nama_desa?: string | null;
+            } | null;
+          }
+        >
+      >
+    >('admin/bkkd/kandidat-ruas', {
+      method: 'GET',
+      query: params,
+    });
+  }
+
+  async function ajukanPromosiRuas(
+    proposalId: string,
+    lokasiId: string,
+    payload: {
+      nama_ruas_usulan?: string;
+      hierarki_jalan_usulan?: HierarkiJalanBkkd;
+      catatan?: string;
+    }
+  ) {
+    return $http<ApiResponse<BkkdProposalLokasi>>(
+      `admin/bkkd/proposal/${proposalId}/lokasi/${lokasiId}/ajukan-ruas`,
+      {
+        method: 'POST',
+        body: payload,
+      }
+    );
+  }
+
+  async function validasiPromosiRuas(
+    proposalId: string,
+    lokasiId: string,
+    payload: {
+      keputusan: 'setujui_baru' | 'ekstensi_potong_unik' | 'tolak';
+      nama_ruas?: string;
+      kode_ruas?: string;
+      hierarki_jalan?: HierarkiJalanBkkd;
+      lebar_m?: number | null;
+      perkerasan?: string | null;
+      kondisi?: string | null;
+      catatan?: string | null;
+    }
+  ) {
+    return $http<
+      ApiResponse<BkkdProposalLokasi> & {
+        jaringan_ruas?: JaringanJalanRuasFeature | null;
+      }
+    >(`admin/bkkd/proposal/${proposalId}/lokasi/${lokasiId}/validasi-ruas`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
   return {
     fetchRefOpd,
     fetchRefBidang,
@@ -297,31 +383,27 @@ export function useBkkdApi() {
     updateProposal,
     deleteProposal,
     restoreProposal,
-    ajukanOpd,
-    batalkanProposal,
-    uploadLampiran,
-    tambahLampiranLink,
-    deleteLampiran,
-    getLampiranDownloadUrl,
     getProposalRiwayat,
-    fetchVerifikasiList,
-    submitVerifikasi,
-    submitVerifikasiKolektif,
-    fetchDokumenVerifikasiList,
-    getDokumenVerifikasiDownloadUrl,
-    updateVerifikasi,
-    getVerifikasiDownloadUrl,
-    getVerifikasiRiwayat,
-    fetchRekapitulasiDesa,
-    tetapkanTapd,
-    batalkanTapd,
-    getRekapitulasiExportUrl,
     fetchAgregasiDesa,
     getAgregasiDesaExportUrl,
     fetchGlobalRiwayat,
     uploadTemporaryDocument,
     importProposalExcel,
     getProposalImportTemplateUrl,
-    gantiProposalPapbd,
+    fetchRefJalanPoros,
+    generateRoutePreview,
+    fetchProposalLokasi,
+    createProposalLokasi,
+    updateProposalLokasi,
+    deleteProposalLokasi,
+    reanalyzeProposalSpatial,
+    runProposalSpatialAnalysis: reanalyzeProposalSpatial,
+    syncPendingSpatialAnalysis,
+    simpanKonfirmasiDesa,
+    fetchAnalisaSpasialList,
+    fetchJaringanJalanRuas,
+    fetchKandidatRuas,
+    ajukanPromosiRuas,
+    validasiPromosiRuas,
   };
 }

@@ -9,12 +9,14 @@
     "build": "nuxi cleanup && nuxi build",
     "cleanup": "nuxi cleanup",
     "dev": "nuxt dev",
+    "dev:local": "cross-env PORT=3001 NUXT_PORT=3001 NITRO_PORT=3001 APP_URL=http://localhost:3001 nuxt dev --port 3001",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"
   },
   "devDependencies": {
     "@iconify-json/heroicons": "^1.2.3",
+    "@iconify-json/ion": "^1.2.7",
     "@iconify-json/lucide": "^1.2.108",
     "@iconify-json/simple-icons": "^1.2.82",
     "@nuxt/devtools": "^3.2.4",

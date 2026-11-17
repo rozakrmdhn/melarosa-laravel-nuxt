@@ -1,0 +1,356 @@
+{
+  "generatedAt": "2026-11-15T09:18:08.499667+00:00",
+  "dataSource": {
+    "wmsUrl": "https://geoportal.bojonegorokab.go.id/geoserver/palapa/wms",
+    "wmsLayer": "palapa:POLARUANG_AR_5K_2022_BOJONEGORO",
+    "transportLayer": "palapa:STRUKTURTRANSPORTASI_LN_5K_2022_BOJONEGORO",
+    "osmSource": "OpenStreetMap Overpass (Bojonegoro Urban Core)",
+    "postgisSource": "PostGIS db_melarosa"
+  },
+  "defaultCamera": {
+    "center": [
+      111.881,
+      -7.152
+    ],
+    "zoom": 15.4,
+    "pitch": 58,
+    "bearing": 22,
+    "orientationNote": "Arah utara berada di atas sedikit miring ke kiri (-22 derajat dari vertikal layar)"
+  },
+  "extent": {
+    "rdtrBbox": [
+      111.806229,
+      -7.310111,
+      111.937241,
+      -7.131695
+    ],
+    "osmCoreBbox": [
+      111.85425,
+      -7.18571,
+      111.9334,
+      -7.1317
+    ]
+  },
+  "counts": {
+    "rdtrPolygons": 4703,
+    "badanJalanPolygons": 55,
+    "badanAirPolygons": 232,
+    "roadAndRailLines": 6283,
+    "waterLinesAndPonds": 49,
+    "sawahGridLines": 4211,
+    "trees3d": 1904,
+    "osmRdtrBuildings": 48080,
+    "rdtrGeneratedBuildings": 31004,
+    "osmFilteredInBadanAir": 18,
+    "generatedByKecamatan": {
+      "Kecamatan Bojonegoro": 8724,
+      "Kecamatan Kapas": 8947,
+      "Kecamatan Dander": 13065
+    }
+  },
+  "roadKmByClass": {
+    "Jalan Lingkungan Sekunder": 384.4,
+    "Jalan Lokal Primer": 36.17,
+    "Jalan Arteri Sekunder": 26.23,
+    "Jalan Kolektor Sekunder": 16.35,
+    "Jalan Lokal Sekunder": 19.4,
+    "Jalan Kolektor Primer": 47.18,
+    "Jaringan Jalur Kereta Api Antarkota": 12.41,
+    "Jalan Arteri Primer": 8.79,
+    "Jalan Tol": 9.8
+  },
+  "zoneStats": [
+    {
+      "kz": "P-1",
+      "namobj": "Tanaman Pangan",
+      "cat": "pertanian",
+      "col": "#C8F546",
+      "mcol": "#BDD86B",
+      "polygons": 852,
+      "areaHa": 6523.17
+    },
+    {
+      "kz": "HP",
+      "namobj": "Hutan Produksi Tetap",
+      "cat": "rth",
+      "col": "#7DB538",
+      "mcol": "#5F9634",
+      "polygons": 5,
+      "areaHa": 1949.48
+    },
+    {
+      "kz": "R-3",
+      "namobj": "Perumahan Kepadatan Sedang",
+      "cat": "perumahan",
+      "col": "#FFF005",
+      "mcol": "#EDE6D4",
+      "polygons": 946,
+      "areaHa": 1922.47
+    },
+    {
+      "kz": "R-2",
+      "namobj": "Perumahan Kepadatan Tinggi",
+      "cat": "perumahan",
+      "col": "#FFDB00",
+      "mcol": "#EAE2CE",
+      "polygons": 836,
+      "areaHa": 1154.78
+    },
+    {
+      "kz": "K-2",
+      "namobj": "Perdagangan dan Jasa Skala WP",
+      "cat": "komersial",
+      "col": "#FF8282",
+      "mcol": "#EAE0D5",
+      "polygons": 473,
+      "areaHa": 497.45
+    },
+    {
+      "kz": "BJ",
+      "namobj": "Badan Jalan",
+      "cat": "jalan",
+      "col": "#EB1E1E",
+      "mcol": "#3B424E",
+      "polygons": 55,
+      "areaHa": 230.11
+    },
+    {
+      "kz": "BA",
+      "namobj": "Badan Air",
+      "cat": "air",
+      "col": "#96DBF2",
+      "mcol": "#289FD4",
+      "polygons": 232,
+      "areaHa": 223.77
+    },
+    {
+      "kz": "PS",
+      "namobj": "Perlindungan Setempat",
+      "cat": "sempadan",
+      "col": "#05D6D6",
+      "mcol": "#A3CF7A",
+      "polygons": 334,
+      "areaHa": 95.42
+    },
+    {
+      "kz": "R-4",
+      "namobj": "Perumahan Kepadatan Rendah",
+      "cat": "perumahan",
+      "col": "#FFFA4A",
+      "mcol": "#F0EBDA",
+      "polygons": 34,
+      "areaHa": 88.32
+    },
+    {
+      "kz": "K-1",
+      "namobj": "Perdagangan dan Jasa Skala Kota",
+      "cat": "komersial",
+      "col": "#FF6363",
+      "mcol": "#E6D8CC",
+      "polygons": 46,
+      "areaHa": 66.72
+    },
+    {
+      "kz": "KPI",
+      "namobj": "Kawasan Peruntukan Industri",
+      "cat": "industri",
+      "col": "#690000",
+      "mcol": "#DCD7D4",
+      "polygons": 40,
+      "areaHa": 62.27
+    },
+    {
+      "kz": "SPU-1",
+      "namobj": "SPU Skala Kota",
+      "cat": "fasum",
+      "col": "#7D197D",
+      "mcol": "#E8DFEA",
+      "polygons": 48,
+      "areaHa": 59.37
+    },
+    {
+      "kz": "KT",
+      "namobj": "Perkantoran",
+      "cat": "perkantoran",
+      "col": "#9C9C9C",
+      "mcol": "#E0E4E8",
+      "polygons": 140,
+      "areaHa": 53.49
+    },
+    {
+      "kz": "IK-2",
+      "namobj": "Perikanan Budi Daya",
+      "cat": "perikanan",
+      "col": "#82BAD1",
+      "mcol": "#5DA8C0",
+      "polygons": 53,
+      "areaHa": 48.22
+    },
+    {
+      "kz": "RTH-7",
+      "namobj": "Pemakaman",
+      "cat": "rth",
+      "col": "#59FF00",
+      "mcol": "#8BC066",
+      "polygons": 70,
+      "areaHa": 36.33
+    },
+    {
+      "kz": "P-2",
+      "namobj": "Hortikultura",
+      "cat": "pertanian",
+      "col": "#E5FF4A",
+      "mcol": "#D4DF68",
+      "polygons": 5,
+      "areaHa": 36.12
+    },
+    {
+      "kz": "SPU-2",
+      "namobj": "SPU Skala Kecamatan",
+      "cat": "fasum",
+      "col": "#9B329B",
+      "mcol": "#EAE3EC",
+      "polygons": 60,
+      "areaHa": 31.81
+    },
+    {
+      "kz": "SPU-3",
+      "namobj": "SPU Skala Kelurahan",
+      "cat": "fasum",
+      "col": "#B94BB9",
+      "mcol": "#EDE8EF",
+      "polygons": 178,
+      "areaHa": 30.68
+    },
+    {
+      "kz": "RTH-3",
+      "namobj": "Taman Kecamatan",
+      "cat": "rth",
+      "col": "#468700",
+      "mcol": "#6BB844",
+      "polygons": 41,
+      "areaHa": 22.88
+    },
+    {
+      "kz": "RTH-1",
+      "namobj": "Rimba Kota",
+      "cat": "rth",
+      "col": "#38540A",
+      "mcol": "#4F8A2E",
+      "polygons": 2,
+      "areaHa": 21.19
+    },
+    {
+      "kz": "RTH-8",
+      "namobj": "Jalur Hijau",
+      "cat": "rth",
+      "col": "#0FF500",
+      "mcol": "#72BA50",
+      "polygons": 42,
+      "areaHa": 17.41
+    },
+    {
+      "kz": "HK",
+      "namobj": "Pertahanan dan Keamanan",
+      "cat": "hankam",
+      "col": "#9C00FF",
+      "mcol": "#E2DEDF",
+      "polygons": 29,
+      "areaHa": 14.85
+    },
+    {
+      "kz": "MG",
+      "namobj": "Pertambangan Minyak dan Gas Bumi",
+      "cat": "khusus",
+      "col": "#9BAFCD",
+      "mcol": "#DCE2EB",
+      "polygons": 4,
+      "areaHa": 14.32
+    },
+    {
+      "kz": "RTH-2",
+      "namobj": "Taman Kota",
+      "cat": "rth",
+      "col": "#416900",
+      "mcol": "#60AD3A",
+      "polygons": 7,
+      "areaHa": 8.27
+    },
+    {
+      "kz": "TR",
+      "namobj": "Transportasi",
+      "cat": "khusus",
+      "col": "#D73700",
+      "mcol": "#DFD7CE",
+      "polygons": 3,
+      "areaHa": 4.81
+    },
+    {
+      "kz": "SPU-4",
+      "namobj": "SPU Skala RW",
+      "cat": "fasum",
+      "col": "#D764D7",
+      "mcol": "#F0EBF2",
+      "polygons": 148,
+      "areaHa": 4.73
+    },
+    {
+      "kz": "PTL",
+      "namobj": "Pembangkitan Tenaga Listrik",
+      "cat": "khusus",
+      "col": "#00FFCC",
+      "mcol": "#D8ECE6",
+      "polygons": 1,
+      "areaHa": 2.19
+    },
+    {
+      "kz": "K-3",
+      "namobj": "Perdagangan dan Jasa Skala SWP",
+      "cat": "komersial",
+      "col": "#FFA6A6",
+      "mcol": "#EDE4DA",
+      "polygons": 16,
+      "areaHa": 2.16
+    },
+    {
+      "kz": "W",
+      "namobj": "Pariwisata",
+      "cat": "khusus",
+      "col": "#FFA6FF",
+      "mcol": "#F2E2F0",
+      "polygons": 3,
+      "areaHa": 1.87
+    }
+  ],
+  "files": {
+    "polaruang.geojson": {
+      "features": 4703,
+      "sizeKB": 4170.5
+    },
+    "roads.geojson": {
+      "features": 6338,
+      "sizeKB": 2670.7
+    },
+    "waterways.geojson": {
+      "features": 281,
+      "sizeKB": 348.8
+    },
+    "environment.geojson": {
+      "features": 6115,
+      "sizeKB": 1180.5
+    },
+    "buildings_osm_rdtr.geojson": {
+      "features": 48080,
+      "sizeKB": 21287.3
+    },
+    "buildings_generated_rdtr.geojson": {
+      "features": 31004,
+      "sizeKB": 14370.4
+    },
+    "landmarks.geojson": {
+      "features": 10,
+      "sizeKB": 2.4
+    }
+  },
+  "elapsedSeconds": 31.65
+}

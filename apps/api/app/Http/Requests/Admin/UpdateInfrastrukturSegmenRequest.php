@@ -31,7 +31,7 @@ class UpdateInfrastrukturSegmenRequest extends FormRequest
             'id_desa'            => ['sometimes', 'integer', 'exists:bataswilayah_desa,id'],
             'id_kecamatan'       => ['sometimes', 'integer', 'exists:bataswilayah_kecamatan,id'],
             'plotting_id'        => ['nullable', 'uuid', 'exists:plotting_anggaran,id'],
-            'parent_id'          => ['nullable', 'uuid', 'exists:infrastruktur_segmen,id'],
+            'parent_id'          => ['nullable', 'uuid', 'exists:jalan_porosdesa,id'],
             'status_aset'        => ['nullable', 'string', 'max:100'],
             'sumber_data'        => ['nullable', 'string', 'max:255'],
         ];

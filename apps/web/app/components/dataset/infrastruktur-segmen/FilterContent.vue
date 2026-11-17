@@ -1,6 +1,19 @@
 <script setup lang="ts">
 import WilayahSelector from '~/components/common/WilayahSelector.vue';
-import type { InfrastrukturTipe } from '~/types/infrastruktur';
+import { useAuthStore } from '~/stores/auth';
+import { useWilayahStore } from '~/stores/wilayah';
+import {
+  JALAN_POROS_KONDISI_OPTIONS,
+  KONDISI_OPTIONS,
+  PERKERASAN_OPTIONS,
+  STATUS_ASET_OPTIONS,
+  STATUS_JALAN_OPTIONS,
+  STATUS_KONDISI_OPTIONS,
+  STATUS_VERIFIKASI_OPTIONS,
+  SUMBER_DANA_OPTIONS,
+  type InfrastrukturTipe,
+  type SelectOptionItem,
+} from '~/types/infrastruktur';
 
 interface Props {
   layerId?: string;
@@ -18,6 +31,8 @@ interface Props {
   selectedSumberDana?: string | null;
   modelKecamatan?: number | null;
   modelDesa?: number | null;
+  isKecamatanLocked?: boolean;
+  isDesaLocked?: boolean;
   isMobile?: boolean;
   hideHeader?: boolean;
   hideFooterActions?: boolean;
@@ -39,6 +54,8 @@ const props = withDefaults(defineProps<Props>(), {
   selectedSumberDana: null,
   modelKecamatan: null,
   modelDesa: null,
+  isKecamatanLocked: false,
+  isDesaLocked: false,
   isMobile: false,
   hideHeader: false,
   hideFooterActions: false,
@@ -72,6 +89,27 @@ const emit = defineEmits<{
   (e: 'apply'): void;
   (e: 'reset'): void;
 }>();
+
+const uid = useId();
+const auth = useAuthStore();
+const wilayahStore = useWilayahStore();
+const { isAdmin } = usePermission();
+
+const isUnrestrictedRole = computed(
+  () => isAdmin() || auth.hasRole('admin') || auth.hasRole('verifierBappeda'),
+);
+
+const effectiveKecamatanLocked = computed(
+  () => props.isKecamatanLocked || (!isUnrestrictedRole.value && !!auth.user?.id_kecamatan),
+);
+
+const effectiveDesaLocked = computed(
+  () => props.isDesaLocked || (!isUnrestrictedRole.value && !!auth.user?.id_desa),
+);
+
+function withAllOption(allLabel: string, items: SelectOptionItem[]): SelectOptionItem[] {
+  return [{ label: allLabel, value: 'ALL' }, ...items];
+}
 
 function extractValue(val: any): string | null {
   if (val === null || val === undefined) return null;
@@ -157,8 +195,8 @@ function handleDesaChange(val: any) {
   emit('update:model-desa', n);
 }
 
-const tipeSelectItems = computed(() => [
-  { label: 'Semua Tipe', value: 'ALL' },
+const tipeSelectItems = computed<SelectOptionItem[]>(() => [
+  { label: 'Semua Tipe Infrastruktur', value: 'ALL' },
   ...props.tipeList.map((t) => ({
     label: t.nama,
     value: t.kode,
@@ -168,7 +206,7 @@ const tipeSelectItems = computed(() => [
 const tahunPembangunanSelectItems = computed(() => {
   const currentYear = new Date().getFullYear();
   const items: { label: string; value: string | number }[] = [
-    { label: 'Semua Tahun Pembangunan', value: 'ALL' },
+    { label: 'Semua Tahun', value: 'ALL' },
   ];
   for (let y = currentYear + 1; y >= 2015; y--) {
     items.push({
@@ -179,332 +217,416 @@ const tahunPembangunanSelectItems = computed(() => {
   return items;
 });
 
-const kondisiOptions = [
-  { label: 'Semua Kondisi', value: 'ALL' },
-  { label: 'Baik', value: 'Baik' },
-  { label: 'Sedang', value: 'Sedang' },
-  { label: 'Rusak Ringan', value: 'Rusak Ringan' },
-  { label: 'Rusak Berat', value: 'Rusak Berat' },
-];
+const kondisiOptions = withAllOption('Semua Kondisi', KONDISI_OPTIONS);
+const jalanKondisiOptions = withAllOption('Semua Kondisi', JALAN_POROS_KONDISI_OPTIONS);
+const perkerasanOptions = withAllOption('Semua Perkerasan', PERKERASAN_OPTIONS);
+const statusJalanOptions = withAllOption('Semua Status Jalan', STATUS_JALAN_OPTIONS);
+const statusKondisiOptions = withAllOption('Semua Status Kondisi', STATUS_KONDISI_OPTIONS);
+const statusAsetOptions = withAllOption('Semua Status Aset', STATUS_ASET_OPTIONS);
+const sumberDanaOptions = withAllOption('Semua Sumber Dana', SUMBER_DANA_OPTIONS);
+const verifikasiOptions = withAllOption('Semua Status', STATUS_VERIFIKASI_OPTIONS);
 
-const perkerasanOptions = [
-  { label: 'Semua Perkerasan', value: 'ALL' },
-  { label: 'Aspal', value: 'Aspal' },
-  { label: 'Beton', value: 'Beton' },
-  { label: 'Paving', value: 'Paving' },
-  { label: 'Kerikil', value: 'Kerikil' },
-  { label: 'Tanah', value: 'Tanah' },
-];
+interface FilterFieldDescriptor {
+  key: string;
+  label: string;
+  placeholder: string;
+  items: { label: string; value: string | number }[];
+  modelValue: string | number;
+  activeLabel: string | null;
+  searchInput: boolean | { placeholder: string };
+  fullWidth?: boolean;
+  onUpdate: (val: any) => void;
+  onClear: () => void;
+}
 
-const statusJalanOptions = [
-  { label: 'Semua Status Jalan', value: 'ALL' },
-  { label: 'Jalan Desa', value: 'Jalan Desa' },
-  { label: 'Jalan Poros Desa', value: 'Jalan Poros Desa' },
-  { label: 'Jalan Kabupaten', value: 'Jalan Kabupaten' },
-];
+function findOptionLabel(
+  items: { label: string; value: string | number }[],
+  val: string | number | null | undefined,
+): string | null {
+  if (val === null || val === undefined || val === '' || val === 'ALL') return null;
+  const match = items.find((item) => String(item.value) === String(val));
+  return match?.label ?? String(val);
+}
 
-const statusKondisiOptions = [
-  { label: 'Semua Status Kondisi', value: 'ALL' },
-  { label: 'Eksisting', value: 'Eksisting' },
-  { label: 'Riwayat', value: 'Riwayat' },
-];
+const resolvedTahunValue = computed(() => props.selectedTahunPembangunan ?? props.selectedTahun ?? null);
 
-const statusAsetOptions = [
-  { label: 'Semua Status Aset', value: 'ALL' },
-  { label: 'Pemerintah Desa', value: 'Pemerintah Desa' },
-  { label: 'Pemerintah Kabupaten', value: 'Pemerintah Kabupaten' },
-  { label: 'Aset Desa', value: 'Aset Desa' },
-  { label: 'Lainnya', value: 'Lainnya' },
-];
-
-const sumberDanaOptions = [
-  { label: 'Semua Sumber Dana', value: 'ALL' },
-  { label: 'APBD', value: 'APBD' },
-  { label: 'BKK', value: 'BKK' },
-  { label: 'Dana Desa (DD)', value: 'DD' },
-  { label: 'Sektoral', value: 'Sektoral' },
-  { label: 'Lainnya', value: 'Lainnya' },
-];
-
-const verifikasiOptions = [
-  { label: 'Semua Status', value: 'ALL' },
-  { label: 'Draft', value: 'draft' },
-  { label: 'Diajukan ke Kecamatan', value: 'submitted_desa' },
-  { label: 'Terverifikasi Kecamatan', value: 'verified_kecamatan' },
-  { label: 'Ditolak Kecamatan', value: 'rejected_kecamatan' },
-  { label: 'Disahkan Bappeda', value: 'verified_bappeda' },
-  { label: 'Ditolak Bappeda', value: 'rejected_bappeda' },
-];
-
-const activeFiltersCount = computed(() => {
-  let count = 0;
+// Parametrisasi field fisik & tata kelola menjaga keteraturan visual dan menghindari duplikasi kontrol
+const physicalFields = computed<FilterFieldDescriptor[]>(() => {
   if (props.layerId === 'jalan-poros-desa') {
-    if (props.selectedPerkerasan) count++;
-    if (props.selectedKondisi) count++;
-  } else {
-    if (props.selectedTahunPembangunan || props.selectedTahun) count++;
-    else if (props.selectedTipe) count++;
-    if (props.selectedPerkerasan) count++;
-    if (props.selectedKondisi) count++;
-    if (props.selectedStatusVerifikasi) count++;
-    if (props.selectedStatusJalan) count++;
-    if (props.selectedStatusKondisi) count++;
-    if (props.selectedStatusAset) count++;
-    if (props.selectedSumberDana) count++;
+    return [
+      {
+        key: 'jalan-perkerasan',
+        label: 'Jenis Perkerasan',
+        placeholder: 'Pilih perkerasan',
+        items: perkerasanOptions,
+        modelValue: props.selectedPerkerasan || 'ALL',
+        activeLabel: findOptionLabel(PERKERASAN_OPTIONS, props.selectedPerkerasan),
+        searchInput: false,
+        onUpdate: handlePerkerasanChange,
+        onClear: () => handlePerkerasanChange(null),
+      },
+      {
+        key: 'jalan-kondisi',
+        label: 'Kondisi Jalan',
+        placeholder: 'Pilih kondisi',
+        items: jalanKondisiOptions,
+        modelValue: props.selectedKondisi || 'ALL',
+        activeLabel: findOptionLabel(JALAN_POROS_KONDISI_OPTIONS, props.selectedKondisi),
+        searchInput: false,
+        onUpdate: handleKondisiChange,
+        onClear: () => handleKondisiChange(null),
+      },
+    ];
   }
-  if (props.modelKecamatan) count++;
-  if (props.modelDesa) count++;
-  return count;
+
+  const fields: FilterFieldDescriptor[] = [];
+  if (props.tipeList.length > 0) {
+    fields.push({
+      key: 'tipe',
+      label: 'Tipe Infrastruktur',
+      placeholder: 'Pilih tipe infrastruktur',
+      items: tipeSelectItems.value,
+      modelValue: props.selectedTipe || 'ALL',
+      activeLabel: findOptionLabel(tipeSelectItems.value, props.selectedTipe),
+      searchInput: { placeholder: 'Cari tipe infrastruktur...' },
+      fullWidth: true,
+      onUpdate: handleTipeChange,
+      onClear: () => handleTipeChange(null),
+    });
+  }
+
+  fields.push(
+    {
+      key: 'kondisi',
+      label: 'Kondisi Fisik',
+      placeholder: 'Pilih kondisi fisik',
+      items: kondisiOptions,
+      modelValue: props.selectedKondisi || 'ALL',
+      activeLabel: findOptionLabel(KONDISI_OPTIONS, props.selectedKondisi),
+      searchInput: false,
+      onUpdate: handleKondisiChange,
+      onClear: () => handleKondisiChange(null),
+    },
+    {
+      key: 'perkerasan',
+      label: 'Jenis Perkerasan',
+      placeholder: 'Pilih perkerasan',
+      items: perkerasanOptions,
+      modelValue: props.selectedPerkerasan || 'ALL',
+      activeLabel: findOptionLabel(PERKERASAN_OPTIONS, props.selectedPerkerasan),
+      searchInput: false,
+      onUpdate: handlePerkerasanChange,
+      onClear: () => handlePerkerasanChange(null),
+    },
+    {
+      key: 'status-kondisi',
+      label: 'Status Kondisi',
+      placeholder: 'Pilih status kondisi',
+      items: statusKondisiOptions,
+      modelValue: props.selectedStatusKondisi || 'ALL',
+      activeLabel: findOptionLabel(STATUS_KONDISI_OPTIONS, props.selectedStatusKondisi),
+      searchInput: false,
+      onUpdate: handleStatusKondisiChange,
+      onClear: () => handleStatusKondisiChange(null),
+    },
+    {
+      key: 'tahun',
+      label: 'Tahun Pembangunan',
+      placeholder: 'Pilih tahun bangun',
+      items: tahunPembangunanSelectItems.value,
+      modelValue: resolvedTahunValue.value ?? 'ALL',
+      activeLabel: resolvedTahunValue.value ? String(resolvedTahunValue.value) : null,
+      searchInput: { placeholder: 'Cari tahun...' },
+      onUpdate: handleTahunPembangunanChange,
+      onClear: () => handleTahunPembangunanChange(null),
+    },
+  );
+
+  return fields;
 });
 
+const governanceFields = computed<FilterFieldDescriptor[]>(() => {
+  if (props.layerId !== 'infrastruktur-segmen') return [];
+  return [
+    {
+      key: 'verifikasi',
+      label: 'Status Verifikasi',
+      placeholder: 'Pilih status verifikasi',
+      items: verifikasiOptions,
+      modelValue: props.selectedStatusVerifikasi || 'ALL',
+      activeLabel: findOptionLabel(STATUS_VERIFIKASI_OPTIONS, props.selectedStatusVerifikasi),
+      searchInput: false,
+      onUpdate: handleStatusVerifikasiChange,
+      onClear: () => handleStatusVerifikasiChange(null),
+    },
+    {
+      key: 'status-jalan',
+      label: 'Status Jalan',
+      placeholder: 'Pilih status jalan',
+      items: statusJalanOptions,
+      modelValue: props.selectedStatusJalan || 'ALL',
+      activeLabel: findOptionLabel(STATUS_JALAN_OPTIONS, props.selectedStatusJalan),
+      searchInput: false,
+      onUpdate: handleStatusJalanChange,
+      onClear: () => handleStatusJalanChange(null),
+    },
+    {
+      key: 'status-aset',
+      label: 'Status Aset',
+      placeholder: 'Pilih status aset',
+      items: statusAsetOptions,
+      modelValue: props.selectedStatusAset || 'ALL',
+      activeLabel: findOptionLabel(STATUS_ASET_OPTIONS, props.selectedStatusAset),
+      searchInput: false,
+      onUpdate: handleStatusAsetChange,
+      onClear: () => handleStatusAsetChange(null),
+    },
+    {
+      key: 'sumber-dana',
+      label: 'Sumber Dana',
+      placeholder: 'Pilih sumber dana',
+      items: sumberDanaOptions,
+      modelValue: props.selectedSumberDana || 'ALL',
+      activeLabel: findOptionLabel(SUMBER_DANA_OPTIONS, props.selectedSumberDana),
+      searchInput: { placeholder: 'Cari sumber dana...' },
+      onUpdate: handleSumberDanaChange,
+      onClear: () => handleSumberDanaChange(null),
+    },
+  ];
+});
+
+interface ActiveFilterChip {
+  key: string;
+  label: string;
+  valueLabel: string;
+  onClear: () => void;
+}
+
+const activeFilterChips = computed<ActiveFilterChip[]>(() => {
+  const chips: ActiveFilterChip[] = [];
+
+  if (!effectiveKecamatanLocked.value && props.modelKecamatan) {
+    const kecName =
+      wilayahStore.kecamatanList.find((k) => Number(k.id) === Number(props.modelKecamatan))?.nama_kecamatan ??
+      `Kecamatan #${props.modelKecamatan}`;
+    chips.push({
+      key: 'kecamatan',
+      label: 'Kecamatan',
+      valueLabel: kecName,
+      onClear: () => {
+        handleKecamatanChange(null);
+        if (!effectiveDesaLocked.value) {
+          handleDesaChange(null);
+        }
+      },
+    });
+  }
+
+  if (!effectiveDesaLocked.value && props.modelDesa) {
+    const desaList = props.modelKecamatan
+      ? wilayahStore.desaByKecamatan[Number(props.modelKecamatan)] || []
+      : [];
+    const desaName =
+      desaList.find((d) => Number(d.id) === Number(props.modelDesa))?.nama_desa ??
+      `Desa #${props.modelDesa}`;
+    chips.push({
+      key: 'desa',
+      label: 'Desa',
+      valueLabel: desaName,
+      onClear: () => handleDesaChange(null),
+    });
+  }
+
+  for (const field of [...physicalFields.value, ...governanceFields.value]) {
+    if (field.activeLabel) {
+      chips.push({
+        key: field.key,
+        label: field.label,
+        valueLabel: field.activeLabel,
+        onClear: field.onClear,
+      });
+    }
+  }
+
+  return chips;
+});
+
+const activeFiltersCount = computed(() => activeFilterChips.value.length);
 const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
+
+const fieldGroups = computed(() => {
+  const groups = [
+    {
+      id: 'physical',
+      title: 'Karakteristik & Kondisi Fisik',
+      icon: 'i-lucide-route',
+      ariaLabel: 'Karakteristik dan Kondisi Fisik',
+      fields: physicalFields.value,
+    },
+  ];
+  if (governanceFields.value.length > 0) {
+    groups.push({
+      id: 'governance',
+      title: 'Administrasi, Aset & Pendanaan',
+      icon: 'i-lucide-landmark',
+      ariaLabel: 'Administrasi, Aset dan Pendanaan',
+      fields: governanceFields.value,
+    });
+  }
+  return groups;
+});
+
+const selectContentProps = {
+  align: 'start' as const,
+  sideOffset: 4,
+};
+
+const selectUiConfig = computed(() => ({
+  base: props.isMobile
+    ? 'min-h-[44px] justify-start text-left'
+    : 'min-h-[44px] sm:min-h-[36px] justify-start text-left',
+  content: 'w-(--reka-combobox-trigger-width)',
+}));
 </script>
 
 <template>
   <div class="space-y-4">
-    <!-- Active Filter Indicator Banner -->
+    <!-- Ringkasan Filter Aktif (dapat dihapus per kriteria tanpa membuka ulang dropdown) -->
     <div
-      v-if="!hideHeader && hasActiveFilter"
-      class="flex items-center justify-between px-3 py-2 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-xs"
+      v-if="hasActiveFilter"
+      class="rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/50 p-3 space-y-2"
     >
-      <div class="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-        <UIcon name="i-lucide-filter" class="size-3.5" />
-        <span class="font-medium">{{ activeFiltersCount }} kriteria filter aktif</span>
-      </div>
-      <button
-        type="button"
-        class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 font-medium underline underline-offset-2 cursor-pointer transition-colors"
-        @click="emit('reset')"
-      >
-        Atur ulang
-      </button>
-    </div>
-
-    <!-- Form Fields Container -->
-    <div class="space-y-3.5">
-      <!-- Wilayah Administratif (Row 2 Kolom) -->
-      <div class="space-y-1.5">
-        <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-          Wilayah Administratif
-        </label>
-        <WilayahSelector
-          :model-kecamatan="modelKecamatan"
-          :model-desa="modelDesa"
-          layout="row"
-          :allow-all="true"
-          :size="isMobile ? 'sm' : 'xs'"
-          @update:model-kecamatan="handleKecamatanChange"
-          @update:model-desa="handleDesaChange"
-        />
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1.5 text-xs font-semibold text-blue-800 dark:text-blue-200">
+          <UIcon name="i-lucide-filter" class="size-3.5 shrink-0" aria-hidden="true" />
+          <span class="tabular-nums">{{ activeFiltersCount }} filter aktif</span>
+        </div>
+        <button
+          v-if="!hideHeader"
+          type="button"
+          class="text-xs font-medium text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100 underline underline-offset-2 cursor-pointer min-h-[36px] sm:min-h-0 px-1.5"
+          @click="emit('reset')"
+        >
+          Atur ulang semua
+        </button>
       </div>
 
-      <!-- Kriteria Layer 1: Segmen Fisik Infrastruktur -->
-      <template v-if="layerId === 'infrastruktur-segmen'">
-        <!-- Baris 1: Tahun Pembangunan & Jenis Perkerasan -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Tahun Pembangunan
-            </label>
-            <USelectMenu
-              :model-value="selectedTahunPembangunan ?? selectedTahun ?? 'ALL'"
-              :items="tahunPembangunanSelectItems"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih tahun pembangunan"
-              class="w-full"
-              @update:model-value="handleTahunPembangunanChange"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Jenis Perkerasan
-            </label>
-            <USelectMenu
-              :model-value="selectedPerkerasan || 'ALL'"
-              :items="perkerasanOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih perkerasan"
-              class="w-full"
-              @update:model-value="handlePerkerasanChange"
-            />
-          </div>
-        </div>
-
-        <!-- Baris 2: Kondisi Fisik & Status Kondisi -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Kondisi Fisik
-            </label>
-            <USelectMenu
-              :model-value="selectedKondisi || 'ALL'"
-              :items="kondisiOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih kondisi"
-              class="w-full"
-              @update:model-value="handleKondisiChange"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Status Kondisi
-            </label>
-            <USelectMenu
-              :model-value="selectedStatusKondisi || 'ALL'"
-              :items="statusKondisiOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih status kondisi"
-              class="w-full"
-              @update:model-value="handleStatusKondisiChange"
-            />
-          </div>
-        </div>
-
-        <!-- Baris 3: Status Jalan & Status Aset -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Status Jalan
-            </label>
-            <USelectMenu
-              :model-value="selectedStatusJalan || 'ALL'"
-              :items="statusJalanOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih status jalan"
-              class="w-full"
-              @update:model-value="handleStatusJalanChange"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Status Aset
-            </label>
-            <USelectMenu
-              :model-value="selectedStatusAset || 'ALL'"
-              :items="statusAsetOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih status aset"
-              class="w-full"
-              @update:model-value="handleStatusAsetChange"
-            />
-          </div>
-        </div>
-
-        <!-- Baris 4: Sumber Dana & Status Verifikasi -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Sumber Dana
-            </label>
-            <USelectMenu
-              :model-value="selectedSumberDana || 'ALL'"
-              :items="sumberDanaOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih sumber dana"
-              class="w-full"
-              @update:model-value="handleSumberDanaChange"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Status Verifikasi
-            </label>
-            <USelectMenu
-              :model-value="selectedStatusVerifikasi || 'ALL'"
-              :items="verifikasiOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih status verifikasi"
-              class="w-full"
-              @update:model-value="handleStatusVerifikasiChange"
-            />
-          </div>
-        </div>
-      </template>
-
-      <!-- Kriteria Layer 2: Jalan Poros Desa -->
-      <template v-else-if="layerId === 'jalan-poros-desa'">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <!-- Jenis Perkerasan -->
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Jenis Perkerasan
-            </label>
-            <USelectMenu
-              :model-value="selectedPerkerasan || 'ALL'"
-              :items="perkerasanOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih perkerasan"
-              class="w-full"
-              @update:model-value="handlePerkerasanChange"
-            />
-          </div>
-
-          <!-- Kondisi Jalan -->
-          <div class="space-y-1.5">
-            <label class="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-              Kondisi Jalan
-            </label>
-            <USelectMenu
-              :model-value="selectedKondisi || 'ALL'"
-              :items="kondisiOptions"
-              value-key="value"
-              label-key="label"
-              :size="isMobile ? 'sm' : 'xs'"
-              :ui="{ content: 'z-[100]' }"
-              placeholder="Pilih kondisi"
-              class="w-full"
-              @update:model-value="handleKondisiChange"
-            />
-          </div>
-        </div>
-      </template>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          v-for="chip in activeFilterChips"
+          :key="chip.key"
+          type="button"
+          :aria-label="`Hapus filter ${chip.label}: ${chip.valueLabel}`"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-white dark:bg-[#0e1526] border border-blue-200 dark:border-blue-800/70 px-2.5 py-1.5 sm:py-1 min-h-[44px] sm:min-h-[28px] text-xs text-slate-700 dark:text-slate-200 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/60 dark:hover:bg-blue-900/20 cursor-pointer transition-colors"
+          @click="chip.onClear"
+        >
+          <span class="text-slate-500 dark:text-slate-400">{{ chip.label }}:</span>
+          <span class="font-semibold text-slate-900 dark:text-white">{{ chip.valueLabel }}</span>
+          <UIcon name="i-lucide-x" class="size-3.5 text-slate-400 shrink-0" aria-hidden="true" />
+        </button>
+      </div>
     </div>
 
-    <!-- Action Buttons Footer (opsional bila diletakkan dalam modal sendiri) -->
+    <!-- Kelompok 1: Cakupan Wilayah -->
+    <section
+      aria-label="Cakupan Wilayah Administratif"
+      class="rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 p-3 sm:p-3.5 space-y-2.5"
+    >
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
+          <UIcon name="i-lucide-map-pin" class="size-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+          <span>Cakupan Wilayah</span>
+        </div>
+        <span
+          v-if="effectiveKecamatanLocked || effectiveDesaLocked"
+          class="inline-flex items-center gap-1 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/50 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200"
+        >
+          <UIcon name="i-lucide-lock" class="size-3 shrink-0" aria-hidden="true" />
+          <span>Dikunci sesuai hak akses</span>
+        </span>
+      </div>
+
+      <WilayahSelector
+        :model-kecamatan="modelKecamatan"
+        :model-desa="modelDesa"
+        layout="row"
+        :allow-all="true"
+        :size="isMobile ? 'md' : 'sm'"
+        @update:model-kecamatan="handleKecamatanChange"
+        @update:model-desa="handleDesaChange"
+      />
+    </section>
+
+    <!-- Kelompok 2 & 3: Atribut Layer (Karakteristik Fisik & Administrasi/Pendanaan) -->
+    <section
+      v-for="group in fieldGroups"
+      :key="group.id"
+      :aria-label="group.ariaLabel"
+      class="rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-[#0e1424]/70 p-3 sm:p-3.5 space-y-3"
+    >
+      <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
+        <UIcon :name="group.icon" class="size-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+        <span>{{ group.title }}</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div
+          v-for="field in group.fields"
+          :key="field.key"
+          :class="['space-y-1.5', field.fullWidth ? 'sm:col-span-2' : '']"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <label
+              :for="`${uid}-${field.key}`"
+              class="text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+            >
+              {{ field.label }}
+            </label>
+            <button
+              v-if="field.activeLabel"
+              type="button"
+              :aria-label="`Reset ${field.label}`"
+              class="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+              @click="field.onClear"
+            >
+              Reset
+            </button>
+          </div>
+          <USelectMenu
+            :id="`${uid}-${field.key}`"
+            :model-value="field.modelValue"
+            :items="field.items"
+            value-key="value"
+            label-key="label"
+            :search-input="field.searchInput"
+            :highlight="Boolean(field.activeLabel)"
+            :color="field.activeLabel ? 'primary' : undefined"
+            :size="isMobile ? 'md' : 'sm'"
+            :content="selectContentProps"
+            :ui="selectUiConfig"
+            :placeholder="field.placeholder"
+            :aria-label="`Filter ${field.label}`"
+            class="w-full"
+            @update:model-value="field.onUpdate"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- Action Buttons Footer (untuk konteks drawer/mobile saat DialogFilter footer tidak dipakai) -->
     <div
       v-if="!hideFooterActions"
-      class="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-2"
+      class="pt-3 border-t border-slate-200/80 dark:border-slate-800 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5"
     >
       <UButton
         v-if="hasActiveFilter"
         icon="i-lucide-rotate-ccw"
         label="Atur Ulang"
         color="neutral"
-        variant="ghost"
-        :size="isMobile ? 'sm' : 'xs'"
-        class="cursor-pointer"
-        :class="isMobile ? 'min-h-[44px] px-3' : ''"
+        variant="subtle"
+        :size="isMobile ? 'md' : 'sm'"
+        class="cursor-pointer justify-center"
+        :class="isMobile ? 'min-h-[44px]' : ''"
         @click="emit('reset')"
       />
       <UButton
@@ -512,9 +634,9 @@ const hasActiveFilter = computed(() => activeFiltersCount.value > 0);
         :label="isMobile ? 'Terapkan & Lihat Peta' : 'Terapkan Filter'"
         color="primary"
         variant="solid"
-        :size="isMobile ? 'sm' : 'xs'"
-        class="cursor-pointer font-medium"
-        :class="isMobile ? 'flex-1 justify-center min-h-[44px]' : ''"
+        :size="isMobile ? 'md' : 'sm'"
+        class="cursor-pointer font-semibold justify-center sm:flex-1"
+        :class="isMobile ? 'min-h-[44px]' : ''"
         @click="emit('apply')"
       />
     </div>

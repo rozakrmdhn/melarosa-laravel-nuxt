@@ -78,6 +78,20 @@ export interface PlottingAnggaran {
   updated_at?: string;
 }
 
+export interface JalanPorosRef {
+  id: string;
+  kode_ruas?: number | string | null;
+  nama_ruas?: string | null;
+  desa?: string | null;
+  kecamatan?: string | null;
+  id_desa?: number | null;
+  id_kecamatan?: number | null;
+  panjang?: number | null;
+  kondisi?: string | null;
+  perkerasan?: string | null;
+  lebar?: number | null;
+}
+
 export interface InfrastrukturSegmen {
   id: string;
   tipe_kode: string;
@@ -100,6 +114,7 @@ export interface InfrastrukturSegmen {
   id_kecamatan: number;
   plotting_id?: string | null;
   parent_id?: string | null;
+  parent?: JalanPorosRef | null;
   status_aset?: string | null;
   status_verifikasi: StatusVerifikasi;
   sumber_data?: string | null;
@@ -179,3 +194,103 @@ export interface GeoJsonFeatureCollection {
     properties: Record<string, any>;
   }>;
 }
+
+export interface SelectOptionItem<T extends string = string> {
+  label: string;
+  value: T;
+}
+
+export const KONDISI_OPTIONS: SelectOptionItem<KondisiSegmen>[] = [
+  { label: 'Baik', value: 'Baik' },
+  { label: 'Sedang', value: 'Sedang' },
+  { label: 'Rusak Ringan', value: 'Rusak Ringan' },
+  { label: 'Rusak Berat', value: 'Rusak Berat' },
+];
+
+export const JALAN_POROS_KONDISI_OPTIONS: SelectOptionItem[] = [
+  { label: 'Baik', value: 'Baik' },
+  { label: 'Rusak Sedang', value: 'Rusak Sedang' },
+  { label: 'Rusak Ringan', value: 'Rusak Ringan' },
+  { label: 'Rusak Berat', value: 'Rusak Berat' },
+];
+
+export interface KondisiLegendItem {
+  label: string;
+  color: string;
+}
+
+const KONDISI_COLOR_MAP: Record<string, string> = {
+  Baik: '#10b981',
+  Sedang: '#f59e0b',
+  'Rusak Sedang': '#f59e0b',
+  'Rusak Ringan': '#f97316',
+  'Rusak Berat': '#ef4444',
+};
+
+/** Returns condition legend items matching each layer's domain labels. */
+export function getKondisiLegendItems(layerId?: string): KondisiLegendItem[] {
+  const options = layerId === 'jalan-poros-desa' ? JALAN_POROS_KONDISI_OPTIONS : KONDISI_OPTIONS;
+  return options.map((opt) => ({
+    label: opt.label,
+    color: KONDISI_COLOR_MAP[opt.value] || '#64748b',
+  }));
+}
+
+export const STATUS_KONDISI_OPTIONS: SelectOptionItem<StatusKondisi>[] = [
+  { label: 'Eksisting', value: 'Eksisting' },
+  { label: 'Riwayat', value: 'Riwayat' },
+];
+
+export const PERKERASAN_OPTIONS: SelectOptionItem[] = [
+  { label: 'Aspal', value: 'Aspal' },
+  { label: 'Beton Cor', value: 'Beton Cor' },
+  { label: 'Beton', value: 'Beton' },
+  { label: 'Paving', value: 'Paving' },
+  { label: 'Makadam', value: 'Makadam' },
+  { label: 'Kerikil', value: 'Kerikil' },
+  { label: 'Tanah', value: 'Tanah' },
+  { label: 'Lainnya', value: 'Lainnya' },
+];
+
+export const STATUS_JALAN_OPTIONS: SelectOptionItem[] = [
+  { label: 'Jalan Desa', value: 'Jalan Desa' },
+  { label: 'Jalan Poros Desa', value: 'Jalan Poros Desa' },
+  { label: 'Jalan Kabupaten', value: 'Jalan Kabupaten' },
+];
+
+export const STATUS_ASET_OPTIONS: SelectOptionItem[] = [
+  { label: 'Pemerintah Desa', value: 'Pemerintah Desa' },
+  { label: 'Pemerintah Kabupaten', value: 'Pemerintah Kabupaten' },
+  { label: 'Aset Desa', value: 'Aset Desa' },
+  { label: 'Lainnya', value: 'Lainnya' },
+];
+
+export const SUMBER_DANA_OPTIONS: SelectOptionItem[] = [
+  { label: 'APBD', value: 'APBD' },
+  { label: 'BKK', value: 'BKK' },
+  { label: 'Dana Desa (DD)', value: 'DD' },
+  { label: 'Sektoral', value: 'Sektoral' },
+  { label: 'Lainnya', value: 'Lainnya' },
+];
+
+export const STATUS_VERIFIKASI_OPTIONS: SelectOptionItem<StatusVerifikasi>[] = [
+  { label: 'Draft', value: 'draft' },
+  { label: 'Diajukan ke Kecamatan', value: 'submitted_desa' },
+  { label: 'Terverifikasi Kecamatan', value: 'verified_kecamatan' },
+  { label: 'Ditolak Kecamatan', value: 'rejected_kecamatan' },
+  { label: 'Disahkan Bappeda', value: 'verified_bappeda' },
+  { label: 'Ditolak Bappeda', value: 'rejected_bappeda' },
+];
+
+/** Preserves an existing custom/legacy value in dropdown options when editing saved rows. */
+export function withCurrentOption(
+  options: SelectOptionItem[],
+  currentValue?: string | null,
+): SelectOptionItem[] {
+  const val = currentValue?.trim();
+  if (!val || options.some((opt) => opt.value === val)) {
+    return options;
+  }
+  return [{ label: val, value: val }, ...options];
+}
+

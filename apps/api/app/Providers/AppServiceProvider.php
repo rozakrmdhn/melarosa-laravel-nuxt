@@ -53,7 +53,6 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(PlottingAnggaran::class, PlottingAnggaranPolicy::class);
         Gate::policy(MonitoringRealisasi::class, MonitoringRealisasiPolicy::class);
         Gate::policy(\App\Models\BkkdProposal::class, \App\Policies\BkkdProposalPolicy::class);
-        Gate::policy(\App\Models\BkkdVerifikasi::class, \App\Policies\BkkdVerifikasiPolicy::class);
 
         // Super-admin role bypass for all permissions
         Gate::before(static function ($user, $ability) {
@@ -72,6 +71,14 @@ class AppServiceProvider extends ServiceProvider
             return $request->user()?->hasRole('admin')
                 ? Limit::none()
                 : Limit::perMinute(10)->by($request->ip());
+        });
+
+        RateLimiter::for('backup-mutations', static function (Request $request) {
+            return Limit::perMinute(10)->by($request->user()?->id ?: $request->ip());
+        });
+
+        RateLimiter::for('backup-restore', static function (Request $request) {
+            return Limit::perMinute(5)->by($request->user()?->id ?: $request->ip());
         });
 
         RateLimiter::for('login', static function (Request $request) {

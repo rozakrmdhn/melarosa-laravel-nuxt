@@ -76,10 +76,10 @@ Daftar modul fungsional dalam Melarosa GIS beserta status dokumentasi resminya:
 
 | Modul / Fitur | Berkas Dokumentasi | Status | Deskripsi Singkat |
 |---|---|:---:|---|
-| **Proposal Usulan BKKD** | [bkkd-proposal.md](./features/bkkd-proposal.md) | ✅ Lengkap | Pencatatan proposal desa, nomor registrasi, lampiran terproteksi, PostGIS |
-| **Hasil Verifikasi OPD** | [bkkd-verifikasi.md](./features/bkkd-verifikasi.md) | ✅ Lengkap | Telaah teknis dinas, rekomendasi pagu, catatan teknis, dan koreksi telaah |
-| **Rekapitulasi Desa & TAPD** | [bkkd-rekapitulasi-tapd.md](./features/bkkd-rekapitulasi-tapd.md) | ✅ Lengkap | Matriks usulan per desa, seleksi 1 desa 1 usulan, penyesuaian pagu APBD, Excel |
-| **Audit Trail & Versi BKKD** | [bkkd-audit-riwayat.md](./features/bkkd-audit-riwayat.md) | ✅ Lengkap | Snapshot mutasi data, optimistic locking (409), alasan perubahan, diff viewer |
+| **Proposal Usulan BKKD** | [bkkd-proposal.md](./features/bkkd-proposal.md) | ✅ Lengkap | Pencatatan proposal desa, generator nomor registrasi, import Excel/CSV cerdas, sinkronisasi lokasi & Workspace Peta |
+| **Multi-Lokasi & Analisa Spasial BKKD** | [bkkd-analisa-spasial-lokasi.md](./features/bkkd-analisa-spasial-lokasi.md) | ✅ Lengkap | Inventarisasi 1:N lokasi LineString, snapping & splitting jalan poros desa, fallback OpenRouteService, analisa tumpang tindih 3 lapis, & konfirmasi desa |
+| **Agregasi Wilayah Desa per Tahun** | [bkkd-agregasi-desa.md](./features/bkkd-agregasi-desa.md) | ✅ Lengkap | Monitoring usulan seluruh desa dalam 1 tahun anggaran, filter status usulan, mode desa/bidang, ekspor CSV |
+| **Audit Trail & Versi BKKD** | [bkkd-audit-riwayat.md](./features/bkkd-audit-riwayat.md) | ✅ Lengkap | Snapshot mutasi data proposal & aksi lokasi, optimistic locking (409), alasan perubahan, timeline riwayat |
 
 ---
 

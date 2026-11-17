@@ -96,6 +96,21 @@
     touch-action: manipulation;
   }
 
+  button:not(:disabled),
+  a[href],
+  summary,
+  select:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
   input, select, textarea {
     touch-action: manipulation;
   }
@@ -259,5 +274,27 @@
 .tab-fade-leave-to {
   opacity: 0;
   transform: translateX(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ping,
+  .animate-pulse,
+  .animate-bounce,
+  .animate-spin {
+    animation: none !important;
+  }
+
+  .panel-smooth-transition,
+  .panel-fade-enter-active,
+  .panel-fade-leave-active,
+  .panel-subtle-fade-enter-active,
+  .panel-subtle-fade-leave-active,
+  .panel-body-fade-enter-active,
+  .panel-body-fade-leave-active,
+  .tab-fade-enter-active,
+  .tab-fade-leave-active {
+    transition-duration: 0.01ms !important;
+    transform: none !important;
+  }
 }
 

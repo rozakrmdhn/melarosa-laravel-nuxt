@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import FilterContent from '~/components/dataset/infrastruktur-segmen/FilterContent.vue';
+import { useAuthStore } from '~/stores/auth';
 import type { InfrastrukturTipe } from '~/types/infrastruktur';
 
 interface Props {
@@ -85,22 +86,179 @@ const emit = defineEmits<{
   (e: 'apply'): void;
 }>();
 
-const currentHasActiveFilter = computed(() => {
+const auth = useAuthStore();
+const { isAdmin } = usePermission();
+
+const isUnrestrictedRole = computed(
+  () => isAdmin() || auth.hasRole('admin') || auth.hasRole('verifierBappeda'),
+);
+const isKecamatanLocked = computed(() => !isUnrestrictedRole.value && !!auth.user?.id_kecamatan);
+const isDesaLocked = computed(() => !isUnrestrictedRole.value && !!auth.user?.id_desa);
+
+// Draft filter state agar tombol Tutup membuang perubahan sebelum Terapkan diklik
+const draft = reactive({
+  selectedTipe: null as string | null,
+  selectedTahunPembangunan: null as number | string | null,
+  selectedKondisi: null as string | null,
+  selectedStatusVerifikasi: null as string | null,
+  selectedPerkerasan: null as string | null,
+  selectedStatusJalan: null as string | null,
+  selectedStatusKondisi: null as string | null,
+  selectedStatusAset: null as string | null,
+  selectedSumberDana: null as string | null,
+  modelKecamatan: null as number | null,
+  modelDesa: null as number | null,
+  jalanPerkerasan: null as string | null,
+  jalanKondisi: null as string | null,
+  jalanKecamatan: null as number | null,
+  jalanDesa: null as number | null,
+});
+
+function syncDraftFromProps() {
+  draft.selectedTipe = props.selectedTipe ?? null;
+  draft.selectedTahunPembangunan = props.selectedTahunPembangunan ?? null;
+  draft.selectedKondisi = props.selectedKondisi ?? null;
+  draft.selectedStatusVerifikasi = props.selectedStatusVerifikasi ?? null;
+  draft.selectedPerkerasan = props.selectedPerkerasan ?? null;
+  draft.selectedStatusJalan = props.selectedStatusJalan ?? null;
+  draft.selectedStatusKondisi = props.selectedStatusKondisi ?? null;
+  draft.selectedStatusAset = props.selectedStatusAset ?? null;
+  draft.selectedSumberDana = props.selectedSumberDana ?? null;
+  const resolvedKec = props.modelKecamatan ?? props.jalanKecamatan ?? null;
+  const resolvedDesa = props.modelDesa ?? props.jalanDesa ?? null;
+  draft.modelKecamatan = resolvedKec;
+  draft.modelDesa = resolvedDesa;
+  draft.jalanPerkerasan = props.jalanPerkerasan ?? null;
+  draft.jalanKondisi = props.jalanKondisi ?? null;
+  draft.jalanKecamatan = resolvedKec;
+  draft.jalanDesa = resolvedDesa;
+}
+
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (isOpen) {
+      syncDraftFromProps();
+    }
+  },
+  { immediate: true },
+);
+
+function setDraftKecamatan(val: number | null) {
+  draft.modelKecamatan = val;
+  draft.jalanKecamatan = val;
+}
+
+function setDraftDesa(val: number | null) {
+  draft.modelDesa = val;
+  draft.jalanDesa = val;
+}
+
+const draftSegmenFilterCount = computed(() => {
+  let count = 0;
+  if (draft.selectedTahunPembangunan) count++;
+  if (draft.selectedTipe) count++;
+  if (draft.selectedPerkerasan) count++;
+  if (draft.selectedKondisi) count++;
+  if (draft.selectedStatusVerifikasi) count++;
+  if (draft.selectedStatusJalan) count++;
+  if (draft.selectedStatusKondisi) count++;
+  if (draft.selectedStatusAset) count++;
+  if (draft.selectedSumberDana) count++;
+  if (!isKecamatanLocked.value && draft.modelKecamatan) count++;
+  if (!isDesaLocked.value && draft.modelDesa) count++;
+  return count;
+});
+
+const draftJalanFilterCount = computed(() => {
+  let count = 0;
+  if (draft.jalanPerkerasan) count++;
+  if (draft.jalanKondisi) count++;
+  if (!isKecamatanLocked.value && draft.jalanKecamatan) count++;
+  if (!isDesaLocked.value && draft.jalanDesa) count++;
+  return count;
+});
+
+const currentActiveCount = computed(() => {
   if (props.activeLayerId === 'jalan-poros-desa') {
-    return (props.jalanFilterCount ?? 0) > 0;
+    return draftJalanFilterCount.value;
   }
-  return (props.segmenFilterCount ?? 0) > 0;
+  return draftSegmenFilterCount.value;
+});
+
+const currentHasActiveFilter = computed(() => currentActiveCount.value > 0);
+
+const hasPendingChanges = computed(() => {
+  if (props.activeLayerId === 'jalan-poros-desa') {
+    return (
+      draft.jalanPerkerasan !== (props.jalanPerkerasan ?? null) ||
+      draft.jalanKondisi !== (props.jalanKondisi ?? null) ||
+      draft.jalanKecamatan !== (props.jalanKecamatan ?? props.modelKecamatan ?? null) ||
+      draft.jalanDesa !== (props.jalanDesa ?? props.modelDesa ?? null)
+    );
+  }
+  return (
+    draft.selectedTipe !== (props.selectedTipe ?? null) ||
+    draft.selectedTahunPembangunan !== (props.selectedTahunPembangunan ?? null) ||
+    draft.selectedKondisi !== (props.selectedKondisi ?? null) ||
+    draft.selectedStatusVerifikasi !== (props.selectedStatusVerifikasi ?? null) ||
+    draft.selectedPerkerasan !== (props.selectedPerkerasan ?? null) ||
+    draft.selectedStatusJalan !== (props.selectedStatusJalan ?? null) ||
+    draft.selectedStatusKondisi !== (props.selectedStatusKondisi ?? null) ||
+    draft.selectedStatusAset !== (props.selectedStatusAset ?? null) ||
+    draft.selectedSumberDana !== (props.selectedSumberDana ?? null) ||
+    draft.modelKecamatan !== (props.modelKecamatan ?? null) ||
+    draft.modelDesa !== (props.modelDesa ?? null)
+  );
 });
 
 function handleResetCurrent() {
   if (props.activeLayerId === 'jalan-poros-desa') {
-    emit('reset-jalan');
+    draft.jalanPerkerasan = null;
+    draft.jalanKondisi = null;
   } else {
-    emit('reset-segmen');
+    draft.selectedTipe = null;
+    draft.selectedTahunPembangunan = null;
+    draft.selectedKondisi = null;
+    draft.selectedStatusVerifikasi = null;
+    draft.selectedPerkerasan = null;
+    draft.selectedStatusJalan = null;
+    draft.selectedStatusKondisi = null;
+    draft.selectedStatusAset = null;
+    draft.selectedSumberDana = null;
+  }
+
+  if (!isKecamatanLocked.value) {
+    setDraftKecamatan(null);
+  }
+  if (!isDesaLocked.value) {
+    setDraftDesa(null);
   }
 }
 
 function handleApply() {
+  emit('update:selectedTipe', draft.selectedTipe);
+  emit('update:selectedTahunPembangunan', draft.selectedTahunPembangunan);
+  emit('update:selected-tahun-pembangunan', draft.selectedTahunPembangunan);
+  emit('update:selectedKondisi', draft.selectedKondisi);
+  emit('update:selectedStatusVerifikasi', draft.selectedStatusVerifikasi);
+  emit('update:selectedPerkerasan', draft.selectedPerkerasan);
+  emit('update:selectedStatusJalan', draft.selectedStatusJalan);
+  emit('update:selected-status-jalan', draft.selectedStatusJalan);
+  emit('update:selectedStatusKondisi', draft.selectedStatusKondisi);
+  emit('update:selected-status-kondisi', draft.selectedStatusKondisi);
+  emit('update:selectedStatusAset', draft.selectedStatusAset);
+  emit('update:selected-status-aset', draft.selectedStatusAset);
+  emit('update:selectedSumberDana', draft.selectedSumberDana);
+  emit('update:selected-sumber-dana', draft.selectedSumberDana);
+  emit('update:modelKecamatan', draft.modelKecamatan);
+  emit('update:modelDesa', draft.modelDesa);
+
+  emit('update:jalanPerkerasan', draft.jalanPerkerasan);
+  emit('update:jalanKondisi', draft.jalanKondisi);
+  emit('update:jalanKecamatan', draft.jalanKecamatan);
+  emit('update:jalanDesa', draft.jalanDesa);
+
   if (props.activeLayerId === 'jalan-poros-desa') {
     emit('apply-jalan');
   } else {
@@ -114,57 +272,70 @@ function handleApply() {
 <template>
   <UModal
     :open="open"
+    :overlay="false"
+    :modal="false"
     title="Filter Data Peta"
-    description="Pilih layer dan tentukan kriteria wilayah atau atribut data."
+    description="Pilih layer dan atur kriteria wilayah atau atribut sebelum diterapkan ke peta dan tabel."
     :ui="{
-      content: 'max-w-lg bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl'
+      content: 'w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] max-w-2xl bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl overflow-hidden',
+      header: 'px-4 py-3.5 sm:px-5 sm:py-4',
+      body: 'p-4 sm:p-5 overflow-y-auto overscroll-contain',
+      footer: 'px-4 py-3 sm:px-5 sm:py-3.5 bg-slate-50/90 dark:bg-[#090d16] flex items-center justify-between gap-3 flex-wrap'
     }"
     @update:open="emit('update:open', $event)"
   >
     <template #body>
       <!-- Layer Segmented Switcher -->
-      <div class="mb-4 p-1 bg-gray-100 dark:bg-gray-850/80 rounded-xl flex items-center gap-1 border border-gray-200/60 dark:border-gray-800">
+      <div
+        role="tablist"
+        aria-label="Pilih layer data peta"
+        class="mb-4 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl flex items-center gap-1 border border-slate-200/70 dark:border-slate-800"
+      >
         <button
           type="button"
+          role="tab"
+          :aria-selected="activeLayerId === 'infrastruktur-segmen'"
           :class="[
-            'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[36px]',
+            'flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px] sm:min-h-[38px]',
             activeLayerId === 'infrastruktur-segmen'
-              ? 'bg-white dark:bg-[#0e1424] text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-[#0e1526] text-blue-600 dark:text-blue-400 font-semibold shadow-xs ring-1 ring-slate-200/80 dark:ring-slate-700/80'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           ]"
           @click="emit('update:activeLayerId', 'infrastruktur-segmen')"
         >
-          <UIcon name="i-lucide-route" class="size-3.5 shrink-0" />
+          <UIcon name="i-lucide-route" class="size-3.5 shrink-0" aria-hidden="true" />
           <span class="truncate">Segmen Fisik</span>
           <UBadge
-            v-if="(segmenFilterCount ?? 0) > 0"
-            :label="String(segmenFilterCount)"
+            v-if="draftSegmenFilterCount > 0"
+            :label="String(draftSegmenFilterCount)"
             size="xs"
             color="primary"
             variant="subtle"
-            class="text-[9px] px-1 py-0 h-4 font-mono ml-0.5"
+            class="text-[10px] px-1.5 py-0 h-4 tabular-nums"
           />
         </button>
 
         <button
           type="button"
+          role="tab"
+          :aria-selected="activeLayerId === 'jalan-poros-desa'"
           :class="[
-            'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer min-h-[36px]',
+            'flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px] sm:min-h-[38px]',
             activeLayerId === 'jalan-poros-desa'
-              ? 'bg-white dark:bg-[#0e1424] text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-[#0e1526] text-blue-600 dark:text-blue-400 font-semibold shadow-xs ring-1 ring-slate-200/80 dark:ring-slate-700/80'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
           ]"
           @click="emit('update:activeLayerId', 'jalan-poros-desa')"
         >
-          <UIcon name="i-lucide-milestone" class="size-3.5 shrink-0" />
+          <UIcon name="i-lucide-milestone" class="size-3.5 shrink-0" aria-hidden="true" />
           <span class="truncate">Jalan Poros Desa</span>
           <UBadge
-            v-if="(jalanFilterCount ?? 0) > 0"
-            :label="String(jalanFilterCount)"
+            v-if="draftJalanFilterCount > 0"
+            :label="String(draftJalanFilterCount)"
             size="xs"
             color="info"
             variant="subtle"
-            class="text-[9px] px-1 py-0 h-4 font-mono ml-0.5"
+            class="text-[10px] px-1.5 py-0 h-4 tabular-nums"
           />
         </button>
       </div>
@@ -175,31 +346,33 @@ function handleApply() {
         layer-id="infrastruktur-segmen"
         layer-title="Segmen Fisik Infrastruktur"
         :tipe-list="tipeList"
-        :selected-tipe="selectedTipe"
-        :selected-tahun-pembangunan="selectedTahunPembangunan"
-        :selected-kondisi="selectedKondisi"
-        :selected-status-verifikasi="selectedStatusVerifikasi"
-        :selected-perkerasan="selectedPerkerasan"
-        :selected-status-jalan="selectedStatusJalan"
-        :selected-status-kondisi="selectedStatusKondisi"
-        :selected-status-aset="selectedStatusAset"
-        :selected-sumber-dana="selectedSumberDana"
-        :model-kecamatan="modelKecamatan"
-        :model-desa="modelDesa"
+        :selected-tipe="draft.selectedTipe"
+        :selected-tahun-pembangunan="draft.selectedTahunPembangunan"
+        :selected-kondisi="draft.selectedKondisi"
+        :selected-status-verifikasi="draft.selectedStatusVerifikasi"
+        :selected-perkerasan="draft.selectedPerkerasan"
+        :selected-status-jalan="draft.selectedStatusJalan"
+        :selected-status-kondisi="draft.selectedStatusKondisi"
+        :selected-status-aset="draft.selectedStatusAset"
+        :selected-sumber-dana="draft.selectedSumberDana"
+        :model-kecamatan="draft.modelKecamatan"
+        :model-desa="draft.modelDesa"
+        :is-kecamatan-locked="isKecamatanLocked"
+        :is-desa-locked="isDesaLocked"
         :is-mobile="false"
         :hide-header="true"
         :hide-footer-actions="true"
-        @update:selected-tipe="emit('update:selectedTipe', $event)"
-        @update:selected-tahun-pembangunan="emit('update:selectedTahunPembangunan', $event)"
-        @update:selected-kondisi="emit('update:selectedKondisi', $event)"
-        @update:selected-status-verifikasi="emit('update:selectedStatusVerifikasi', $event)"
-        @update:selected-perkerasan="emit('update:selectedPerkerasan', $event)"
-        @update:selected-status-jalan="emit('update:selectedStatusJalan', $event); emit('update:selected-status-jalan', $event)"
-        @update:selected-status-kondisi="emit('update:selectedStatusKondisi', $event); emit('update:selected-status-kondisi', $event)"
-        @update:selected-status-aset="emit('update:selectedStatusAset', $event); emit('update:selected-status-aset', $event)"
-        @update:selected-sumber-dana="emit('update:selectedSumberDana', $event); emit('update:selected-sumber-dana', $event)"
-        @update:model-kecamatan="emit('update:modelKecamatan', $event)"
-        @update:model-desa="emit('update:modelDesa', $event)"
+        @update:selected-tipe="draft.selectedTipe = $event"
+        @update:selected-tahun-pembangunan="draft.selectedTahunPembangunan = $event"
+        @update:selected-kondisi="draft.selectedKondisi = $event"
+        @update:selected-status-verifikasi="draft.selectedStatusVerifikasi = $event"
+        @update:selected-perkerasan="draft.selectedPerkerasan = $event"
+        @update:selected-status-jalan="draft.selectedStatusJalan = $event"
+        @update:selected-status-kondisi="draft.selectedStatusKondisi = $event"
+        @update:selected-status-aset="draft.selectedStatusAset = $event"
+        @update:selected-sumber-dana="draft.selectedSumberDana = $event"
+        @update:model-kecamatan="setDraftKecamatan($event)"
+        @update:model-desa="setDraftDesa($event)"
       />
 
       <!-- Layer 2 Content: Jalan Poros Desa -->
@@ -207,53 +380,60 @@ function handleApply() {
         v-else-if="activeLayerId === 'jalan-poros-desa'"
         layer-id="jalan-poros-desa"
         layer-title="Jalan Poros Desa"
-        :selected-perkerasan="jalanPerkerasan"
-        :selected-kondisi="jalanKondisi"
-        :model-kecamatan="jalanKecamatan"
-        :model-desa="jalanDesa"
+        :selected-perkerasan="draft.jalanPerkerasan"
+        :selected-kondisi="draft.jalanKondisi"
+        :model-kecamatan="draft.jalanKecamatan"
+        :model-desa="draft.jalanDesa"
+        :is-kecamatan-locked="isKecamatanLocked"
+        :is-desa-locked="isDesaLocked"
         :is-mobile="false"
         :hide-header="true"
         :hide-footer-actions="true"
-        @update:selected-perkerasan="emit('update:jalanPerkerasan', $event)"
-        @update:selected-kondisi="emit('update:jalanKondisi', $event)"
-        @update:model-kecamatan="emit('update:jalanKecamatan', $event)"
-        @update:model-desa="emit('update:jalanDesa', $event)"
+        @update:selected-perkerasan="draft.jalanPerkerasan = $event"
+        @update:selected-kondisi="draft.jalanKondisi = $event"
+        @update:model-kecamatan="setDraftKecamatan($event)"
+        @update:model-desa="setDraftDesa($event)"
       />
+    </template>
 
-      <!-- Dialog Unified Footer -->
-      <div class="mt-5 pt-3.5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-        <div>
-          <UButton
-            v-if="currentHasActiveFilter"
-            icon="i-lucide-rotate-ccw"
-            label="Atur Ulang"
-            color="neutral"
-            variant="ghost"
-            size="xs"
-            class="cursor-pointer text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            @click="handleResetCurrent"
-          />
-        </div>
+    <template #footer>
+      <div class="flex items-center gap-2 min-w-0">
+        <UButton
+          v-if="currentHasActiveFilter"
+          icon="i-lucide-rotate-ccw"
+          label="Atur Ulang"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          class="cursor-pointer min-h-[44px] sm:min-h-[36px] text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+          @click="handleResetCurrent"
+        />
+        <span
+          v-if="hasPendingChanges"
+          class="text-xs font-medium text-amber-700 dark:text-amber-300"
+        >
+          Perubahan belum diterapkan
+        </span>
+      </div>
 
-        <div class="flex items-center gap-2">
-          <UButton
-            label="Tutup"
-            color="neutral"
-            variant="subtle"
-            size="xs"
-            class="cursor-pointer"
-            @click="emit('update:open', false)"
-          />
-          <UButton
-            icon="i-lucide-check"
-            label="Terapkan Filter"
-            color="primary"
-            variant="solid"
-            size="xs"
-            class="cursor-pointer font-medium"
-            @click="handleApply"
-          />
-        </div>
+      <div class="flex items-center gap-2 ms-auto w-full sm:w-auto justify-end">
+        <UButton
+          label="Batal"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          class="cursor-pointer min-h-[44px] sm:min-h-[36px] px-3.5"
+          @click="emit('update:open', false)"
+        />
+        <UButton
+          icon="i-lucide-check"
+          :label="currentActiveCount > 0 ? `Terapkan Filter (${currentActiveCount})` : 'Terapkan Filter'"
+          color="primary"
+          variant="solid"
+          size="sm"
+          class="cursor-pointer font-semibold min-h-[44px] sm:min-h-[36px] px-4 flex-1 sm:flex-none justify-center"
+          @click="handleApply"
+        />
       </div>
     </template>
   </UModal>

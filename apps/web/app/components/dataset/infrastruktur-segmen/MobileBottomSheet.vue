@@ -114,6 +114,12 @@ function handleResize() {
   }
 }
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && props.open) {
+    dismiss();
+  }
+}
+
 onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', handleResize, { passive: true });
@@ -121,6 +127,7 @@ onMounted(() => {
     window.addEventListener('touchend', endDrag);
     window.addEventListener('mousemove', onDrag);
     window.addEventListener('mouseup', endDrag);
+    document.addEventListener('keydown', handleKeydown);
   }
 });
 
@@ -131,6 +138,7 @@ onUnmounted(() => {
     window.removeEventListener('touchend', endDrag);
     window.removeEventListener('mousemove', onDrag);
     window.removeEventListener('mouseup', endDrag);
+    document.removeEventListener('keydown', handleKeydown);
   }
 });
 
@@ -183,20 +191,13 @@ function dismiss() {
 
 <template>
   <Teleport to="body">
-    <!-- Backdrop overlay -->
-    <Transition name="sheet-backdrop">
-      <div
-        v-if="open"
-        class="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] lg:hidden"
-        @click="dismiss"
-      />
-    </Transition>
-
     <!-- Bottom Sheet Container (touch-none removed so children can scroll naturally) -->
     <Transition name="sheet-slide">
       <div
         v-if="open"
-        class="fixed bottom-0 left-0 right-0 z-50 lg:hidden flex flex-col bg-white dark:bg-[#0b0f19] rounded-t-2xl shadow-2xl border-t border-gray-200 dark:border-gray-800 will-change-transform"
+        role="region"
+        :aria-label="title"
+        class="fixed bottom-0 left-0 right-0 z-50 lg:hidden flex flex-col max-h-[calc(100dvh-0.75rem)] pb-[env(safe-area-inset-bottom)] bg-white dark:bg-[#0b0f19] rounded-t-2xl border-t border-gray-200/90 dark:border-gray-700/80 ring-1 ring-slate-900/8 dark:ring-white/10 shadow-[0_-10px_32px_-4px_rgba(15,23,42,0.16)] dark:shadow-[0_-12px_36px_-4px_rgba(0,0,0,0.6)] will-change-transform"
         :style="sheetStyle"
       >
         <!-- Top Drag Header: touch-none strictly isolated here for dragging gesture -->
@@ -217,7 +218,11 @@ function dismiss() {
               </span>
             </div>
 
-            <div class="flex items-center gap-1 shrink-0">
+            <div
+              class="flex items-center gap-1 shrink-0"
+              @mousedown.stop
+              @touchstart.stop
+            >
               <!-- Touch-friendly snap toggle: 44px min tap target compliant with antislop-layoutmobile R-03 -->
               <UButton
                 :icon="snapLevel === 'peek' ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
@@ -225,6 +230,7 @@ function dismiss() {
                 color="neutral"
                 variant="ghost"
                 class="size-8 min-h-[44px] min-w-[44px] p-0 flex items-center justify-center cursor-pointer"
+                :aria-label="snapLevel === 'peek' ? 'Perbesar panel' : 'Perkecil panel'"
                 :title="snapLevel === 'peek' ? 'Perbesar panel' : 'Perkecil panel'"
                 @click="toggleSnap"
               />
@@ -235,6 +241,7 @@ function dismiss() {
                 color="neutral"
                 variant="ghost"
                 class="size-8 min-h-[44px] min-w-[44px] p-0 flex items-center justify-center cursor-pointer"
+                aria-label="Tutup panel"
                 title="Tutup panel"
                 @click="dismiss"
               />
@@ -255,15 +262,6 @@ function dismiss() {
 </template>
 
 <style scoped>
-.sheet-backdrop-enter-active,
-.sheet-backdrop-leave-active {
-  transition: opacity 0.25s ease;
-}
-.sheet-backdrop-enter-from,
-.sheet-backdrop-leave-to {
-  opacity: 0;
-}
-
 .sheet-slide-enter-active,
 .sheet-slide-leave-active {
   transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);

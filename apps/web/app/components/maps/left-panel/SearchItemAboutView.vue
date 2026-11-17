@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
+  (e: "back-to-jelajah"): void;
   (e: "zoom-kecamatan", k: KecamatanEntry): void;
   (e: "zoom-dataset", item: DatasetResultItem): void;
   (e: "toggle-dataset", item: DatasetResultItem): void;
@@ -68,13 +69,13 @@ function getKecamatanCode(name?: string): string {
 }
 
 function getDatasetCode(item?: DatasetResultItem): string {
-  if (!item) return "DATA";
+  if (!item) return "Peta";
   const proto = String(item.protocol || "").toUpperCase();
-  if (proto.includes("MVT") || proto.includes("VECTOR")) return "MVT";
-  if (proto.includes("WFS")) return "WFS";
-  if (proto.includes("WMS")) return "WMS";
-  if (proto.includes("GEOJSON")) return "GEO";
-  return "DATA";
+  if (proto.includes("MVT") || proto.includes("VECTOR")) return "Peta Vektor";
+  if (proto.includes("WFS")) return "Data Peta";
+  if (proto.includes("WMS")) return "Peta Tematik";
+  if (proto.includes("GEOJSON")) return "Data Lokasi";
+  return "Peta";
 }
 
 function getGeoparkCode(item?: any): string {
@@ -147,7 +148,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
 
   return {
     id: layerId,
-    name: String(r?.name || d?.title || r?.title || "Dataset Spasial"),
+    name: String(r?.name || d?.title || r?.title || "Peta Pendukung"),
     protocol: String(d?.protocol || r?.protocol || "WMS"),
     url: String(r?.url || r?.wmsUrl || "https://geoportal.bojonegorokab.go.id/geoserver/wms"),
     layer_name: String(r?.layer_name || r?.wmsLayerName || d?.title || ""),
@@ -180,8 +181,11 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
           </div>
         </template>
         <template v-else-if="itemType === 'dataset'">
-          <div class="size-11 rounded-full bg-purple-700 dark:bg-purple-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs tracking-wider">
-            {{ getDatasetCode(itemData) }}
+          <div class="size-10 rounded-xl bg-purple-600/10 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 flex items-center justify-center shrink-0">
+            <UIcon
+              :name="String(itemData.protocol || '').toUpperCase().includes('MVT') ? 'i-lucide-layers' : 'i-lucide-map'"
+              class="size-5"
+            />
           </div>
         </template>
         <template v-else-if="itemType === 'coordinate'">
@@ -213,27 +217,19 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             </p>
           </template>
           <template v-else-if="itemType === 'dataset'">
-            <div class="flex items-center gap-1.5 flex-wrap">
-              <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
-                {{ itemData.title }}
-              </h1>
-              <span
-                v-if="itemData.slug"
-                class="px-1.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-white/10 shrink-0"
-              >
-                {{ itemData.slug }}
-              </span>
-            </div>
+            <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
+              {{ itemData.title }}
+            </h1>
             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-normal">
               {{ itemData.subtitle }}
             </p>
           </template>
           <template v-else-if="itemType === 'coordinate'">
             <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
-              Titik Koordinat
+              Titik Lokasi Peta
             </h1>
             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-normal tabular-nums">
-              {{ itemData.formatted }} · WGS 84
+              {{ itemData.formatted }}
             </p>
           </template>
           <template v-else>
@@ -255,13 +251,13 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
         </div>
       </div>
 
-      <!-- Circle X Close Button -->
+      <!-- Circle X Close Button (Kembali ke Jelajah) -->
       <button
         type="button"
         class="relative after:absolute after:-inset-1 after:content-[''] size-9 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-200 flex items-center justify-center transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 mt-0.5"
-        aria-label="Tutup detail dan kembali ke daftar pencarian"
-        title="Tutup detail dan kembali ke daftar pencarian"
-        @click="emit('close')"
+        aria-label="Tutup pencarian dan kembali ke Jelajah"
+        title="Kembali ke Jelajah"
+        @click="emit('back-to-jelajah')"
       >
         <UIcon name="i-lucide-x" class="size-4" />
       </button>
@@ -315,7 +311,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
           </div>
           <div class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] flex items-center justify-between text-xs text-slate-700 dark:text-slate-300">
             <span class="tabular-nums font-semibold">{{ kecamatanCoords[1].toFixed(5) }}°, {{ kecamatanCoords[0].toFixed(5) }}°</span>
-            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold tabular-nums">WGS 84</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold">Titik Pusat</span>
           </div>
         </div>
 
@@ -341,62 +337,61 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
 
       <!-- 4. Detail Titik Koordinat (Desimal & Derajat) -->
       <template v-else-if="itemType === 'coordinate'">
-        <!-- Status & Label Koordinat -->
         <div class="flex items-center justify-between text-xs">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300">
-              Koordinat WGS 84
+              Titik Lokasi Peta
             </span>
             <span
               v-if="itemData.kecamatan"
               class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 flex items-center gap-1"
             >
-              <UIcon name="i-lucide-map-pin" class="size-3.5" />
+              <UIcon name="i-ion-location" class="size-3.5" />
               Kecamatan {{ itemData.kecamatan.name }}
             </span>
           </div>
           <span class="text-xs text-slate-500 dark:text-slate-400 font-medium">Bojonegoro</span>
         </div>
 
-        <!-- Format Desimal (DD) -->
+        <!-- Format Desimal -->
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
             <h2 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Koordinat Desimal (DD)
+              Koordinat Desimal
             </h2>
             <button
               type="button"
               class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 min-h-[44px] px-2"
               @click="copyCoordinates([itemData.lng, itemData.lat])"
             >
-              <UIcon :name="isCopied ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" />
-              <span>{{ isCopied ? 'Tersalin' : 'Salin Desimal' }}</span>
+              <UIcon :name="isCopied ? 'i-ion-checkmark-circle' : 'i-ion-copy-outline'" class="size-3.5" />
+              <span>{{ isCopied ? 'Tersalin' : 'Salin' }}</span>
             </button>
           </div>
           <div class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] flex items-center justify-between text-xs text-slate-700 dark:text-slate-300">
             <span class="tabular-nums font-semibold">{{ itemData.lat?.toFixed(5) }}°, {{ itemData.lng?.toFixed(5) }}°</span>
-            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold tabular-nums">Latitude, Longitude</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold">Lintang, Bujur</span>
           </div>
         </div>
 
-        <!-- Format Derajat Menit Detik (DMS) -->
+        <!-- Format Derajat -->
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
             <h2 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Koordinat Derajat (DMS)
+              Format Derajat
             </h2>
             <button
               type="button"
               class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 min-h-[44px] px-2"
               @click="copyDMS(itemData.dms)"
             >
-              <UIcon :name="isDmsCopied ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3.5" />
+              <UIcon :name="isDmsCopied ? 'i-ion-checkmark-circle' : 'i-ion-copy-outline'" class="size-3.5" />
               <span>{{ isDmsCopied ? 'Tersalin' : 'Salin Derajat' }}</span>
             </button>
           </div>
           <div class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] flex items-center justify-between text-xs text-slate-700 dark:text-slate-300">
             <span class="tabular-nums font-semibold">{{ itemData.dms }}</span>
-            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold tabular-nums">DMS WGS 84</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold">Derajat</span>
           </div>
         </div>
 
@@ -407,8 +402,8 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             class="w-full flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-semibold text-xs shadow-md shadow-blue-600/20 transition-all cursor-pointer"
             @click="emit('zoom-coordinate', itemData)"
           >
-            <UIcon name="i-lucide-navigation" class="size-4" />
-            <span>Terbangkan Kamera ke Titik Ini (Fly To)</span>
+            <UIcon name="i-ion-navigate" class="size-4" />
+            <span>Tampilkan Titik Ini di Peta</span>
           </button>
 
           <a
@@ -593,8 +588,8 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             class="w-full flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-semibold text-xs shadow-md shadow-blue-600/20 transition-all cursor-pointer"
             @click="handleZoomGeopark(itemData)"
           >
-            <UIcon name="i-lucide-crosshair" class="size-4" />
-            <span>Pusatkan Peta ke Geosite Ini</span>
+            <UIcon name="i-ion-locate" class="size-4" />
+            <span>Pusatkan Peta ke Lokasi Ini</span>
           </button>
 
           <button
@@ -602,8 +597,8 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
             class="w-full flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
             @click="emit('open-geopark-tab', itemData)"
           >
-            <UIcon name="i-lucide-book-open" class="size-4" />
-            <span>Buka Ulasan di Tab Geosite</span>
+            <UIcon name="i-ion-flame" class="size-4" />
+            <span>Buka Ulasan di Tab Wisata</span>
           </button>
 
           <NuxtLink

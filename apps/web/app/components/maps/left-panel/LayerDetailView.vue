@@ -195,6 +195,42 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
               />
             </div>
           </div>
+          <!-- Simbologi Vektor MVT -->
+          <div v-else-if="props.selectedLayer.style_config" class="pt-1 space-y-2">
+            <span class="text-xs text-slate-500 font-semibold block uppercase tracking-wider">Simbologi Layer Vektor:</span>
+            <div class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 space-y-2 text-xs">
+              <div v-if="props.selectedLayer.style_config.rules?.length" class="space-y-1.5">
+                <div
+                  v-for="(rule, rIdx) in props.selectedLayer.style_config.rules"
+                  :key="rule.id || rIdx"
+                  class="flex items-center gap-2"
+                >
+                  <span
+                    class="size-3.5 rounded-full shrink-0 border border-black/10 dark:border-white/20 shadow-2xs"
+                    :style="{ backgroundColor: rule.color || props.selectedLayer.style_config.color }"
+                  />
+                  <span class="text-slate-700 dark:text-slate-300 capitalize font-medium">
+                    {{ rule.value }}
+                  </span>
+                  <span class="text-[10px] text-slate-400 font-mono">
+                    ({{ rule.field }})
+                  </span>
+                </div>
+              </div>
+              <div v-else class="flex items-center gap-2">
+                <span
+                  class="size-3.5 rounded-full shrink-0 border border-black/10 dark:border-white/20 shadow-2xs"
+                  :style="{ backgroundColor: props.selectedLayer.style_config.color || '#2563eb' }"
+                />
+                <span class="text-slate-700 dark:text-slate-300 font-medium">
+                  {{ props.selectedLayer.style_config.geom_type === 'polygon' ? 'Area Poligon' : props.selectedLayer.style_config.geom_type === 'point' ? 'Titik Lokasi' : 'Trase Garis' }}
+                </span>
+                <span v-if="props.selectedLayer.style_config.dash && props.selectedLayer.style_config.dash !== 'solid'" class="text-[10px] text-slate-400 font-mono">
+                  ({{ props.selectedLayer.style_config.dash }})
+                </span>
+              </div>
+            </div>
+          </div>
 
           <p v-if="props.selectedLayer.description" class="text-xs text-slate-600 dark:text-slate-400 pt-1.5 border-t border-slate-100 dark:border-white/5 leading-relaxed font-medium">
             {{ props.selectedLayer.description }}

@@ -1,0 +1,443 @@
+{
+  "projection": {
+    "geographicSRS": "EPSG:4326",
+    "projectedSRS": "EPSG:32749",
+    "name": "WGS 84 / UTM zone 49S Isometric 2:1 Dimetric",
+    "utmZone": "49S",
+    "centralMeridian": 111.0,
+    "falseEasting": 500000.0,
+    "falseNorthing": 10000000.0,
+    "scaleFactor": 0.9996
+  },
+  "originCoordinate": {
+    "geographic": [
+      111.893824,
+      -7.158704
+    ],
+    "projected": [
+      598692.59,
+      9208609.62
+    ]
+  },
+  "scaleFactor": 1.0,
+  "isometricTileWidth": 64,
+  "isometricTileHeight": 32,
+  "rotationAngle": 0.0,
+  "verticalExaggeration": 1.45,
+  "pixelResolution": 30.0,
+  "resolutionPerZoom": {
+    "0": 30.0,
+    "1": 15.0,
+    "2": 7.5,
+    "3": 3.75,
+    "4": 1.875
+  },
+  "scalePerZoom": {
+    "0": 0.03333333,
+    "1": 0.06666667,
+    "2": 0.13333333,
+    "3": 0.26666667,
+    "4": 0.53333333
+  },
+  "tileSize": 256,
+  "minZoom": 0,
+  "maxZoom": 4,
+  "zoomLevels": [
+    {
+      "z": 0,
+      "cols": 2,
+      "rows": 1,
+      "widthPx": 512,
+      "heightPx": 256,
+      "pixelResolution": 30.0,
+      "scale": 0.03333333
+    },
+    {
+      "z": 1,
+      "cols": 4,
+      "rows": 2,
+      "widthPx": 1024,
+      "heightPx": 512,
+      "pixelResolution": 15.0,
+      "scale": 0.06666667
+    },
+    {
+      "z": 2,
+      "cols": 8,
+      "rows": 4,
+      "widthPx": 2048,
+      "heightPx": 1024,
+      "pixelResolution": 7.5,
+      "scale": 0.13333333
+    },
+    {
+      "z": 3,
+      "cols": 16,
+      "rows": 8,
+      "widthPx": 4096,
+      "heightPx": 2048,
+      "pixelResolution": 3.75,
+      "scale": 0.26666667
+    },
+    {
+      "z": 4,
+      "cols": 32,
+      "rows": 16,
+      "widthPx": 8192,
+      "heightPx": 4096,
+      "pixelResolution": 1.875,
+      "scale": 0.53333333
+    }
+  ],
+  "geographicExtent": {
+    "minLng": 111.854249318,
+    "minLat": -7.185711589,
+    "maxLng": 111.933399408,
+    "maxLat": -7.131695562
+  },
+  "projectedExtent": {
+    "minEasting": 594321.365,
+    "minNorthing": 9205628.766,
+    "maxEasting": 603063.812,
+    "maxNorthing": 9211590.483
+  },
+  "isometricExtent": {
+    "minIsoX": -7680.0,
+    "minIsoY": -3840.0,
+    "maxIsoX": 7680.0,
+    "maxIsoY": 3840.0
+  },
+  "boundingExtent": {
+    "geographic": {
+      "minLng": 111.854249318,
+      "minLat": -7.185711589,
+      "maxLng": 111.933399408,
+      "maxLat": -7.131695562
+    },
+    "projected": {
+      "minEasting": 594321.365,
+      "minNorthing": 9205628.766,
+      "maxEasting": 603063.812,
+      "maxNorthing": 9211590.483
+    },
+    "isometric": {
+      "minIsoX": -7680.0,
+      "minIsoY": -3840.0,
+      "maxIsoX": 7680.0,
+      "maxIsoY": 3840.0
+    }
+  },
+  "coordinateTransformationParameters": {
+    "originEasting": 598692.59,
+    "originNorthing": 9208609.62,
+    "originLng": 111.893824,
+    "originLat": -7.158704,
+    "scaleFactor": 1.0,
+    "isoRatio": 0.5,
+    "rotationAngleDeg": 0.0,
+    "minIsoX": -7680.0,
+    "minIsoY": -3840.0,
+    "maxIsoX": 7680.0,
+    "maxIsoY": 3840.0,
+    "basePixelResolution": 30.0,
+    "verticalExaggeration": 1.45
+  },
+  "tileIndexingScheme": {
+    "type": "custom-isometric-grid",
+    "origin": "top-left-isometric-extent",
+    "urlTemplate": "/tiles/bojonegoro-isometric/{z}/{x}/{y}.png",
+    "format": "png",
+    "metatileOverlapPx": 64,
+    "description": "Indeks tile (z, x=col, y=row) dihitung dari ruang piksel isometrik terproyeksi EPSG:32749, bukan Web Mercator XYZ."
+  },
+  "generatedAt": "2026-11-15T08:42:21.491861+00:00",
+  "masterPreviewUrl": "/tiles/bojonegoro-isometric/master_preview.png",
+  "featuresIndexUrl": "/tiles/bojonegoro-isometric/features.json",
+  "datasetStats": {
+    "data_source": "OpenStreetMap Overpass API + PostGIS db_melarosa",
+    "desa_count": 18,
+    "landcover_count": 275,
+    "water_polygon_count": 23,
+    "river_count": 29,
+    "park_count": 112,
+    "road_count": 3388,
+    "rail_count": 57,
+    "postgis_poros_count": 13,
+    "postgis_lingkungan_count": 11,
+    "infrastructure_count": 45,
+    "tree_count": 2380,
+    "building_count": 47979,
+    "landmark_count": 10
+  },
+  "coordinateVerification": {
+    "passed": true,
+    "maxMeterError": 0.0,
+    "maxDegreeError": 0.0,
+    "samples": [
+      {
+        "name": "Alun-Alun Bojonegoro (OSM way 371909910)",
+        "geographic": {
+          "lng": 111.880507,
+          "lat": -7.149721
+        },
+        "projectedEpsg32749": {
+          "easting": 597225.308,
+          "northing": 9209606.957
+        },
+        "isometric": {
+          "isoX": -469.945,
+          "isoY": -1232.309
+        },
+        "pixelZ4": {
+          "px": 3845.36,
+          "py": 1390.77
+        },
+        "inverseGeographic": {
+          "lng": 111.880507,
+          "lat": -7.149721
+        },
+        "meterError": 0.0,
+        "degreeError": 0.0
+      },
+      {
+        "name": "Gedung Pemkab Bojonegoro (OSM way 515576017)",
+        "geographic": {
+          "lng": 111.881489,
+          "lat": -7.150168
+        },
+        "projectedEpsg32749": {
+          "easting": 597333.654,
+          "northing": 9209557.329
+        },
+        "isometric": {
+          "isoX": -411.227,
+          "isoY": -1153.322
+        },
+        "pixelZ4": {
+          "px": 3876.68,
+          "py": 1432.89
+        },
+        "inverseGeographic": {
+          "lng": 111.881489,
+          "lat": -7.150168
+        },
+        "meterError": 0.0,
+        "degreeError": 0.0
+      },
+      {
+        "name": "Masjid Agung Darussalam (OSM way 515575643)",
+        "geographic": {
+          "lng": 111.878772,
+          "lat": -7.149451
+        },
+        "projectedEpsg32749": {
+          "easting": 597033.772,
+          "northing": 9209637.174
+        },
+        "isometric": {
+          "isoX": -631.264,
+          "isoY": -1343.186
+        },
+        "pixelZ4": {
+          "px": 3759.33,
+          "py": 1331.63
+        },
+        "inverseGeographic": {
+          "lng": 111.878772,
+          "lat": -7.149451
+        },
+        "meterError": 0.0,
+        "degreeError": 0.0
+      },
+      {
+        "name": "Stasiun Besar Bojonegoro (OSM way 515039716)",
+        "geographic": {
+          "lng": 111.886672,
+          "lat": -7.164054
+        },
+        "projectedEpsg32749": {
+          "easting": 597903.043,
+          "northing": 9208020.991
+        },
+        "isometric": {
+          "isoX": -1378.177,
+          "isoY": -100.459
+        },
+        "pixelZ4": {
+          "px": 3360.97,
+          "py": 1994.42
+        },
+        "inverseGeographic": {
+          "lng": 111.886672,
+          "lat": -7.164054
+        },
+        "meterError": 0.0,
+        "degreeError": 0.0
+      },
+      {
+        "name": "RSUD Dr. R. Sosodoro Djatikoesoemo (OSM way 787655319)",
+        "geographic": {
+          "lng": 111.899594,
+          "lat": -7.160179
+        },
+        "projectedEpsg32749": {
+          "easting": 599330.795,
+          "northing": 9208446.639
+        },
+        "isometric": {
+          "isoX": 475.223,
+          "isoY": 400.593
+        },
+        "pixelZ4": {
+          "px": 4349.45,
+          "py": 2261.65
+        },
+        "inverseGeographic": {
+          "lng": 111.899594,
+          "lat": -7.160179
+        },
+        "meterError": 0.0,
+        "degreeError": 0.0
+      },
+      {
+        "name": "Stadion Letjen H. Soedirman (OSM way 222360199)",
+        "geographic": {
+          "lng": 111.900705,
+          "lat": -7.148177
+        },
+        "projectedEpsg32749": {
+          "easting": 599456.076,
+          "northing": 9209773.347
+        },
+        "isometric": {
+          "isoX": 1927.213,
+          "isoY": -200.12
+        },
+        "pixelZ4": {
+          "px": 5123.85,
+          "py": 1941.27
+        },
+        "inverseGeographic": {
+          "lng": 111.900705,
+          "lat": -7.148177
+        },
+        "meterError": 0.0,
+        "degreeError": 0.0
+      }
+    ]
+  },
+  "tileGenerationSummary": {
+    "totalTiles": 682,
+    "totalBytes": 5059321,
+    "zoomReports": [
+      {
+        "zoom": 0,
+        "cols": 2,
+        "rows": 1,
+        "tilesWritten": 2,
+        "totalBytes": 37752,
+        "elapsedSeconds": 0.49
+      },
+      {
+        "zoom": 1,
+        "cols": 4,
+        "rows": 2,
+        "tilesWritten": 8,
+        "totalBytes": 127377,
+        "elapsedSeconds": 0.9
+      },
+      {
+        "zoom": 2,
+        "cols": 8,
+        "rows": 4,
+        "tilesWritten": 32,
+        "totalBytes": 380664,
+        "elapsedSeconds": 2.75
+      },
+      {
+        "zoom": 3,
+        "cols": 16,
+        "rows": 8,
+        "tilesWritten": 128,
+        "totalBytes": 1172385,
+        "elapsedSeconds": 10.21
+      },
+      {
+        "zoom": 4,
+        "cols": 32,
+        "rows": 16,
+        "tilesWritten": 512,
+        "totalBytes": 3341143,
+        "elapsedSeconds": 21.21
+      }
+    ],
+    "totalElapsedSeconds": 45.47
+  },
+  "colorPalette": {
+    "void_bg": "#E4DDCE",
+    "void_grid": "#D8D0C0",
+    "terrain_urban_a": "#F4EDDA",
+    "terrain_urban_b": "#EFE7D3",
+    "terrain_rural_a": "#E8E6CC",
+    "terrain_rural_b": "#E2E0C4",
+    "desa_border": "#B0B298",
+    "kec_border_outer": "#42623A",
+    "kec_border_inner": "#7AA26C",
+    "farmland_a": "#C4DC8A",
+    "farmland_b": "#B6D07A",
+    "farmland_line": "#9CB862",
+    "grass_a": "#88D654",
+    "grass_b": "#78C646",
+    "park_a": "#6CCE3E",
+    "park_b": "#5EBE32",
+    "park_border": "#46922A",
+    "pitch_a": "#4EC230",
+    "pitch_b": "#44B228",
+    "pitch_line": "#EEF6E8",
+    "forest_a": "#408E2A",
+    "forest_b": "#367E24",
+    "cemetery_a": "#9AC87A",
+    "cemetery_b": "#8CBA6C",
+    "campus_fill": "#E8E2D4",
+    "campus_border": "#C4BCAA",
+    "industrial_fill": "#DEDAD2",
+    "commercial_fill": "#EEE7D6",
+    "tree_shadow": "#346822",
+    "tree_dark": "#24661A",
+    "tree_mid": "#3E9C2C",
+    "tree_light": "#6CD648",
+    "tree_tip": "#98EE68",
+    "tree_trunk": "#664A30",
+    "river_bank": "#C6B892",
+    "river_edge": "#127AA4",
+    "river_deep_a": "#16A0D2",
+    "river_deep_b": "#1CAEDE",
+    "river_mid": "#2EC4F0",
+    "river_wave": "#84E4FC",
+    "canal_edge": "#4C8698",
+    "canal_fill": "#22AEDC",
+    "road_curb": "#DAD4C6",
+    "road_outline": "#2E343E",
+    "road_arterial": "#444C58",
+    "road_arterial_stripe": "#EEC860",
+    "road_secondary": "#505864",
+    "road_secondary_stripe": "#E0E4EA",
+    "road_local": "#5E6672",
+    "road_service": "#888C90",
+    "road_poros": "#525C68",
+    "bridge_deck": "#DEE4EA",
+    "bridge_truss": "#CE4C30",
+    "bridge_rail": "#546070",
+    "rail_ballast": "#92887C",
+    "rail_steel": "#343230",
+    "rail_tie": "#BAAC9A",
+    "rail_abandoned": "#A69C8A",
+    "infra_good": "#26A86C",
+    "infra_fair": "#E09C2C",
+    "infra_poor": "#D64A40",
+    "bldg_shadow": "#B8AE9A",
+    "bldg_outline": "#2C2624",
+    "window_dark": "#404E5E",
+    "window_lit": "#C0DAEA"
+  }
+}

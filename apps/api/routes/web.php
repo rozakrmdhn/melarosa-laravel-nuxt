@@ -2,18 +2,20 @@
 
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\BackupController;
 use App\Http\Controllers\Admin\BatasWilayahDesaController;
 use App\Http\Controllers\Admin\BatasWilayahKecamatanController;
 use App\Http\Controllers\Admin\BkkdAgregasiDesaController;
 use App\Http\Controllers\Admin\BkkdProposalController;
-use App\Http\Controllers\Admin\BkkdRekapitulasiController;
-use App\Http\Controllers\Admin\BkkdVerifikasiController;
+use App\Http\Controllers\Admin\BkkdProposalLokasiController;
 use App\Http\Controllers\Admin\InfrastrukturSegmenController;
 use App\Http\Controllers\Admin\InfrastrukturTipeController;
 use App\Http\Controllers\Admin\InfrastrukturVerifikasiController;
 use App\Http\Controllers\Admin\JalanPorosDesaController;
+use App\Http\Controllers\Admin\JaringanJalanRuasController;
 use App\Http\Controllers\Admin\GeoportalLayerController;
 use App\Http\Controllers\Admin\LayerController;
+use App\Http\Controllers\Admin\MartinLayerController;
 use App\Http\Controllers\Gis\GeoportalPublicLayerController;
 use App\Http\Controllers\Admin\MonitoringRealisasiController;
 use App\Http\Controllers\Admin\PermissionController;
@@ -111,12 +113,14 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
 
             // Layer Management Routes
             Route::get('layers', [LayerController::class, 'index'])->middleware('permission:layers-view')->name('admin.layers.index');
+            Route::get('layers/stack', [LayerController::class, 'stack'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.stack.v1');
             Route::post('layers', [LayerController::class, 'store'])->middleware('permission:layers-create|layers-manage')->name('admin.layers.store');
             Route::post('layers/reorder', [LayerController::class, 'reorder'])->middleware('permission:layers-update|layers-manage')->name('admin.layers.reorder');
             Route::get('layers/{layer}', [LayerController::class, 'show'])->middleware('permission:layers-view')->name('admin.layers.show');
             Route::put('layers/{layer}', [LayerController::class, 'update'])->middleware('permission:layers-update|layers-manage')->name('admin.layers.update');
             Route::delete('layers/{layer}', [LayerController::class, 'destroy'])->middleware('permission:layers-delete|layers-manage')->name('admin.layers.destroy');
             Route::patch('layers/{layer}/toggle-active', [LayerController::class, 'toggleActive'])->middleware('permission:layers-update|layers-manage')->name('admin.layers.toggle-active');
+            Route::get('layers/{layer}/attributes', [LayerController::class, 'attributes'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.attributes');
 
             // Infrastruktur Master Tipe
             Route::get('infrastruktur-tipe', [InfrastrukturTipeController::class, 'index'])->middleware('permission:infrastruktur-tipe-view|infrastruktur-tipe-manage')->name('admin.infrastruktur-tipe.index');
@@ -167,14 +171,20 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
 
             // Layer Management
             Route::get('layers', [LayerController::class, 'index'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.index');
+            Route::get('layers/stack', [LayerController::class, 'stack'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.stack');
             Route::post('layers', [LayerController::class, 'store'])->middleware('permission:layers-create|layers-manage')->name('admin.layers.store');
             Route::post('layers/reorder', [LayerController::class, 'reorder'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.reorder');
             Route::post('layers/geoportal/sync', [GeoportalLayerController::class, 'sync'])->middleware('permission:layers-create|layers-update|layers-manage')->name('admin.layers.geoportal.sync');
             Route::get('layers/geoportal/sync-history', [GeoportalLayerController::class, 'syncHistory'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.geoportal.history');
+            Route::get('layers/martin/status', [MartinLayerController::class, 'status'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.martin.status');
+            Route::get('layers/martin/catalog', [MartinLayerController::class, 'catalog'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.martin.catalog');
+            Route::post('layers/martin/sync', [MartinLayerController::class, 'sync'])->middleware('permission:layers-create|layers-update|layers-manage')->name('admin.layers.martin.sync');
+            Route::get('layers/martin/sync-history', [MartinLayerController::class, 'syncHistory'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.martin.history');
             Route::get('layers/{layer}', [LayerController::class, 'show'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.show');
             Route::put('layers/{layer}', [LayerController::class, 'update'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.update');
             Route::delete('layers/{layer}', [LayerController::class, 'destroy'])->middleware('permission:layers-delete|layers-manage')->name('admin.layers.destroy');
             Route::patch('layers/{layer}/toggle-active', [LayerController::class, 'toggleActive'])->middleware('permission:layers-edit|layers-update|layers-manage')->name('admin.layers.toggle-active');
+            Route::get('layers/{layer}/attributes', [LayerController::class, 'attributes'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.attributes.v2');
 
             // Master Referensi BKKD
             Route::get('ref-bkkd/opd', [RefBkkdController::class, 'opd'])->name('admin.ref-bkkd.opd');
@@ -189,29 +199,33 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::put('bkkd/proposal/{id}', [BkkdProposalController::class, 'update'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.update');
             Route::delete('bkkd/proposal/{id}', [BkkdProposalController::class, 'destroy'])->middleware('permission:bkkd-proposal-delete')->name('admin.bkkd.proposal.destroy');
             Route::post('bkkd/proposal/{id}/restore', [BkkdProposalController::class, 'restore'])->middleware('permission:bkkd-proposal-delete')->name('admin.bkkd.proposal.restore');
-            Route::post('bkkd/proposal/{id}/ajukan', [BkkdProposalController::class, 'ajukanOpd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.ajukan');
-            Route::post('bkkd/proposal/{id}/batalkan', [BkkdProposalController::class, 'batalkan'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.batalkan');
-            Route::post('bkkd/proposal/{id}/ganti-papbd', [BkkdProposalController::class, 'gantiPapbd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.ganti-papbd');
-            Route::post('bkkd/proposal/{id}/lampiran', [BkkdProposalController::class, 'uploadLampiran'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lampiran.store');
-            Route::delete('bkkd/proposal/{id}/lampiran/{lampiranId}', [BkkdProposalController::class, 'deleteLampiran'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lampiran.destroy');
-            Route::get('bkkd/proposal/{id}/lampiran/{lampiranId}/download', [BkkdProposalController::class, 'downloadLampiran'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.proposal.lampiran.download');
             Route::get('bkkd/proposal/{id}/riwayat', [BkkdProposalController::class, 'riwayat'])->middleware('permission:bkkd-riwayat-view')->name('admin.bkkd.proposal.riwayat');
 
-            // BKKD Hasil Verifikasi OPD
-            Route::get('bkkd/verifikasi', [BkkdVerifikasiController::class, 'index'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.index');
-            Route::post('bkkd/verifikasi/kolektif', [BkkdVerifikasiController::class, 'storeKolektif'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.kolektif');
-            Route::get('bkkd/verifikasi/dokumen', [BkkdVerifikasiController::class, 'dokumenList'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.dokumen.index');
-            Route::get('bkkd/verifikasi/dokumen/{id}/download', [BkkdVerifikasiController::class, 'downloadDokumen'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.dokumen.download');
-            Route::post('bkkd/proposal/{id}/verifikasi', [BkkdVerifikasiController::class, 'store'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.store');
-            Route::put('bkkd/verifikasi/{id}', [BkkdVerifikasiController::class, 'update'])->middleware('permission:bkkd-verifikasi-manage')->name('admin.bkkd.verifikasi.update');
-            Route::get('bkkd/verifikasi/{id}/download', [BkkdVerifikasiController::class, 'download'])->middleware('permission:bkkd-verifikasi-view')->name('admin.bkkd.verifikasi.download');
-            Route::get('bkkd/verifikasi/{id}/riwayat', [BkkdVerifikasiController::class, 'riwayat'])->middleware('permission:bkkd-riwayat-view')->name('admin.bkkd.verifikasi.riwayat');
+            // BKKD Multi-Lokasi LineString & Analisa Spasial
+            Route::get('bkkd/ref-jalan-poros', [BkkdProposalLokasiController::class, 'jalanPorosByDesa'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.ref-jalan-poros');
+            Route::post('bkkd/generate-route', [BkkdProposalLokasiController::class, 'generateRoute'])->middleware('permission:bkkd-proposal-view|bkkd-proposal-create|bkkd-proposal-update')->name('admin.bkkd.generate-route');
+            Route::get('bkkd/analisa-spasial', [BkkdProposalLokasiController::class, 'daftarKonfirmasi'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.analisa-spasial.index');
+            Route::post('bkkd/analisa-spasial/sync-pending', [BkkdProposalLokasiController::class, 'syncPendingAnalysis'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.analisa-spasial.sync-pending');
+            Route::get('bkkd/proposal/{id}/lokasi', [BkkdProposalLokasiController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.proposal.lokasi.index');
+            Route::post('bkkd/proposal/{id}/lokasi', [BkkdProposalLokasiController::class, 'store'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lokasi.store');
+            Route::put('bkkd/proposal/{id}/lokasi/{lokasiId}', [BkkdProposalLokasiController::class, 'update'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lokasi.update');
+            Route::delete('bkkd/proposal/{id}/lokasi/{lokasiId}', [BkkdProposalLokasiController::class, 'destroy'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lokasi.destroy');
+            Route::post('bkkd/proposal/{id}/analisa-spasial', [BkkdProposalLokasiController::class, 'reanalyze'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.analisa-spasial');
+            Route::post('bkkd/proposal/{id}/konfirmasi-desa', [BkkdProposalLokasiController::class, 'simpanKonfirmasiDesa'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.konfirmasi-desa');
 
-            // BKKD Rekapitulasi Desa & Penetapan TAPD
-            Route::get('bkkd/rekapitulasi-desa', [BkkdRekapitulasiController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.rekapitulasi.index');
-            Route::post('bkkd/rekapitulasi-desa/{id}/tetapkan-tapd', [BkkdRekapitulasiController::class, 'tetapkanTapd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.rekapitulasi.tetapkan-tapd');
-            Route::post('bkkd/rekapitulasi-desa/{id}/batalkan-tapd', [BkkdRekapitulasiController::class, 'batalkanTapd'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.rekapitulasi.batalkan-tapd');
-            Route::get('bkkd/rekapitulasi-desa/export', [BkkdRekapitulasiController::class, 'exportExcel'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.rekapitulasi.export');
+            // Modul Standalone Master Jaringan Jalan Kabupaten Bojonegoro
+            Route::get('jaringan-jalan', [JaringanJalanRuasController::class, 'index'])->middleware('permission:bkkd-proposal-view|jalan-poros-desa-view')->name('admin.jaringan-jalan.index');
+            Route::get('jaringan-jalan/kandidat', [JaringanJalanRuasController::class, 'kandidat'])->middleware('permission:bkkd-proposal-view|jalan-poros-desa-view')->name('admin.jaringan-jalan.kandidat');
+            Route::put('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'update'])->middleware('permission:bkkd-proposal-update|jalan-poros-desa-manage')->name('admin.jaringan-jalan.update');
+            Route::delete('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'destroy'])->middleware('permission:bkkd-proposal-update|jalan-poros-desa-manage')->name('admin.jaringan-jalan.destroy');
+            Route::post('jaringan-jalan/promosi/{id}/lokasi/{lokasiId}/ajukan', [JaringanJalanRuasController::class, 'ajukan'])->middleware('permission:bkkd-proposal-update')->name('admin.jaringan-jalan.promosi.ajukan');
+            Route::post('jaringan-jalan/promosi/{id}/lokasi/{lokasiId}/validasi', [JaringanJalanRuasController::class, 'validasi'])->middleware('permission:bkkd-proposal-update')->name('admin.jaringan-jalan.promosi.validasi');
+
+            // Alias BKKD untuk Master Jaringan Jalan
+            Route::get('bkkd/jaringan-jalan', [JaringanJalanRuasController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.jaringan-jalan.index');
+            Route::get('bkkd/kandidat-ruas', [JaringanJalanRuasController::class, 'kandidat'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.kandidat-ruas.index');
+            Route::post('bkkd/proposal/{id}/lokasi/{lokasiId}/ajukan-ruas', [JaringanJalanRuasController::class, 'ajukan'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lokasi.ajukan-ruas');
+            Route::post('bkkd/proposal/{id}/lokasi/{lokasiId}/validasi-ruas', [JaringanJalanRuasController::class, 'validasi'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.lokasi.validasi-ruas');
 
             // BKKD Agregasi Wilayah Desa
             Route::get('bkkd/agregasi-desa', [BkkdAgregasiDesaController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.agregasi-desa.index');
@@ -219,11 +233,31 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
 
             // BKKD Global Riwayat Log
             Route::get('bkkd/riwayat', [BkkdProposalController::class, 'riwayatSemua'])->middleware('permission:bkkd-riwayat-view')->name('admin.bkkd.riwayat.index');
+
+            // Backup & Restore Management (Super Admin only)
+            Route::prefix('backups')->middleware('role:admin')->group(function () {
+                Route::get('/', [BackupController::class, 'index'])->name('admin.backups.index');
+                Route::get('statistics', [BackupController::class, 'statistics'])->name('admin.backups.statistics');
+                Route::get('schedules', [BackupController::class, 'schedules'])->name('admin.backups.schedules');
+                Route::put('schedules', [BackupController::class, 'updateSchedules'])->middleware('throttle:backup-mutations')->name('admin.backups.schedules.update');
+                Route::get('restores', [BackupController::class, 'restores'])->name('admin.backups.restores');
+                Route::get('jobs/{id}', [BackupController::class, 'jobStatus'])->whereUuid('id')->name('admin.backups.jobs.status');
+                Route::post('/', [BackupController::class, 'store'])->middleware('throttle:backup-mutations')->name('admin.backups.store');
+                Route::post('validate', [BackupController::class, 'validateBackup'])->middleware('throttle:backup-restore')->name('admin.backups.validate');
+                Route::post('restore', [BackupController::class, 'restore'])->middleware('throttle:backup-restore')->name('admin.backups.restore');
+                Route::post('upload', [BackupController::class, 'upload'])->middleware('throttle:backup-mutations')->name('admin.backups.upload');
+                Route::get('{id}/download-url', [BackupController::class, 'downloadUrl'])->whereUuid('id')->name('admin.backups.download-url');
+                Route::get('{id}/download', [BackupController::class, 'download'])->whereUuid('id')->name('admin.backups.download');
+                Route::get('{id}', [BackupController::class, 'show'])->whereUuid('id')->name('admin.backups.show');
+                Route::delete('{id}', [BackupController::class, 'destroy'])->middleware('throttle:backup-mutations')->whereUuid('id')->name('admin.backups.destroy');
+            });
         });
     });
 
     // Map Viewer Active Layers Feed (Public / Map accessible)
     Route::get('layers', [LayerController::class, 'activeLayers'])->name('layers.active');
+    Route::get('layers/martin/status', [MartinLayerController::class, 'status'])->name('layers.martin.status');
+    Route::get('layers/{layer}/feature-geometry', [LayerController::class, 'featureGeometry'])->name('layers.feature-geometry');
     Route::get('layers/geoportal', [GeoportalPublicLayerController::class, 'index'])->name('layers.geoportal.index');
     Route::get('layers/geoportal/status', [GeoportalPublicLayerController::class, 'status'])->name('layers.geoportal.status');
     Route::get('layers/geoportal/{layer}/metadata', [GeoportalPublicLayerController::class, 'metadata'])->name('layers.geoportal.metadata');

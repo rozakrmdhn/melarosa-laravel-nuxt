@@ -241,7 +241,7 @@ export function usePublicNavigation() {
 
     if (exact || normalizedTarget === '/') {
       if (normalizedTarget === '/maps') {
-        return currentBase === '/maps';
+        return currentBase === '/maps' || currentBase.startsWith('/maps/');
       }
       return currentBase === normalizedTarget;
     }

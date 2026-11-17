@@ -1,6 +1,4 @@
-﻿<script setup lang="ts">
-import type { DropdownMenuItem } from "@nuxt/ui";
-
+<script setup lang="ts">
 interface Props {
   state?: "collapsed" | "expanded";
 }
@@ -10,79 +8,34 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const isCollapsed = computed(() => props.state === "collapsed");
-
-const teams = ref([
-  {
-    label: "Melarosa",
-    icon: "i-simple-icons-nuxt",
-    badge: "Enterprise",
-  },
-  {
-    label: "Production DB",
-    icon: "i-lucide-database",
-    badge: "PostgreSQL",
-  },
-]);
-
-const selectedTeam = ref(teams.value[0]);
-
-const teamsItems = computed<DropdownMenuItem[][]>(() => [
-  teams.value.map((team, index) => ({
-    ...team,
-    kbds: ["meta", String(index + 1)],
-    onSelect() {
-      selectedTeam.value = team;
-    },
-  })),
-  [
-    {
-      label: "Create workspace",
-      icon: "i-lucide-circle-plus",
-    },
-  ],
-]);
 </script>
 
 <template>
-  <UDropdownMenu
-    :items="teamsItems"
-    :content="{ align: isCollapsed ? 'center' : 'start', collisionPadding: 12 }"
-    :ui="{ content: 'w-56 dark:bg-[#0f1422] dark:border-gray-800' }"
-    :class="isCollapsed ? 'w-full flex justify-center' : 'flex-1 min-w-0'"
+  <NuxtLink
+    to="/admin"
+    :aria-label="isCollapsed ? 'Beranda Admin Melarosa' : undefined"
+    :class="[
+      'group flex items-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400',
+      isCollapsed
+        ? 'size-11 mx-auto justify-center hover:bg-slate-100 dark:hover:bg-slate-800/70'
+        : 'w-full min-h-11 gap-2.5 px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/70',
+    ]"
   >
-    <UButton
-      color="neutral"
-      variant="ghost"
-      :square="isCollapsed"
-      aria-label="Select workspace"
-      :class="[
-        'overflow-hidden transition-colors',
-        isCollapsed
-          ? 'size-9 p-0 flex items-center justify-center rounded-md hover:bg-gray-100 dark:hover:bg-gray-800/60'
-          : 'w-full flex items-center justify-between px-2.5 py-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800/60',
-      ]"
-    >
-      <div class="flex items-center gap-2.5 min-w-0">
-        <div class="size-8 rounded-md bg-blue-500/10 dark:bg-blue-500/15 flex items-center justify-center shrink-0">
-          <UIcon
-            name="i-simple-icons-nuxt"
-            class="size-4.5 text-blue-600 dark:text-blue-400 shrink-0"
-          />
-        </div>
-        <div v-if="!isCollapsed" class="flex flex-col text-left min-w-0">
-          <span class="truncate font-semibold text-sm text-gray-900 dark:text-gray-100 leading-tight">
-            {{ selectedTeam.label }}
-          </span>
-          <span class="truncate text-xs text-gray-500 dark:text-gray-400 leading-tight mt-0.5">
-            Enterprise Workspace
-          </span>
-        </div>
-      </div>
-      <UIcon
-        v-if="!isCollapsed"
-        name="i-lucide-chevrons-up-down"
-        class="size-4 text-gray-400 dark:text-gray-500 shrink-0 ms-auto"
-      />
-    </UButton>
-  </UDropdownMenu>
+    <div class="size-8 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200/70 dark:border-blue-800/60 flex items-center justify-center shrink-0 p-1">
+      <img
+        src="/logo-kabupaten.png"
+        alt="Lambang Kabupaten Bojonegoro"
+        class="size-full object-contain"
+      >
+    </div>
+
+    <div v-if="!isCollapsed" class="flex flex-col text-left min-w-0">
+      <span class="truncate font-bold text-sm tracking-tight text-slate-900 dark:text-slate-50 leading-tight">
+        Melarosa
+      </span>
+      <span class="truncate text-xs font-medium text-slate-600 dark:text-slate-400 leading-tight mt-0.5">
+        Satu Data Spasial Bojonegoro
+      </span>
+    </div>
+  </NuxtLink>
 </template>

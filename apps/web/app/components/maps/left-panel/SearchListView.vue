@@ -34,15 +34,12 @@ const nearbyKecamatan = computed(() => {
 
 <template>
   <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-3 space-y-4">
-    <!-- 0. Kategori Titik Koordinat (WGS 84) - Prioritas Utama saat terdeteksi -->
+    <!-- 0. Kategori Titik Lokasi - Prioritas saat format koordinat terdeteksi -->
     <div v-if="props.parsedCoordinateResult" class="space-y-2">
       <div class="flex items-center justify-between px-1">
         <span class="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-          <UIcon name="i-lucide-crosshair" class="size-4" />
-          <span>Hasil Pencarian Koordinat</span>
-        </span>
-        <span class="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums">
-          WGS 84
+          <UIcon name="i-ion-locate" class="size-4" />
+          <span>Titik Lokasi Peta</span>
         </span>
       </div>
 
@@ -54,25 +51,25 @@ const nearbyKecamatan = computed(() => {
         >
           <div class="flex items-center gap-3 min-w-0">
             <div class="size-9 rounded-full flex items-center justify-center shrink-0 bg-blue-600 text-white shadow-xs group-hover:scale-105 transition-transform">
-              <UIcon name="i-lucide-navigation" class="size-4.5" />
+              <UIcon name="i-ion-navigate" class="size-4.5" />
             </div>
             <div class="min-w-0">
               <p class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate tabular-nums">
                 {{ props.parsedCoordinateResult.formatted }}
               </p>
               <p class="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5 tabular-nums">
-                {{ coordinateDMS }}
                 <span v-if="nearbyKecamatan" class="text-blue-600 dark:text-blue-400 font-semibold">
-                  · Kec. {{ nearbyKecamatan.name }}
+                  Kecamatan {{ nearbyKecamatan.name }}
                 </span>
+                <span v-else>Kabupaten Bojonegoro</span>
               </p>
             </div>
           </div>
           <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
-            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-600 text-white shadow-2xs">
-              Fly To Peta
+            <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-600 text-white shadow-2xs">
+              Buka di Peta
             </span>
-            <UIcon name="i-lucide-chevron-right" class="size-4 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+            <UIcon name="i-ion-chevron-forward" class="size-4 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
           </div>
         </button>
       </div>
@@ -88,20 +85,20 @@ const nearbyKecamatan = computed(() => {
         </span>
       </div>
 
-      <div class="space-y-1.5">
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
         <button
           v-for="k in props.filteredKecamatanResults"
           :key="k.name"
           type="button"
-          class="w-full flex items-center justify-between p-2.5 rounded-2xl text-left transition-all cursor-pointer bg-slate-50/70 dark:bg-white/[0.02] hover:bg-slate-100 dark:hover:bg-white/[0.05] border border-slate-200/60 dark:border-white/5 hover:border-blue-400 dark:hover:border-blue-600 group min-h-[48px]"
+          class="w-full flex items-center justify-between px-3.5 py-3 text-left transition-colors cursor-pointer hover:bg-slate-200/45 dark:hover:bg-white/[0.04] group min-h-[54px]"
           @click="emit('select-kecamatan', k)"
         >
           <div class="flex items-center gap-3 min-w-0">
-            <div class="size-9 rounded-full flex items-center justify-center shrink-0 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-900/50 group-hover:scale-105 transition-transform">
+            <div class="size-9 rounded-xl flex items-center justify-center shrink-0 bg-white dark:bg-[#0f172a] shadow-2xs text-blue-600 dark:text-blue-400">
               <UIcon name="i-lucide-map-pin" class="size-4.5" />
             </div>
             <div class="min-w-0">
-              <p class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+              <p class="text-[13px] font-bold text-slate-900 dark:text-slate-100 truncate">
                 Kecamatan {{ k.name }}
               </p>
               <p class="text-xs text-slate-500 dark:text-slate-400 truncate">
@@ -109,97 +106,88 @@ const nearbyKecamatan = computed(() => {
               </p>
             </div>
           </div>
-          <UIcon name="i-lucide-chevron-right" class="size-4 text-slate-300 dark:text-slate-600 group-hover:text-blue-500 transition-colors shrink-0 pl-1" />
+          <UIcon name="i-lucide-chevron-right" class="size-4 text-slate-400 group-hover:text-blue-500 transition-colors shrink-0 pl-1" />
         </button>
       </div>
     </div>
 
-    <!-- 2. Kategori Dataset & Layer Spasial -->
+    <!-- 2. Kategori Peta Pendukung -->
     <div v-if="props.filteredDatasetResults.length > 0" class="space-y-2">
       <div class="flex items-center justify-between px-1">
         <span class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">
-          Dataset & Layer Spasial
+          Peta & Data Wilayah
         </span>
         <span class="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums">
-          {{ props.filteredDatasetResults.length }} dataset
+          {{ props.filteredDatasetResults.length }} peta
         </span>
       </div>
 
-      <div class="space-y-1.5">
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
         <button
           v-for="d in props.filteredDatasetResults"
           :key="d.id"
           type="button"
-          class="w-full flex items-center justify-between p-2.5 rounded-2xl text-left transition-all cursor-pointer bg-slate-50/70 dark:bg-white/[0.02] hover:bg-slate-100 dark:hover:bg-white/[0.05] border border-slate-200/60 dark:border-white/5 hover:border-emerald-400 dark:hover:border-emerald-600 group min-h-[48px]"
+          class="w-full flex items-center justify-between px-3.5 py-3 text-left transition-colors cursor-pointer hover:bg-slate-200/45 dark:hover:bg-white/[0.04] group min-h-[54px]"
           @click="emit('select-dataset', d)"
         >
           <div class="flex items-center gap-3 min-w-0">
-            <div class="size-9 rounded-full flex items-center justify-center shrink-0 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-900/50 group-hover:scale-105 transition-transform">
-              <UIcon name="i-lucide-layers-2" class="size-4.5" />
+            <div class="size-9 rounded-xl flex items-center justify-center shrink-0 bg-white dark:bg-[#0f172a] shadow-2xs text-emerald-600 dark:text-emerald-400">
+              <UIcon name="i-ion-map-outline" class="size-4.5" />
             </div>
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5 min-w-0">
-                <p class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-                  {{ d.title }}
-                </p>
-                <span
-                  v-if="d.slug"
-                  class="px-1.5 py-0.2 rounded-md text-xs font-medium bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 border border-slate-200/70 dark:border-white/10 shrink-0 truncate max-w-[130px]"
-                  :title="d.slug"
-                >
-                  {{ d.slug }}
-                </span>
-              </div>
+              <p class="text-[13px] font-bold text-slate-900 dark:text-slate-100 truncate">
+                {{ d.title }}
+              </p>
               <p class="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                {{ d.subtitle }}
+                {{ d.category || d.subtitle }}
               </p>
             </div>
           </div>
           <div class="flex items-center gap-1.5 shrink-0 pl-1">
             <span
               v-if="d.isActive"
-              class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300"
+              class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300"
             >
               Aktif
             </span>
-            <UIcon name="i-lucide-chevron-right" class="size-4 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors" />
+            <UIcon name="i-ion-chevron-forward" class="size-4 text-slate-400 group-hover:text-emerald-500 transition-colors" />
           </div>
         </button>
       </div>
     </div>
 
-    <!-- 3. Kategori Geosite & Geopark Bojonegoro (Menggantikan dummy landmark) -->
+    <!-- 3. Kategori Wisata Geopark Bojonegoro -->
     <div v-if="props.filteredGeoparkResults.length > 0" class="space-y-2">
       <div class="flex items-center justify-between px-1">
         <span class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">
-          Geosite & Geopark Bojonegoro
+          Wisata Geopark Bojonegoro
         </span>
         <span class="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums">
-          {{ props.filteredGeoparkResults.length }} situs
+          {{ props.filteredGeoparkResults.length }} lokasi
         </span>
       </div>
 
-      <div class="space-y-1.5">
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
         <button
           v-for="site in props.filteredGeoparkResults"
           :key="site.id"
           type="button"
-          class="w-full flex items-center justify-between p-2.5 rounded-2xl text-left transition-all cursor-pointer bg-slate-50/70 dark:bg-white/[0.02] hover:bg-slate-100 dark:hover:bg-white/[0.05] border border-slate-200/60 dark:border-white/5 hover:border-emerald-400 dark:hover:border-emerald-600 group min-h-[48px]"
+          class="w-full flex items-center justify-between px-3.5 py-3 text-left transition-colors cursor-pointer hover:bg-slate-200/45 dark:hover:bg-white/[0.04] group min-h-[54px]"
           @click="emit('select-geopark', site)"
         >
           <div class="flex items-center gap-3 min-w-0">
             <div
-              class="size-9 rounded-full flex items-center justify-center shrink-0 border group-hover:scale-105 transition-transform"
+              class="size-9 rounded-xl flex items-center justify-center shrink-0 bg-white dark:bg-[#0f172a] shadow-2xs"
               :class="site.categorySlug === 'geo-diversity'
-                ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border-blue-200/60 dark:border-blue-900/50'
+                ? 'text-blue-600 dark:text-blue-400'
                 : site.categorySlug === 'bio-diversity'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-900/50'
-                  : 'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border-amber-200/60 dark:border-amber-900/50'"
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-amber-600 dark:text-amber-400'"
             >
               <span class="text-xs font-bold tabular-nums">{{ site.code }}</span>
             </div>
             <div class="min-w-0 flex-1">
-              <p class="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+              <p class="text-[13px] font-bold text-slate-900 dark:text-slate-100 truncate">
                 {{ site.title }}
               </p>
               <p class="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
@@ -210,11 +198,11 @@ const nearbyKecamatan = computed(() => {
           <div class="flex items-center gap-1.5 shrink-0 pl-1">
             <span
               v-if="!site.hasCoordinate"
-              class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300"
+              class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300"
             >
               Takbenda
             </span>
-            <UIcon name="i-lucide-chevron-right" class="size-4 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors" />
+            <UIcon name="i-lucide-chevron-right" class="size-4 text-slate-400 group-hover:text-emerald-500 transition-colors" />
           </div>
         </button>
       </div>
@@ -233,7 +221,7 @@ const nearbyKecamatan = computed(() => {
           Tidak ada hasil yang cocok
         </p>
         <p class="text-xs text-slate-500 dark:text-slate-400 px-4">
-          Tidak ditemukan wilayah, koordinat, dataset, atau geosite untuk kata kunci "{{ props.universalSearchQuery }}".
+          Tidak ditemukan kecamatan, jalan, atau lokasi wisata untuk kata kunci "{{ props.universalSearchQuery }}".
         </p>
       </div>
       <button

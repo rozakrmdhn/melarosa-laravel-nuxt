@@ -80,6 +80,9 @@ const hoverTooltip = ref<{
 let mapInstance: any = null;
 let maplibregl: any = null;
 let resizeObserver: ResizeObserver | null = null;
+let pendingResizeRaf: number | null = null;
+let lastObservedW = 0;
+let lastObservedH = 0;
 let tileErrorCount = 0;
 
 const appliedStatusCache = new Map<number, StatusAnalisaRtrw>();
@@ -488,20 +491,64 @@ function handleBasemapChange(code: string) {
   setBasemapChoice(code);
 }
 
-function fitToBbox(bbox: [number, number, number, number] | null | undefined, maxZoom = 16.5) {
-  if (!mapInstance || !bbox || bbox.length !== 4) return;
-  mapInstance.fitBounds(
-    [
-      [bbox[0], bbox[1]],
-      [bbox[2], bbox[3]],
-    ],
-    { padding: 56, maxZoom, duration: 480 },
-  );
+function isValidLngLatBounds(b: [number, number, number, number] | null | undefined): b is [number, number, number, number] {
+  if (!b || b.length !== 4) return false;
+  const [minX, minY, maxX, maxY] = b.map(Number);
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return false;
+  if (minX > maxX || minY > maxY) return false;
+  return minX >= -180 && maxX <= 180 && minY >= -85 && maxY <= 85;
 }
 
-function fitToBojonegoro() {
-  if (!mapInstance) return;
-  mapInstance.fitBounds(BOJONEGORO_BOUNDS, { padding: 32, duration: 440 });
+function safeFitBounds(
+  bbox: [number, number, number, number] | null | undefined,
+  desiredPadding = 40,
+  maxZoom = 16.5,
+  duration = 450,
+) {
+  if (!mapInstance || !isValidLngLatBounds(bbox)) return;
+  const el = mapContainerRef.value;
+  const w = el?.clientWidth ?? 0;
+  const h = el?.clientHeight ?? 0;
+  if (w < 80 || h < 80) return;
+
+  const [minX, minY, maxX, maxY] = bbox;
+  if (Math.abs(maxX - minX) < 1e-6 && Math.abs(maxY - minY) < 1e-6) {
+    mapInstance.easeTo({
+      center: [minX, minY],
+      zoom: Math.min(maxZoom, 15.5),
+      duration,
+    });
+    return;
+  }
+
+  const maxAllowedPad = Math.max(4, Math.floor((Math.min(w, h) - 24) / 2));
+  const safePadding = Math.max(4, Math.min(desiredPadding, maxAllowedPad));
+
+  try {
+    mapInstance.fitBounds(
+      [
+        [minX, minY],
+        [maxX, maxY],
+      ],
+      { padding: safePadding, maxZoom, duration },
+    );
+  } catch {
+    // Abaikan jika canvas terlalu sempit sementara saat pergantian panel
+  }
+}
+
+function fitToBbox(bbox: [number, number, number, number] | null | undefined, maxZoom = 16.5) {
+  safeFitBounds(bbox, 48, maxZoom, 450);
+}
+
+function fitToBojonegoro(duration = 440) {
+  const flatBounds: [number, number, number, number] = [
+    BOJONEGORO_BOUNDS[0][0],
+    BOJONEGORO_BOUNDS[0][1],
+    BOJONEGORO_BOUNDS[1][0],
+    BOJONEGORO_BOUNDS[1][1],
+  ];
+  safeFitBounds(flatBounds, 28, 16, duration);
 }
 
 function fitToActiveBounds() {
@@ -523,8 +570,27 @@ function zoomBy(delta: number) {
   mapInstance.easeTo({ zoom: Math.max(8, Math.min(18.5, z + delta)), duration: 220 });
 }
 
+function scheduleMapResize() {
+  if (!mapInstance || !import.meta.client) return;
+  if (pendingResizeRaf !== null) {
+    cancelAnimationFrame(pendingResizeRaf);
+  }
+  pendingResizeRaf = requestAnimationFrame(() => {
+    pendingResizeRaf = null;
+    const el = mapContainerRef.value;
+    if (!el || !mapInstance) return;
+    const w = Math.round(el.clientWidth);
+    const h = Math.round(el.clientHeight);
+    if (w < 40 || h < 40) return;
+    if (w === lastObservedW && h === lastObservedH) return;
+    lastObservedW = w;
+    lastObservedH = h;
+    mapInstance.resize();
+  });
+}
+
 function resizeMap() {
-  mapInstance?.resize();
+  scheduleMapResize();
 }
 
 function getTooltipStyle() {
@@ -672,10 +738,15 @@ async function initMap() {
     mapInstance = new maplibregl.Map({
       container: mapContainerRef.value,
       style: buildMapStyle(currentBasemap.value),
-      bounds: BOJONEGORO_BOUNDS,
-      fitBoundsOptions: { padding: 28 },
+      center: [111.82, -7.2],
+      zoom: 10,
       minZoom: 8,
       maxZoom: 18.5,
+      trackResize: false,
+      canvasContextAttributes: {
+        preserveDrawingBuffer: true,
+        antialias: true,
+      },
       attributionControl: false,
     });
 
@@ -686,7 +757,11 @@ async function initMap() {
       isMapReady.value = true;
       martinStatusState.value = 'ready';
       emit('martin-status', { ok: true, errorCount: 0 });
+      const el = mapContainerRef.value;
+      lastObservedW = Math.round(el?.clientWidth ?? 0);
+      lastObservedH = Math.round(el?.clientHeight ?? 0);
       mapInstance?.resize();
+      fitToBojonegoro(0);
       syncLayerVisibility();
       syncLayerOpacity();
       syncColorModePaint();
@@ -740,7 +815,7 @@ async function initMap() {
 
     if (typeof ResizeObserver !== 'undefined' && mapContainerRef.value) {
       resizeObserver = new ResizeObserver(() => {
-        mapInstance?.resize();
+        scheduleMapResize();
       });
       resizeObserver.observe(mapContainerRef.value);
     }
@@ -815,6 +890,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown);
+  if (pendingResizeRaf !== null) {
+    cancelAnimationFrame(pendingResizeRaf);
+    pendingResizeRaf = null;
+  }
   resizeObserver?.disconnect();
   resizeObserver = null;
   if (mapInstance) {
@@ -962,7 +1041,7 @@ onBeforeUnmount(() => {
           aria-label="Fokus Wilayah Kabupaten Bojonegoro"
           title="Reset ke Seluruh Bojonegoro"
           class="size-11 lg:size-8 flex items-center justify-center text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
-          @click="fitToBojonegoro"
+          @click="fitToBojonegoro()"
         >
           <UIcon name="i-lucide-maximize-2" class="size-4" />
         </button>

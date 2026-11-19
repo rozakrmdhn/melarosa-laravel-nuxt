@@ -206,6 +206,23 @@ function expandBottomPanel() {
   }
 }
 
+function scheduleMapResize() {
+  nextTick(() => {
+    mapRef.value?.resizeMap();
+  });
+}
+
+function handleSplitterDragging(axis: 'vertical' | 'horizontal', dragging: boolean) {
+  if (axis === 'vertical') {
+    isDraggingVertical.value = dragging;
+  } else {
+    isDraggingHorizontal.value = dragging;
+  }
+  if (!dragging) {
+    scheduleMapResize();
+  }
+}
+
 function toggleAllPanels() {
   if (!isDesktop.value) return;
   if (allPanelsCollapsed.value) {
@@ -219,9 +236,7 @@ function toggleAllPanels() {
     rightSlotCtrl?.collapse();
     bottomSlotCtrl?.collapse();
   }
-  nextTick(() => {
-    setTimeout(() => mapRef.value?.resizeMap(), 240);
-  });
+  scheduleMapResize();
 }
 
 // ─── Mobile Sheet & Dock State ────────────────────────────────────────────────
@@ -891,10 +906,14 @@ function resetFilters() {
   refreshAllData();
 }
 
-function toggleStatusFilter(status: '' | StatusAnalisaRtrw) {
-  filters.status_analisa = filters.status_analisa === status ? '' : status;
+function setStatusFilter(status: '' | StatusAnalisaRtrw) {
+  filters.status_analisa = status;
   filters.analisaPage = 1;
   Promise.all([loadAnalisaList(), loadMapIndex()]);
+}
+
+function toggleStatusFilter(status: '' | StatusAnalisaRtrw) {
+  setStatusFilter(filters.status_analisa === status ? '' : status);
 }
 
 function toggleOrdeFilter(orde02: string) {
@@ -1000,7 +1019,7 @@ onBeforeUnmount(() => {
       <!-- Left Title Group (Desktop aligned dynamically with LeftPanel width) -->
       <div class="flex items-center h-full min-w-0">
         <div
-          class="flex items-center gap-2 px-3 shrink-0 transition-[width] duration-200"
+          class="flex items-center gap-2 px-3 shrink-0"
           :style="isDesktop && leftPanelActualWidth > 0 ? { width: `${leftPanelActualWidth}px` } : undefined"
         >
           <UIcon name="i-lucide-route" class="size-4 text-[#176B4D] dark:text-emerald-400 shrink-0" />
@@ -1119,10 +1138,10 @@ onBeforeUnmount(() => {
           class="w-full h-full"
           :ui="{
             root: 'h-full w-full',
-            panel: isDraggingVertical ? '' : 'panel-smooth-transition',
+            panel: '',
             handle: 'h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-row-resize',
           }"
-          @dragging="(val: boolean) => { isDraggingVertical = val; if (!val) nextTick(() => mapRef?.resizeMap()); }"
+          @dragging="(_index: number, dragging: boolean) => handleSplitterDragging('vertical', dragging)"
         >
           <template #workspace>
             <USplitter
@@ -1131,10 +1150,10 @@ onBeforeUnmount(() => {
               class="w-full h-full"
               :ui="{
                 root: 'h-full w-full',
-                panel: isDraggingHorizontal ? '' : 'panel-smooth-transition',
+                panel: '',
                 handle: 'w-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-col-resize',
               }"
-              @dragging="(val: boolean) => { isDraggingHorizontal = val; if (!val) nextTick(() => mapRef?.resizeMap()); }"
+              @dragging="(_index: number, dragging: boolean) => handleSplitterDragging('horizontal', dragging)"
             >
               <!-- LEFT PANEL -->
               <template #left="{ collapsed, collapse, expand, resize }">
@@ -1154,7 +1173,7 @@ onBeforeUnmount(() => {
                     :id-desa="filters.id_desa"
                     :is-kecamatan-locked="isKecamatanLocked"
                     :is-desa-locked="isDesaLocked"
-                    @update:collapsed="(c) => { c ? collapse() : resize(LEFT_PANEL_WIDTH); nextTick(() => setTimeout(() => mapRef?.resizeMap(), 220)); }"
+                    @update:collapsed="(c) => { c ? collapse() : resize(LEFT_PANEL_WIDTH); scheduleMapResize(); }"
                     @update:layers="(v) => (mapLayers = v)"
                     @update:layers-opacity="(v) => (layersOpacity = v)"
                     @update:color-mode-type="(v) => (rtrwColorMode = v)"
@@ -1218,7 +1237,7 @@ onBeforeUnmount(() => {
                   :adopting-rtrw="adoptingRtrw"
                   :saving-poros="savingPoros"
                   :deleting-poros="deletingPoros"
-                  @update:collapsed="(c) => { c ? collapse() : resize(RIGHT_PANEL_WIDTH); nextTick(() => setTimeout(() => mapRef?.resizeMap(), 220)); }"
+                  @update:collapsed="(c) => { c ? collapse() : resize(RIGHT_PANEL_WIDTH); scheduleMapResize(); }"
                   @adopt-rtrw="handleAdoptFromInspector"
                   @save-poros="handleSavePoros"
                   @request-delete-poros="openDeleteDialog"
@@ -1262,7 +1281,7 @@ onBeforeUnmount(() => {
               :kabupaten-meta="kabupatenMeta"
               :loading-kabupaten="loadingKabupaten"
               :console-logs="consoleLogs"
-              @update:collapsed="(c) => { c ? collapse() : resize(BOTTOM_PANEL_HEIGHT); nextTick(() => setTimeout(() => mapRef?.resizeMap(), 220)); }"
+              @update:collapsed="(c) => { c ? collapse() : resize(BOTTOM_PANEL_HEIGHT); scheduleMapResize(); }"
               @update:active-tab="(t) => (activeTab = t)"
               @update:per-page="(p) => (perPage = p)"
               @update:search-query="handleSearchUpdate"
@@ -1278,7 +1297,7 @@ onBeforeUnmount(() => {
               @inspect-kabupaten="(kab) => inspectKabupatenFeature(kab, true)"
               @filter-orde="(o) => toggleOrdeFilter(o)"
               @filter-wilayah="(id) => { if (summaryData?.wilayah_level === 'desa') applyFilterPatch({ id_desa: id }); else applyFilterPatch({ id_kecamatan: id, id_desa: null }); activeTab = 'analisa'; }"
-              @toggle-status="(st) => { filters.status_analisa = st; filters.analisaPage = 1; Promise.all([loadAnalisaList(), loadMapIndex()]); }"
+              @toggle-status="setStatusFilter"
               @reset-filters="resetFilters"
               @open-filter-modal="filterModalOpen = true"
               @clear-console="consoleLogs = []"
@@ -1533,7 +1552,7 @@ onBeforeUnmount(() => {
             @inspect-kabupaten="(kab) => { inspectKabupatenFeature(kab, false); openMobileDock('detail', 'peek'); }"
             @filter-orde="(o) => toggleOrdeFilter(o)"
             @filter-wilayah="(id) => { if (summaryData?.wilayah_level === 'desa') applyFilterPatch({ id_desa: id }); else applyFilterPatch({ id_kecamatan: id, id_desa: null }); }"
-            @toggle-status="(st) => { filters.status_analisa = st; filters.analisaPage = 1; Promise.all([loadAnalisaList(), loadMapIndex()]); }"
+            @toggle-status="setStatusFilter"
             @reset-filters="resetFilters"
             @open-filter-modal="openMobileDock('filter', 'full')"
             @clear-console="consoleLogs = []"
@@ -1682,10 +1701,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.panel-smooth-transition {
-  transition: flex-basis 200ms cubic-bezier(0.22, 1, 0.36, 1), width 200ms cubic-bezier(0.22, 1, 0.36, 1), height 200ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

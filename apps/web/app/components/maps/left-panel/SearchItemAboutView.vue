@@ -163,6 +163,7 @@ const targetGeoportalLayer = computed<GeoportalLayerItem | null>(() => {
     category: r?.category || d?.category || "Tematik Umum",
     opd_name: r?.opd_name || r?.instansi || d?.subtitle?.split(" · ")[0] || "Pemerintah Kabupaten Bojonegoro",
     legend_url: r?.legend_url || null,
+    style_config: r?.style_config || null,
     csw_metadata: r?.csw_metadata || null,
     last_synced_at: r?.last_synced_at || null,
   };

@@ -52,7 +52,12 @@ const loadingKecamatan = computed(() => wilayahStore.loadingKecamatan);
 const loadingDesa = computed(() => wilayahStore.isDesaLoading(props.modelKecamatan));
 
 const isUnrestrictedRole = computed(
-  () => isAdmin() || auth.hasRole('admin') || auth.hasRole('verifierBappeda'),
+  () =>
+    isAdmin()
+    || auth.hasRole('admin')
+    || auth.hasRole('verifierBappeda')
+    || auth.hasRole('verifikator-bappeda')
+    || auth.hasRole('bappeda'),
 );
 
 // Auto-lock logic berdasarkan role & wilayah pengguna

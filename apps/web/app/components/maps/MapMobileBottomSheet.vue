@@ -90,19 +90,23 @@ const sheetTranslateY = computed(() => {
     const raw = currentDragOffset.value;
     const minOffset = snapOffsets.value.min;
 
-    // Upward rubber-band dampening beyond full (raw < 0)
+    // Subtle upward dampening beyond full (raw < 0)
     if (raw < 0) {
-      return raw * 0.22;
+      return Math.max(-16, raw * 0.15);
     }
-    // Downward rubber-band dampening beyond min
+    // Clamp downward drag at minOffset so content never stretches below the resting bar
     if (raw > minOffset) {
-      const over = raw - minOffset;
-      return minOffset + over * 0.35;
+      return minOffset;
     }
     return raw;
   }
 
   return snapOffsets.value[snapLevel.value] ?? snapOffsets.value.peek;
+});
+
+const contentBottomInset = computed(() => {
+  const snapOffset = snapOffsets.value[snapLevel.value] ?? snapOffsets.value.peek;
+  return Math.max(keyboardHeight.value, snapOffset);
 });
 
 const sheetStyle = computed(() => {
@@ -278,17 +282,28 @@ function findScrollableParent(target: HTMLElement | null, boundary: HTMLElement 
   return null;
 }
 
+let contentTouchBlocked = false;
+
 function handleContentTouchStart(e: TouchEvent) {
   if (e.touches.length !== 1) return;
+  const target = e.target as HTMLElement | null;
+  if (
+    target &&
+    (target.closest("[data-sheet-no-drag]") ||
+      (target.tagName === "INPUT" && (target as HTMLInputElement).type === "range"))
+  ) {
+    contentTouchBlocked = true;
+    return;
+  }
+  contentTouchBlocked = false;
   contentTouchStartX = e.touches[0].clientX;
   contentTouchStartY = e.touches[0].clientY;
-  const target = e.target as HTMLElement | null;
   activeScrollableEl = findScrollableParent(target, scrollContainerRef.value);
   touchStartScrollTop = activeScrollableEl ? activeScrollableEl.scrollTop : 0;
 }
 
 function handleContentTouchMove(e: TouchEvent) {
-  if (e.touches.length !== 1 || isDragging.value) return;
+  if (contentTouchBlocked || e.touches.length !== 1 || isDragging.value) return;
 
   const currentX = e.touches[0].clientX;
   const currentY = e.touches[0].clientY;
@@ -600,12 +615,12 @@ onUnmounted(() => {
           <slot name="tabs" />
         </div>
 
-        <!-- ── Content Body Container (Responsive Internal Clearance for Virtual Keyboard) ── -->
+        <!-- ── Content Body Container (Matches visible snap height + virtual keyboard clearance) ── -->
         <div
           ref="scrollContainerRef"
           class="flex-1 min-h-0 flex flex-col overflow-hidden transition-[padding-bottom] duration-200"
           :style="{
-            paddingBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : '0px'
+            paddingBottom: contentBottomInset > 0 ? `${contentBottomInset}px` : '0px'
           }"
           @touchstart.passive="handleContentTouchStart"
           @touchmove="handleContentTouchMove"

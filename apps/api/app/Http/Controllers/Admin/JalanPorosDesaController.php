@@ -21,9 +21,7 @@ class JalanPorosDesaController extends Controller
     {
         $this->authorize('viewAny', JalanPorosDesa::class);
         $user = $request->user();
-        $isBappeda = $user && $user->hasRole('verifierBappeda');
-        $isAdmin   = $user && $user->hasRole('admin');
-        $isRestricted = $user && !$isAdmin && !$isBappeda;
+        $isRestricted = $user && !$user->isAdminOrBappeda();
 
         $targetKecId  = $request->filled('id_kecamatan') ? (int) $request->input('id_kecamatan') : ($request->filled('kecamatan') && is_numeric($request->input('kecamatan')) ? (int) $request->input('kecamatan') : null);
         $targetDesaId = $request->filled('id_desa') ? (int) $request->input('id_desa') : ($request->filled('desa') && is_numeric($request->input('desa')) ? (int) $request->input('desa') : null);
@@ -106,7 +104,7 @@ class JalanPorosDesaController extends Controller
         $format = $request->query('format', 'geojson');
 
         if ($format === 'lookup') {
-            $limit = min(max((int) $request->query('limit', 500), 1), 1000);
+            $limit = min(max((int) $request->query('limit', 500), 1), 2500);
             $items = (clone $query)
                 ->select([
                     'id',

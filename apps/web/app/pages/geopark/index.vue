@@ -6,10 +6,18 @@ import {
   type GeoparkSite,
 } from '~/composables/useGeoparkSites';
 
-useSeoMeta({
+usePublicSeo({
   title: 'Katalog 31 Situs Geopark Nasional Bojonegoro',
   description:
     'Jurnal dan direktori 31 situs resmi Geopark Nasional Bojonegoro mencakup Keragaman Geologi, Keragaman Hayati, dan Keragaman Budaya.',
+  path: '/geopark',
+  jsonLd: {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: 'Katalog 31 Situs Geopark Nasional Bojonegoro',
+    url: 'https://melarosa.saggaserv.my.id/geopark',
+    inLanguage: 'id-ID',
+  },
 });
 
 const {
@@ -188,29 +196,42 @@ function resetFilters() {
 <template>
   <main class="w-full min-h-screen bg-[#F7F8F5] dark:bg-[#070b14] text-[#17251F] dark:text-slate-100 pb-16 sm:pb-24">
     <!-- Editorial Masthead -->
-    <header class="w-full pt-6 sm:pt-10 pb-8 sm:pb-10">
+    <header class="w-full pt-6 sm:pt-10 pb-8">
       <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-          <div class="max-w-3xl">
-            <p class="text-xs font-bold uppercase tracking-wider text-[#176B4D] dark:text-emerald-400 tabular-nums">
-              Geopark Nasional Bojonegoro · {{ sites.length }} Situs Terverifikasi
-            </p>
-            <h1 class="mt-1.5 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-[#17251F] dark:text-slate-50 leading-[1.12]">
-              Jurnal Warisan Geologi, Hayati & Budaya
-            </h1>
-            <p class="mt-3 text-sm sm:text-base lg:text-lg text-[#4F5D54] dark:text-slate-300 leading-relaxed max-w-2xl">
-              Dokumentasi ilmiah dan cerita lapangan dari 31 situs warisan bumi, keanekaragaman hayati, serta tradisi masyarakat di Kabupaten Bojonegoro.
-            </p>
+        <div class="pb-8 border-b border-slate-200/80 dark:border-white/[0.08]">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div class="inline-flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-[#2B5B9E] dark:bg-sky-400" />
+              <span class="text-xs font-semibold uppercase tracking-[0.14em] text-[#2B5B9E] dark:text-sky-400 tabular-nums">
+                Geopark Nasional · Kab. Bojonegoro
+              </span>
+            </div>
+
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] text-xs font-medium text-slate-700 dark:text-slate-300 tabular-nums">
+              <UIcon name="i-lucide-compass" class="w-3.5 h-3.5 text-[#2B5B9E] dark:text-sky-400" />
+              <span>{{ sites.length }} Situs Terverifikasi</span>
+            </div>
           </div>
 
-          <div class="shrink-0">
-            <NuxtLink
-              to="/maps?tab=geosite"
-              class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-3 text-xs sm:text-sm font-semibold text-white transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:focus-visible:ring-blue-400"
-            >
-              <UIcon name="i-lucide-map" class="size-4" />
-              <span>Eksplorasi Peta Geosite</span>
-            </NuxtLink>
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-end">
+            <div class="lg:col-span-8">
+              <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-white leading-[1.15] mb-2.5">
+                Katalog Geopark Bojonegoro
+              </h1>
+              <p class="text-sm sm:text-[15px] text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl">
+                Dokumentasi {{ sites.length }} situs warisan geologi, keanekaragaman hayati, dan tradisi budaya Kabupaten Bojonegoro.
+              </p>
+            </div>
+
+            <div class="lg:col-span-4 flex flex-wrap lg:justify-end items-center gap-2.5">
+              <NuxtLink
+                to="/maps?tab=geosite"
+                class="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-5 py-2.5 text-xs font-semibold text-white transition-colors shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E] dark:focus-visible:ring-sky-400"
+              >
+                <UIcon name="i-lucide-map" class="size-4" />
+                <span>Eksplorasi Peta Geosite</span>
+              </NuxtLink>
+            </div>
           </div>
         </div>
 

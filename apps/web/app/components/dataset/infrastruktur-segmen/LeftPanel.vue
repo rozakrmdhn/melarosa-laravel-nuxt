@@ -366,6 +366,20 @@ function handleLegendItemClick(layerId: string, field: 'kondisi' | 'perkerasan',
     }
   }
 }
+
+function getActiveLegendValue(layerId: string, field: 'kondisi' | 'perkerasan'): string | null {
+  if (layerId === 'jalan-poros-desa') {
+    return (field === 'kondisi' ? props.jalanPorosDesaKondisiFilter : props.jalanPorosDesaPerkerasanFilter) || null;
+  }
+  return (field === 'kondisi' ? props.selectedKondisi : props.selectedPerkerasan) || null;
+}
+
+function clearLegendFilter(layerId: string, field: 'kondisi' | 'perkerasan') {
+  const activeVal = getActiveLegendValue(layerId, field);
+  if (activeVal) {
+    handleLegendItemClick(layerId, field, activeVal);
+  }
+}
 </script>
 
 <template>
@@ -442,6 +456,13 @@ function handleLegendItemClick(layerId: string, field: 'kondisi' | 'perkerasan',
             </div>
           </UTooltip>
         </div>
+
+        <span
+          class="mt-1 text-[11px] font-medium text-gray-500 dark:text-gray-400 tracking-wide whitespace-nowrap"
+          style="writing-mode: vertical-rl;"
+        >
+          Daftar Layer
+        </span>
       </button>
 
       <!-- Expanded Body Content -->
@@ -575,32 +596,43 @@ function handleLegendItemClick(layerId: string, field: 'kondisi' | 'perkerasan',
                   :title="`Warna Simbologi: ${getLayerColor(layer)}`"
                 />
 
-                <div class="flex items-center gap-1.5 truncate">
-                  <span
-                    class="text-xs truncate tracking-tight"
-                    :class="activeLayerId === layer.id ? 'text-gray-900 dark:text-white font-semibold' : 'text-gray-700 dark:text-gray-300 font-medium'"
-                    :title="layer.title"
-                  >
-                    {{ layer.title }}
-                  </span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5 truncate">
+                    <span
+                      class="text-xs truncate tracking-tight"
+                      :class="activeLayerId === layer.id ? 'text-gray-900 dark:text-white font-semibold' : 'text-gray-700 dark:text-gray-300 font-medium'"
+                      :title="layer.title"
+                    >
+                      {{ layer.title }}
+                    </span>
 
-                  <!-- Single Clean Status Badge -->
-                  <UBadge
-                    v-if="activeLayerId === layer.id"
-                    label="Aktif"
-                    color="primary"
-                    variant="subtle"
-                    size="xs"
-                    class="text-[9px] px-1.5 py-0 h-4 shrink-0 font-medium"
-                  />
-                  <UBadge
-                    v-else-if="!layer.isPrimary"
-                    label="Referensi"
-                    color="neutral"
-                    variant="outline"
-                    size="xs"
-                    class="text-[9px] px-1 py-0 h-4 shrink-0"
-                  />
+                    <!-- Single Clean Status Badge -->
+                    <UBadge
+                      v-if="activeLayerId === layer.id"
+                      label="Aktif"
+                      color="primary"
+                      variant="subtle"
+                      size="xs"
+                      class="text-[9px] px-1.5 py-0 h-4 shrink-0 font-medium"
+                    />
+                    <UBadge
+                      v-else-if="!layer.isPrimary"
+                      label="Referensi"
+                      color="neutral"
+                      variant="outline"
+                      size="xs"
+                      class="text-[9px] px-1 py-0 h-4 shrink-0"
+                    />
+                  </div>
+                  <p
+                    v-if="layer.isPrimary && layer.metadata?.totalItem !== undefined"
+                    class="text-[10px] text-gray-600 dark:text-gray-400 tabular-nums truncate mt-0.5"
+                  >
+                    {{ Number(layer.metadata.totalItem || 0).toLocaleString('id-ID') }} segmen
+                    <template v-if="layer.metadata.totalPanjangMeter !== undefined">
+                      · {{ formatShortLength(layer.metadata.totalPanjangMeter) }}
+                    </template>
+                  </p>
                 </div>
               </button>
 
@@ -815,6 +847,17 @@ function handleLegendItemClick(layerId: string, field: 'kondisi' | 'perkerasan',
                 <!-- Legenda Mode Kondisi (interaktif quick filter & metrik ringkas) -->
                 <template v-else-if="layer.symbology.colorMode === 'kondisi'">
                   <div class="space-y-1.5">
+                    <div class="flex items-center justify-between gap-2 text-[10px] text-gray-600 dark:text-gray-400">
+                      <span class="font-medium">Klik item untuk filter cepat</span>
+                      <button
+                        v-if="getActiveLegendValue(layer.id, 'kondisi')"
+                        type="button"
+                        class="text-blue-700 dark:text-blue-300 hover:underline font-semibold cursor-pointer"
+                        @click="clearLegendFilter(layer.id, 'kondisi')"
+                      >
+                        Reset
+                      </button>
+                    </div>
                     <div class="grid grid-cols-2 gap-1.5 text-[11px]">
                       <button
                         v-for="item in getKondisiLegendItems(layer.id)"
@@ -852,28 +895,41 @@ function handleLegendItemClick(layerId: string, field: 'kondisi' | 'perkerasan',
 
                 <!-- Legenda Mode Perkerasan (interaktif quick filter) -->
                 <template v-else-if="layer.symbology.colorMode === 'perkerasan'">
-                  <div class="grid grid-cols-2 gap-1.5 text-[11px]">
-                    <button
-                      v-for="item in perkerasanLegendItems"
-                      :key="item.label"
-                      type="button"
-                      :aria-pressed="isLegendFilterActive(layer.id, 'perkerasan', item.label)"
-                      :title="`Klik untuk filter perkerasan ${item.label}`"
-                      :class="[
-                        'flex items-center gap-1.5 px-1.5 rounded border text-left transition-colors cursor-pointer',
-                        isMobileDrawer ? 'min-h-[44px] py-1.5' : 'py-1',
-                        isLegendFilterActive(layer.id, 'perkerasan', item.label)
-                          ? 'border-blue-500/60 bg-blue-50/80 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 font-semibold'
-                          : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700/80 hover:bg-gray-100/70 dark:hover:bg-gray-800/40 text-gray-700 dark:text-gray-300'
-                      ]"
-                      @click="handleLegendItemClick(layer.id, 'perkerasan', item.label)"
-                    >
-                      <span
-                        class="w-3 h-1 rounded-full shrink-0"
-                        :style="{ backgroundColor: item.color }"
-                      />
-                      <span class="truncate">{{ item.label }}</span>
-                    </button>
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between gap-2 text-[10px] text-gray-600 dark:text-gray-400">
+                      <span class="font-medium">Klik perkerasan untuk filter</span>
+                      <button
+                        v-if="getActiveLegendValue(layer.id, 'perkerasan')"
+                        type="button"
+                        class="text-blue-700 dark:text-blue-300 hover:underline font-semibold cursor-pointer"
+                        @click="clearLegendFilter(layer.id, 'perkerasan')"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5 text-[11px]">
+                      <button
+                        v-for="item in perkerasanLegendItems"
+                        :key="item.label"
+                        type="button"
+                        :aria-pressed="isLegendFilterActive(layer.id, 'perkerasan', item.label)"
+                        :title="`Klik untuk filter perkerasan ${item.label}`"
+                        :class="[
+                          'flex items-center gap-1.5 px-1.5 rounded border text-left transition-colors cursor-pointer',
+                          isMobileDrawer ? 'min-h-[44px] py-1.5' : 'py-1',
+                          isLegendFilterActive(layer.id, 'perkerasan', item.label)
+                            ? 'border-blue-500/60 bg-blue-50/80 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 font-semibold'
+                            : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700/80 hover:bg-gray-100/70 dark:hover:bg-gray-800/40 text-gray-700 dark:text-gray-300'
+                        ]"
+                        @click="handleLegendItemClick(layer.id, 'perkerasan', item.label)"
+                      >
+                        <span
+                          class="w-3 h-1 rounded-full shrink-0"
+                          :style="{ backgroundColor: item.color }"
+                        />
+                        <span class="truncate">{{ item.label }}</span>
+                      </button>
+                    </div>
                   </div>
                 </template>
               </div>

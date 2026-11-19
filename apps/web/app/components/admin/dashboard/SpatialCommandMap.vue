@@ -7,6 +7,9 @@ import {
   getKondisiMeta,
   type KecamatanSeriesItem,
 } from "~/types/admin-dashboard";
+import BasemapSwitcher from "~/components/common/BasemapSwitcher.vue";
+import { useBasemapStore } from "~/stores/basemap";
+import { createOpenLayersBasemapSource } from "~/utils/basemap-sources";
 
 interface InspectedFeature {
   source: "infrastruktur" | "jalan_poros" | "kecamatan" | "desa";
@@ -46,9 +49,10 @@ const colorMode = useColorMode();
 
 const martinUrl = computed(() => config.public.martinUrl || "/martin");
 
+const basemapStore = useBasemapStore();
 const mapContainerRef = ref<HTMLElement | null>(null);
 const searchQuery = ref("");
-const basemapMode = ref<"esri" | "rbi" | "kanvas">("esri");
+const basemapMode = ref<string>("esri");
 
 const layerVisibility = reactive({
   infrastruktur: true,
@@ -99,35 +103,9 @@ function prefersReducedMotion(): boolean {
 
 function buildBasemapSource() {
   if (!olModules) return null;
-  if (basemapMode.value === "kanvas") return null;
-
-  if (basemapMode.value === "rbi") {
-    return new olModules.XYZ({
-      url: "/rbi-tiles/{z}/{y}/{x}",
-      attributions: "&copy; Badan Informasi Geospasial (BIG)",
-      maxZoom: 18,
-      tileLoadFunction: (imageTile: any, src: string) => {
-        const img = imageTile.getImage();
-        let hasRetried = false;
-        img.onerror = () => {
-          if (!hasRetried && src.includes("/rbi-tiles/")) {
-            hasRetried = true;
-            img.src = src.replace(
-              /^.*?\/rbi-tiles\//,
-              "https://geoservices.big.go.id/rbi/rest/services/BASEMAP/Rupabumi_Indonesia/MapServer/tile/",
-            );
-          }
-        };
-        img.src = src;
-      },
-    });
-  }
-
-  return new olModules.XYZ({
-    url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-    attributions: "&copy; Esri, HERE, Garmin, FAO, NOAA, USGS",
-    maxZoom: 19,
-  });
+  if (basemapMode.value === "kanvas" || basemapMode.value === "none") return null;
+  const item = basemapStore.getByCode(basemapMode.value, "openlayers");
+  return createOpenLayersBasemapSource(item ?? basemapMode.value, olModules);
 }
 
 function updateBasemapSource() {
@@ -600,7 +578,7 @@ watch(
   { deep: true },
 );
 
-watch(basemapMode, () => {
+watch([basemapMode, () => basemapStore.items], () => {
   updateBasemapSource();
 });
 
@@ -683,7 +661,7 @@ watch(
       <div class="lg:col-span-8 relative h-[360px] sm:h-[420px] xl:h-[460px] bg-slate-100 dark:bg-[#070b14] border-b lg:border-b-0 lg:border-e border-slate-200 dark:border-slate-800 overflow-hidden">
         <!-- Cartographic Background Grid for "Kanvas" Mode -->
         <div
-          v-if="basemapMode === 'kanvas'"
+          v-if="basemapMode === 'kanvas' || basemapMode === 'none'"
           class="absolute inset-0 pointer-events-none opacity-45 dark:opacity-25 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:20px_20px]"
           aria-hidden="true"
         />
@@ -785,33 +763,15 @@ watch(
           </button>
         </div>
 
-        <!-- Top-Right Basemap Switcher -->
+        <!-- Top-Right Basemap Switcher (Medium Basemap) -->
         <div class="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
-          <div
-            role="group"
-            aria-label="Pilih mode peta dasar"
-            class="flex items-center rounded-lg bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-700 shadow-xs p-0.5 backdrop-blur-md"
-          >
-            <button
-              v-for="opt in [
-                { id: 'esri', label: 'ESRI' },
-                { id: 'rbi', label: 'RBI' },
-                { id: 'kanvas', label: 'Kanvas' },
-              ]"
-              :key="opt.id"
-              type="button"
-              :aria-pressed="basemapMode === opt.id"
-              class="px-2 py-1 min-h-8 rounded-md text-xs font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
-              :class="
-                basemapMode === opt.id
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-              "
-              @click="basemapMode = opt.id as 'esri' | 'rbi' | 'kanvas'"
-            >
-              {{ opt.label }}
-            </button>
-          </div>
+          <BasemapSwitcher
+            v-model="basemapMode"
+            variant="medium"
+            engine="openlayers"
+            :allow-none="true"
+            placement="top-right"
+          />
         </div>
 
         <!-- MVT Tile Offline Hint (Real network condition only, never fake error) -->

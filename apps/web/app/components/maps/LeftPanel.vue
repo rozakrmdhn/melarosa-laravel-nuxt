@@ -110,11 +110,19 @@ function normalizeIncomingTab(val?: string): MainTab {
 }
 
 const localActiveTab = ref<MainTab>(normalizeIncomingTab(props.activeTab));
+const pendingOtherLayers = ref(false);
 
 watch(
   () => props.activeTab,
   (val) => {
     const target = normalizeIncomingTab(val);
+    if (pendingOtherLayers.value && target === "layers") {
+      pendingOtherLayers.value = false;
+      localActiveTab.value = "layers";
+      petaSubView.value = "other-layers";
+      return;
+    }
+    pendingOtherLayers.value = false;
     if (props.inspectorOpen && target === "layers") {
       localActiveTab.value = "layers";
       petaSubView.value = "identify";
@@ -131,6 +139,24 @@ const currentActiveTab = computed<MainTab>(() => {
   }
   return localActiveTab.value;
 });
+
+function getMainTabIndex(tab: MainTab): number {
+  if (tab === "infrastruktur") return 1;
+  if (tab === "geopark") return 2;
+  return 0;
+}
+
+const activeDesktopTabIndex = computed(() => getMainTabIndex(currentActiveTab.value));
+const tabTransitionName = ref<"tab-slide-forward" | "tab-slide-backward">("tab-slide-forward");
+
+watch(
+  currentActiveTab,
+  (nextTab, prevTab) => {
+    const nextIdx = getMainTabIndex(nextTab);
+    const prevIdx = prevTab ? getMainTabIndex(prevTab) : 0;
+    tabTransitionName.value = nextIdx >= prevIdx ? "tab-slide-forward" : "tab-slide-backward";
+  }
+);
 
 export type PetaSubView = "home" | "other-layers" | "layer-detail" | "identify";
 const petaSubView = ref<PetaSubView>("home");
@@ -161,6 +187,15 @@ const universalSearchQuery = ref("");
 const isSearchOpen = ref(false);
 const searchWrapperRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
+
+watch(
+  () => props.selectedKecamatanFilter,
+  (next, prev) => {
+    if (!next && prev && isSearchOpen.value && selectedSearchItem.value?.type === "kecamatan") {
+      handleCloseSearch();
+    }
+  }
+);
 
 watch(
   () => props.inspectorOpen,
@@ -798,8 +833,28 @@ defineExpose({
   resetSubViews,
   handleCloseSearch,
   openOtherLayers: () => {
+    const needsTabSwitch = normalizeIncomingTab(props.activeTab) !== "layers";
     resetSubViews("layers");
     petaSubView.value = "other-layers";
+    if (needsTabSwitch) {
+      pendingOtherLayers.value = true;
+      emit("tab-change", "layers");
+    }
+  },
+  isOtherLayersOpen: () => {
+    return (
+      (normalizeIncomingTab(props.activeTab) === "layers" && petaSubView.value === "other-layers") ||
+      currentActiveTab.value === "dataset"
+    );
+  },
+  closeOtherLayers: () => {
+    pendingOtherLayers.value = false;
+    petaSubView.value = "home";
+    selectedLayerId.value = null;
+    if (normalizeIncomingTab(props.activeTab) !== "layers" || currentActiveTab.value === "dataset") {
+      localActiveTab.value = "layers";
+      emit("tab-change", "layers");
+    }
   },
   openGeoparkDetail: (site: GeoparkSite) => {
     selectedGeoparkSite.value = site;
@@ -861,16 +916,22 @@ defineExpose({
       <div
         role="tablist"
         aria-label="Navigasi Peta Utama"
-        class="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-white/[0.06] rounded-full text-sm font-bold tracking-tight"
+        class="relative grid grid-cols-3 p-1 bg-slate-100 dark:bg-white/[0.06] rounded-full tracking-tight overflow-hidden"
       >
+        <span
+          aria-hidden="true"
+          class="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] rounded-full bg-white dark:bg-[#0f172a] shadow-xs transition-transform duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] will-change-transform motion-reduce:transition-none"
+          :style="{ transform: `translate3d(${activeDesktopTabIndex * 100}%, 0, 0)` }"
+        />
+
         <button
           type="button"
           role="tab"
-          :aria-selected="currentActiveTab === 'layers'"
-          class="py-2 px-2 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-xs sm:text-sm font-bold tracking-tight"
-          :class="currentActiveTab === 'layers'
-            ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-xs'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+          :aria-selected="currentActiveTab === 'layers' || currentActiveTab === 'dataset'"
+          class="relative z-10 rounded-full px-2.5 py-1.5 min-h-[36px] inline-flex items-center justify-center text-[13px] tracking-tight transition-colors duration-200 cursor-pointer select-none text-center whitespace-nowrap truncate focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-[0.98]"
+          :class="currentActiveTab === 'layers' || currentActiveTab === 'dataset'
+            ? 'text-slate-900 dark:text-white font-bold'
+            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
           @click="handleTabClick('layers')"
         >
           Jelajah
@@ -880,10 +941,10 @@ defineExpose({
           type="button"
           role="tab"
           :aria-selected="currentActiveTab === 'infrastruktur'"
-          class="py-2 px-2 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-xs sm:text-sm font-bold tracking-tight"
+          class="relative z-10 rounded-full px-2.5 py-1.5 min-h-[36px] inline-flex items-center justify-center text-[13px] tracking-tight transition-colors duration-200 cursor-pointer select-none text-center whitespace-nowrap truncate focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-[0.98]"
           :class="currentActiveTab === 'infrastruktur'
-            ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-xs'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+            ? 'text-slate-900 dark:text-white font-bold'
+            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
           @click="handleTabClick('infrastruktur')"
         >
           Infrastruktur
@@ -893,10 +954,10 @@ defineExpose({
           type="button"
           role="tab"
           :aria-selected="currentActiveTab === 'geopark'"
-          class="py-2 px-2 min-h-[44px] rounded-full flex items-center justify-center transition-all cursor-pointer select-none text-center text-xs sm:text-sm font-bold tracking-tight"
+          class="relative z-10 rounded-full px-2.5 py-1.5 min-h-[36px] inline-flex items-center justify-center text-[13px] tracking-tight transition-colors duration-200 cursor-pointer select-none text-center whitespace-nowrap truncate focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 active:scale-[0.98]"
           :class="currentActiveTab === 'geopark'
-            ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-xs'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+            ? 'text-slate-900 dark:text-white font-bold'
+            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
           @click="handleTabClick('geopark')"
         >
           Wisata
@@ -1000,7 +1061,8 @@ defineExpose({
       </div>
 
       <!-- Body Content Area -->
-      <div class="min-h-0 flex-1 flex flex-col">
+      <div class="min-h-0 flex-1 flex flex-col relative overflow-hidden">
+        <Transition :name="tabTransitionName" mode="out-in">
         <!-- 1. Pencarian: Daftar Hasil -->
         <SearchListView
           v-if="isSearchOpen && searchSubView === 'list'"
@@ -1138,29 +1200,66 @@ defineExpose({
             @zoom="handleZoomGeoparkSite"
           />
         </div>
+        </Transition>
       </div>
     </div>
 
     <!-- Minimal Footer Attribution (Desktop) -->
     <div
       v-if="!isMobileDrawer"
-      class="border-t border-slate-100 dark:border-white/8 bg-slate-50/70 dark:bg-[#070c16]/80 px-4 sm:px-5 py-2.5 shrink-0 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 select-text"
+      class="border-t border-slate-100 dark:border-white/8 bg-slate-50/70 dark:bg-[#070c16]/80 px-4 sm:px-5 py-2.5 shrink-0 text-[11px] text-slate-500 dark:text-slate-400 select-text"
     >
-      <p>
-        Data peta © kontributor
+      <p class="truncate">
+        © {{ new Date().getFullYear() }} MELAROSA · Pemkab Bojonegoro ·
         <a
           href="https://www.openstreetmap.org/copyright"
           target="_blank"
           rel="noopener noreferrer"
           class="underline hover:text-slate-700 dark:hover:text-slate-200"
-        >OpenStreetMap</a>
-        · Melarosa Kab. Bojonegoro
+        >© OpenStreetMap</a>
       </p>
     </div>
   </div>
 </template>
 
 <style scoped>
+.tab-slide-forward-enter-active,
+.tab-slide-forward-leave-active,
+.tab-slide-backward-enter-active,
+.tab-slide-backward-leave-active {
+  transition:
+    opacity 190ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.tab-slide-forward-enter-from {
+  opacity: 0;
+  transform: translate3d(18px, 0, 0);
+}
+.tab-slide-forward-leave-to {
+  opacity: 0;
+  transform: translate3d(-14px, 0, 0);
+}
+
+.tab-slide-backward-enter-from {
+  opacity: 0;
+  transform: translate3d(-18px, 0, 0);
+}
+.tab-slide-backward-leave-to {
+  opacity: 0;
+  transform: translate3d(14px, 0, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-slide-forward-enter-active,
+  .tab-slide-forward-leave-active,
+  .tab-slide-backward-enter-active,
+  .tab-slide-backward-leave-active {
+    transition: none;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 4px;
 }

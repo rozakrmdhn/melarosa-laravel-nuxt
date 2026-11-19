@@ -21,8 +21,12 @@ class UpdatePlottingAnggaranRequest extends FormRequest
             'nama_kegiatan'        => ['sometimes', 'string', 'max:255'],
             'lokasi_kegiatan'      => ['nullable', 'string'],
             'sumber_dana'          => ['sometimes', 'string', 'max:255'],
+            'nomor_sk'             => ['nullable', 'string', 'max:120'],
+            'tanggal_sk'           => ['nullable', 'date'],
+            'status_penetapan'     => ['sometimes', 'string', 'in:draft,ditetapkan,selesai'],
+            'bkkd_proposal_id'     => ['nullable', 'uuid', 'exists:bkkd_proposal,id'],
             'target_pagu_anggaran' => ['sometimes', 'numeric', 'min:0'],
-            'target_panjang_m'     => ['sometimes', 'numeric', 'min:0'],
+            'target_panjang_m'     => ['nullable', 'numeric', 'min:0'],
         ];
     }
 }

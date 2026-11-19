@@ -99,6 +99,7 @@ export interface GeoportalLayerItem {
   category: string | null;
   opd_name: string | null;
   legend_url: string | null;
+  style_config?: Record<string, any> | null;
   csw_metadata?: Record<string, any> | null;
   pycsw?: PycswMetadataRecord | null;
   last_synced_at?: string | null;
@@ -191,6 +192,16 @@ export function useGeoportalStatus() {
 }
 
 export type GeoportalGroupedMap = Record<string, GeoportalLayerItem[]>;
+
+export function buildWebgisDatasetRoute(
+  layer: Pick<GeoportalLayerItem, "id" | "layer_name" | "name">
+): string {
+  return `/maps?dataset=${encodeURIComponent(layer.id)}&layer_name=${encodeURIComponent(layer.layer_name || layer.name)}`;
+}
+
+export function usePendingWebgisDataset() {
+  return useState<GeoportalLayerItem | null>("melarosa_pending_webgis_dataset", () => null);
+}
 
 export function useGeoportalLayers() {
   const searchQuery = ref("");
@@ -318,6 +329,7 @@ export function useGeoportalLayers() {
       category: layer.category || undefined,
       opd_name: layer.opd_name,
       legend_url: layer.legend_url,
+      style_config: (layer as any).style_config || null,
       csw_metadata: layer.csw_metadata,
       last_synced_at: layer.last_synced_at,
     };

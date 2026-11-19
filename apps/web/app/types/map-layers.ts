@@ -1,10 +1,12 @@
-export type BasemapKey = "esri" | "rbi" | "osm" | "satellite" | "aerial" | "none" | "dark" | "positron" | "topo";
+export type BasemapKey = "esri" | "rbi" | "osm" | "satellite" | "aerial" | "none" | "dark" | "positron" | "topo" | (string & {});
 
 export type MainTab = "layers" | "infrastruktur" | "geopark" | "dataset";
 
 export type ActiveLayerTool = "none" | "opacity" | "filter" | "info";
 
 export type GeometryType = "line" | "polygon" | "point" | "auto";
+export type SymbolRenderMode = "single" | "categorized" | "graduated" | "rule_based";
+export type LabelRenderMode = "single" | "rule_based";
 export type DashPreset =
   | "solid"
   | "dash"
@@ -20,32 +22,66 @@ export type DashPreset =
 export interface StyleRule {
   id?: string;
   field: string;
-  operator: "equals" | "contains" | "starts_with" | "gt" | "lt";
+  operator: "equals" | "contains" | "starts_with" | "gt" | "lt" | "between";
   value: string | number;
+  min_value?: number | null;
+  max_value?: number | null;
+  label?: string;
   color?: string;
   width?: number;
   fill_color?: string;
   dash?: string | number[];
 }
 
+export interface LabelStyleRule {
+  id?: string;
+  description?: string;
+  filter_field: string;
+  operator: "equals" | "contains" | "starts_with" | "gt" | "lt" | "between";
+  value: string | number;
+  min_value?: number | null;
+  max_value?: number | null;
+  label_field?: string;
+  color?: string;
+  halo_color?: string;
+  halo_width?: number;
+  font_size?: number;
+  font_family?: string;
+  font_style?: "regular" | "italic" | "bold" | "bold_italic";
+  opacity?: number;
+  min_zoom?: number;
+}
+
 export interface LayerStyleLabelConfig {
   enabled: boolean;
+  mode?: LabelRenderMode;
   field: string;
+  rules?: LabelStyleRule[];
   min_zoom?: number;
   color?: string;
   halo_color?: string;
   halo_width?: number;
   font_size?: number;
+  font_family?: string;
+  font_style?: "regular" | "italic" | "bold" | "bold_italic";
+  opacity?: number;
   placement?: "line" | "point";
   orientation?: "horizontal" | "vertical" | "follow_line";
+  align?: "left" | "center" | "right";
   rotation?: number;
   offset_x?: number;
   offset_y?: number;
   overflow?: boolean;
+  wrap?: boolean;
+  wrap_width?: number;
 }
 
 export interface LayerStyleConfig {
   geom_type?: GeometryType;
+  symbol_mode?: SymbolRenderMode;
+  classify_field?: string;
+  color_ramp?: string;
+  graduated_classes?: number;
   color?: string;
   width?: number;
   dash?: DashPreset | number[] | string;
@@ -64,6 +100,8 @@ export interface LayerStyleConfig {
   zoom_scale?: boolean;
   min_zoom?: number | null;
   custom_style_json?: any;
+  sld_mode?: "visual" | "xml";
+  custom_sld_xml?: string | null;
 }
 
 export interface ActiveLayerItem {

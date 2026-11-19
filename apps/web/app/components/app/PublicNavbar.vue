@@ -97,6 +97,9 @@ const PAGE_ITEMS: SearchItem[] = [
   { id: "page-dataset", title: "Katalog Dataset JIGN", category: "halaman", desc: "Pusat direktori dataset geospasial resmi JIGN Bojonegoro", icon: "i-lucide-database", to: "/dataset" },
   { id: "page-geopark", title: "Geopark Bojonegoro", category: "halaman", desc: "20 situs geodiversity dan warisan alam Bojonegoro", icon: "i-lucide-mountain-snow", to: "/geopark" },
   { id: "page-statistik", title: "Statistik Geospasial", category: "halaman", desc: "Dashboard analitik dan statistik data spasial Bojonegoro", icon: "i-lucide-bar-chart-3", to: "/statistik" },
+  { id: "page-sumber-data", title: "Sumber Data", category: "halaman", desc: "Simpul Jaringan Geoportal, Martin Tile Server, dan sumber data lainnya", icon: "i-lucide-server", to: "/sumber-data" },
+  { id: "page-peta-digital", title: "Peta Digital", category: "halaman", desc: "Cari dan unduh file PDF / tautan peta digital desa, kecamatan, dan kabupaten", icon: "i-lucide-file-down", to: "/peta-digital" },
+  { id: "page-panduan", title: "Panduan Penggunaan", category: "halaman", desc: "Petunjuk lengkap menggunakan peta, filter wilayah, dataset, dan statistik", icon: "i-lucide-book-open", to: "/panduan" },
 ];
 
 // Deteksi koordinat WGS 84 (format Desimal DD atau DMS)
@@ -203,6 +206,27 @@ const mobileNavItems = [
     desc: "Dashboard analitik dan statistik data spasial",
     icon: "i-lucide-bar-chart-3",
     to: "/statistik",
+    exact: true,
+  },
+  {
+    label: "Sumber Data",
+    desc: "Geoportal JIGN, Martin Tile Server, dan basemap",
+    icon: "i-lucide-server",
+    to: "/sumber-data",
+    exact: true,
+  },
+  {
+    label: "Peta Digital",
+    desc: "Unduh peta digital desa, kecamatan & kabupaten",
+    icon: "i-lucide-file-down",
+    to: "/peta-digital",
+    exact: true,
+  },
+  {
+    label: "Panduan",
+    desc: "Petunjuk lengkap menggunakan portal MELAROSA",
+    icon: "i-lucide-book-open",
+    to: "/panduan",
     exact: true,
   },
 ];
@@ -332,11 +356,12 @@ onUnmounted(() => {
         <nav
           ref="desktopNavRef"
           aria-label="Navigasi Utama"
-          class="pointer-events-auto relative flex items-center rounded-full py-1.5 transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] overflow-hidden will-change-[width]"
+          class="pointer-events-auto relative flex items-center rounded-full py-1.5 transition-all duration-[1500ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] will-change-[width]"
           :style="isMaps ? {
             width: isMapsExpanded ? 'calc(100vw - 32px)' : compactNavWidth
           } : {}"
           :class="[
+            isMaps && !isMapsExpanded ? 'overflow-hidden' : 'overflow-visible',
             isScrolled
               ? 'bg-white border border-slate-300 shadow-lg shadow-slate-900/8 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50'
               : 'bg-white border border-slate-200 shadow-md shadow-slate-900/5 dark:bg-[#09111e] dark:border-white/10 dark:shadow-2xl dark:shadow-black/50',
@@ -374,18 +399,71 @@ onUnmounted(() => {
 
           <!-- 2. Bagian Tengah: Navigasi Utama (Gaya Segmented Pill Tab Menu) -->
           <div class="flex items-center gap-0.5 p-1 bg-slate-100 dark:bg-white/[0.06] rounded-full shrink-0 justify-center">
-            <NuxtLink
-              v-for="link in navTree"
-              :key="link.to"
-              :to="link.to"
-              :aria-current="isPathActive(link.to, link.exact) ? 'page' : undefined"
-              class="rounded-full px-3.5 xl:px-4 py-1.5 min-h-[36px] inline-flex items-center justify-center text-[13px] tracking-tight transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
-              :class="isPathActive(link.to, link.exact)
-                ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white font-bold shadow-xs'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
-            >
-              {{ link.label }}
-            </NuxtLink>
+            <template v-for="link in navTree" :key="link.label">
+              <div
+                v-if="link.children && link.children.length > 0"
+                class="relative group/navitem"
+              >
+                <NuxtLink
+                  v-if="link.to"
+                  :to="link.to"
+                  :aria-current="isPathActive(link.to, link.exact) || link.children.some(c => isPathActive(c.to, c.exact)) ? 'page' : undefined"
+                  class="rounded-full px-3.5 xl:px-4 py-1.5 min-h-[36px] inline-flex items-center justify-center gap-1 text-[13px] tracking-tight transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
+                  :class="isPathActive(link.to, link.exact) || link.children.some(c => isPathActive(c.to, c.exact))
+                    ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white font-bold shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
+                >
+                  <span>{{ link.label }}</span>
+                  <UIcon name="i-lucide-chevron-down" class="size-3.5 opacity-70 transition-transform duration-200 group-hover/navitem:rotate-180" aria-hidden="true" />
+                </NuxtLink>
+                <button
+                  v-else
+                  type="button"
+                  aria-haspopup="menu"
+                  class="rounded-full px-3.5 xl:px-4 py-1.5 min-h-[36px] inline-flex items-center justify-center gap-1 text-[13px] tracking-tight transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
+                  :class="link.children.some(c => isPathActive(c.to, c.exact))
+                    ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white font-bold shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
+                >
+                  <span>{{ link.label }}</span>
+                  <UIcon name="i-lucide-chevron-down" class="size-3.5 opacity-70 transition-transform duration-200 group-hover/navitem:rotate-180" aria-hidden="true" />
+                </button>
+
+                <!-- Dropdown Sub-Menu Desktop -->
+                <div class="pointer-events-none opacity-0 translate-y-1 group-hover/navitem:pointer-events-auto group-hover/navitem:opacity-100 group-hover/navitem:translate-y-0 group-focus-within/navitem:pointer-events-auto group-focus-within/navitem:opacity-100 group-focus-within/navitem:translate-y-0 transition-all duration-150 absolute right-0 top-full pt-2 w-52 z-[90]">
+                  <div class="rounded-2xl bg-white dark:bg-[#0b121e] border border-slate-200/90 dark:border-white/10 shadow-xl p-1.5 space-y-0.5">
+                    <NuxtLink
+                      v-for="child in link.children"
+                      :key="child.to || child.label"
+                      :to="child.to || '/'"
+                      class="flex items-center gap-2.5 px-3 py-2 min-h-[40px] rounded-xl transition-colors cursor-pointer"
+                      :class="isPathActive(child.to, child.exact)
+                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100/90 dark:hover:bg-white/[0.06] font-semibold'"
+                    >
+                      <UIcon
+                        :name="child.icon || 'i-lucide-file-text'"
+                        class="size-4 shrink-0 text-blue-600 dark:text-blue-400"
+                        aria-hidden="true"
+                      />
+                      <span class="text-[13px] truncate">{{ child.label }}</span>
+                    </NuxtLink>
+                  </div>
+                </div>
+              </div>
+
+              <NuxtLink
+                v-else-if="link.to"
+                :to="link.to"
+                :aria-current="isPathActive(link.to, link.exact) ? 'page' : undefined"
+                class="rounded-full px-3.5 xl:px-4 py-1.5 min-h-[36px] inline-flex items-center justify-center text-[13px] tracking-tight transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 whitespace-nowrap"
+                :class="isPathActive(link.to, link.exact)
+                  ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white font-bold shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
+              >
+                {{ link.label }}
+              </NuxtLink>
+            </template>
           </div>
 
           <!-- 3. Bagian Kanan: Search Icon Button + Theme Mode & Masuk / User -->

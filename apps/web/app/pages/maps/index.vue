@@ -6,6 +6,8 @@ import BasemapPanel from "~/components/maps/BasemapPanel.vue";
 import MapBasemapBottomSheet from "~/components/maps/MapBasemapBottomSheet.vue";
 import MapMobileBottomSheet, { type SnapLevel } from "~/components/maps/MapMobileBottomSheet.vue";
 import type { ActiveLayerItem, MainTab } from "~/types/map-layers";
+import { normalizeBasemapAlias } from "~/types/basemap";
+import { useBasemapStore } from "~/stores/basemap";
 import { useGeoparkSites, type GeoparkSite } from "~/composables/useGeoparkSites";
 import type { RekapRuasItem } from "~/types/rekap-jalan";
 import { parseCoordinateString } from "~/utils/gis-helpers";
@@ -37,6 +39,8 @@ const route = useRoute();
 const router = useRouter();
 const colorMode = useColorMode();
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
+const mobileLeftPanelRef = ref<any>(null);
+const desktopLeftPanelRef = ref<any>(null);
 
 interface GoogleMapsView {
   center: [number, number]; // [lng, lat]
@@ -120,31 +124,23 @@ function extractSearchQuery(queryObj: any): string | null {
 
 const searchedLocationLabel = ref<string | null>(extractSearchQuery(route.query));
 
-// Inisialisasi basemap dari parameter URL atau localStorage yang persisten
-const validBasemaps: BasemapKey[] = ["esri", "rbi", "osm", "satellite", "aerial", "none", "dark", "topo", "positron"];
+// Inisialisasi basemap dinamis dari database, parameter URL, atau localStorage
+const basemapStore = useBasemapStore();
 
 function getInitialBasemap(): BasemapKey {
-  const queryParam = typeof route.query.basemap === "string" ? route.query.basemap : null;
+  const queryParam = typeof route.query.basemap === "string" ? route.query.basemap.trim() : null;
   if (queryParam) {
-    if (queryParam === "positron") return "esri";
-    if (queryParam === "dark") return "esri";
-    if (queryParam === "topo") return "osm";
-    if (validBasemaps.includes(queryParam as BasemapKey)) {
-      return queryParam as BasemapKey;
-    }
+    return normalizeBasemapAlias(queryParam) as BasemapKey;
   }
   if (import.meta.client) {
     try {
       const saved = localStorage.getItem("melarosa_active_basemap");
-      if (saved === "positron") return "esri";
-      if (saved === "dark") return "esri";
-      if (saved === "topo") return "osm";
-      if (saved && validBasemaps.includes(saved as BasemapKey)) {
-        return saved as BasemapKey;
+      if (saved && saved.trim()) {
+        return normalizeBasemapAlias(saved.trim()) as BasemapKey;
       }
     } catch {}
   }
-  return "esri";
+  return (basemapStore.defaultKode || "esri") as BasemapKey;
 }
 
 const currentBasemap = useState<BasemapKey>("melarosa_active_basemap", () => getInitialBasemap());
@@ -601,9 +597,15 @@ async function handleSelectRoadFromExplorer(payload: {
   }
 
   const featId = `ruas-${ruas.id}`;
+  const resolvedPorosLayerName = porosLayer?.layer_name || porosLayer?.martinSource || "jalan_porosdesa";
+  const rawRoadId =
+    ruas.id !== undefined && ruas.id !== null && String(ruas.id).trim() !== "" ? String(ruas.id).trim() : null;
   const feat: IdentifiedFeature = {
     id: featId,
+    rawFeatureId: rawRoadId,
     layerId: mvtMatch?.layerId || porosLayer?.id || "jalan_porosdesa",
+    layerName: resolvedPorosLayerName,
+    selectionKey: rawRoadId ? `${resolvedPorosLayerName.toLowerCase()}::${rawRoadId}` : null,
     layerTitle: porosLayer?.title || "Jalan Desa",
     layerInstansi: porosLayer?.instansi || "Pemerintah Kabupaten Bojonegoro",
     geometryType: resolvedGeoJson?.type || "LineString",
@@ -754,21 +756,75 @@ function handleToggleLeftPanelOrMobileDrawer() {
   toggleLeftPanel();
 }
 
+const pendingOpenLayersMenu = ref(false);
+
 function handleOpenLayersMenu() {
-  if (isMobileScreen.value) {
+  const mobile = typeof window !== "undefined" ? window.innerWidth < 768 : isMobileScreen.value;
+  if (mobile) {
+    mobileDrawerTab.value = "layer";
     mobileDrawerOpen.value = true;
     if (mobileSheetSnap.value === "min") {
-      mobileSheetSnap.value = "half";
+      mobileSheetSnap.value = "peek";
+    }
+    if (!mobileLeftPanelRef.value?.openOtherLayers) {
+      pendingOpenLayersMenu.value = true;
     }
     nextTick(() => {
-      mobileLeftPanelRef.value?.openOtherLayers?.();
+      if (mobileLeftPanelRef.value?.openOtherLayers) {
+        mobileLeftPanelRef.value.openOtherLayers();
+        pendingOpenLayersMenu.value = false;
+      }
     });
   } else {
     leftPanelOpen.value = true;
+    if (!desktopLeftPanelRef.value?.openOtherLayers) {
+      pendingOpenLayersMenu.value = true;
+    }
     nextTick(() => {
-      desktopLeftPanelRef.value?.openOtherLayers?.();
+      if (desktopLeftPanelRef.value?.openOtherLayers) {
+        desktopLeftPanelRef.value.openOtherLayers();
+        pendingOpenLayersMenu.value = false;
+      }
     });
   }
+}
+
+const activeMobileTabIndex = computed(() => {
+  if (currentMainTab.value === "infrastruktur" || currentMainTab.value === "dataset") return 1;
+  if (currentMainTab.value === "geopark") return 2;
+  return 0;
+});
+
+function handleToggleLayersMenu() {
+  const mobile = typeof window !== "undefined" ? window.innerWidth < 768 : isMobileScreen.value;
+  if (mobile) {
+    const isLayerViewOpen =
+      Boolean(mobileLeftPanelRef.value?.isOtherLayersOpen?.()) &&
+      mobileDrawerOpen.value &&
+      mobileSheetSnap.value !== "min";
+
+    if (isLayerViewOpen) {
+      pendingOpenLayersMenu.value = false;
+      mobileLeftPanelRef.value?.closeOtherLayers?.();
+      mobileDrawerTab.value = "layer";
+      mobileSheetSnap.value = "min";
+      return;
+    }
+
+    handleOpenLayersMenu();
+    return;
+  }
+
+  const isDesktopLayerViewOpen =
+    Boolean(desktopLeftPanelRef.value?.isOtherLayersOpen?.()) && leftPanelOpen.value;
+
+  if (isDesktopLayerViewOpen) {
+    pendingOpenLayersMenu.value = false;
+    desktopLeftPanelRef.value?.closeOtherLayers?.();
+    return;
+  }
+
+  handleOpenLayersMenu();
 }
 
 function handleFitKabupaten() {
@@ -819,7 +875,7 @@ function mapLayerItemToActive(item: any): ActiveLayerItem {
     (item.protocol || "").toUpperCase() === "MVT" ||
     item.source_type === "martin" ||
     (item.url && item.url.includes("/martin/")) ||
-    (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa", "bataswilayah_kabupaten"].includes(item.layer_name));
+    (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa", "jalan_kabupaten_luarkota", "bataswilayah_kabupaten"].includes(item.layer_name));
 
   const isSegmen = item.layer_name === "infrastruktur_segmen" || item.id === "01a1589c-8c15-70b6-a4fe-35517f888b36";
   const isKabupaten =
@@ -849,8 +905,8 @@ function mapLayerItemToActive(item: any): ActiveLayerItem {
     mvtUrl: isMvt ? (item.mvtUrl || item.url) : undefined,
     martinSource: isMvt ? (detectedMartinSource || (isKabupaten ? "bataswilayah_kabupaten" : isSegmen ? "infrastruktur_segmen" : "jalan_porosdesa")) : undefined,
     style_config: item.style_config || null,
-    expanded: false,
-    activeTool: "none",
+    expanded: Boolean(item.expanded),
+    activeTool: item.activeTool || "none",
     disableIdentify: isKabupaten || Boolean(item.disableIdentify),
     geoportal_id: item.geoportal_id,
     category: item.category,
@@ -976,12 +1032,158 @@ function applyLayersFromApi(feed: any) {
   }
 }
 
+const { allLayers: geoportalCatalogLayers, toActiveLayerItem } = useGeoportalLayers();
+const pendingWebgisDataset = usePendingWebgisDataset();
+const appliedDatasetQueryKey = ref<string | null>(null);
+const fittedDatasetBboxKey = ref<string | null>(null);
+
+function matchesDatasetQuery(item: any, datasetParam: string, layerNameParam: string): boolean {
+  if (!item) return false;
+  const itemId = String(item.id || "").trim();
+  const itemGeoId = String(item.geoportal_id || "").trim();
+  const itemLayerName = String(item.layer_name || item.wmsLayerName || "")
+    .trim()
+    .toLowerCase();
+  const dsLower = datasetParam.toLowerCase();
+  const lnLower = layerNameParam.toLowerCase();
+
+  if (datasetParam && ((itemId && itemId === datasetParam) || (itemGeoId && itemGeoId === datasetParam))) {
+    return true;
+  }
+  if (dsLower && itemLayerName && itemLayerName === dsLower) {
+    return true;
+  }
+  if (lnLower && itemLayerName && itemLayerName === lnLower) {
+    return true;
+  }
+  return false;
+}
+
+function fitDatasetBboxIfAvailable(targetKey: string, source: any) {
+  if (!source || fittedDatasetBboxKey.value === targetKey || pathView) return;
+  const bbox =
+    source.pycsw?.iso_19139?.bbox ||
+    source.pycsw?.dublin_core?.bbox ||
+    source.csw_metadata?.iso_19139?.bbox ||
+    source.csw_metadata?.dublin_core?.bbox ||
+    source.bbox;
+  if (bbox && bbox.west != null && bbox.south != null && bbox.east != null && bbox.north != null) {
+    fittedDatasetBboxKey.value = targetKey;
+    nextTick(() => {
+      mapCanvasRef.value?.fitBbox(
+        [Number(bbox.west), Number(bbox.south), Number(bbox.east), Number(bbox.north)],
+        13,
+        500,
+        isMobileScreen.value ? "peek" : undefined
+      );
+    });
+  }
+}
+
+function applyDatasetQueryToMap() {
+  const datasetParam = typeof route.query.dataset === "string" ? route.query.dataset.trim() : "";
+  const layerNameParam = typeof route.query.layer_name === "string" ? route.query.layer_name.trim() : "";
+  const targetKey = datasetParam || layerNameParam;
+  if (!targetKey) {
+    pendingWebgisDataset.value = null;
+    appliedDatasetQueryKey.value = null;
+    fittedDatasetBboxKey.value = null;
+    return;
+  }
+
+  const rawFeedList: any[] = layersData.value?.data || (Array.isArray(layersData.value) ? layersData.value : []);
+  const matchedFromApi = rawFeedList.find((item: any) =>
+    matchesDatasetQuery(item, datasetParam, layerNameParam)
+  );
+  const matchedGeoportal = geoportalCatalogLayers.value.find((item) =>
+    matchesDatasetQuery(item, datasetParam, layerNameParam)
+  );
+  const matchedPending = matchesDatasetQuery(pendingWebgisDataset.value, datasetParam, layerNameParam)
+    ? pendingWebgisDataset.value
+    : null;
+  const geoCandidate = matchedGeoportal || matchedPending;
+
+  if (appliedDatasetQueryKey.value === targetKey) {
+    fitDatasetBboxIfAvailable(targetKey, geoCandidate || matchedFromApi);
+    return;
+  }
+
+  const existing = activeLayers.value.find((l) =>
+    matchesDatasetQuery(l, datasetParam, layerNameParam)
+  );
+
+  if (existing) {
+    const rest = activeLayers.value.filter((l) => l.id !== existing.id);
+    activeLayers.value = withNormalizedStackOrder([
+      { ...existing, visible: true, expanded: true },
+      ...rest,
+    ]);
+    appliedDatasetQueryKey.value = targetKey;
+    handleOpenLayersMenu();
+    fitDatasetBboxIfAvailable(targetKey, geoCandidate || matchedFromApi || existing);
+    if (hasInitializedLayersFromApi.value && matchedPending) {
+      pendingWebgisDataset.value = null;
+    }
+    return;
+  }
+
+  let candidate: ActiveLayerItem | null = null;
+  if (
+    matchedFromApi &&
+    ((matchedFromApi.protocol || "").toUpperCase() === "MVT" || matchedFromApi.source_type === "martin")
+  ) {
+    candidate = mapLayerItemToActive(matchedFromApi);
+  } else if (geoCandidate) {
+    candidate = toActiveLayerItem(geoCandidate, 0.85);
+  } else if (matchedFromApi) {
+    candidate = mapLayerItemToActive({
+      ...matchedFromApi,
+      expanded: true,
+      activeTool: "opacity",
+      opacity:
+        typeof matchedFromApi.opacity === "number" && matchedFromApi.opacity > 0
+          ? matchedFromApi.opacity
+          : 0.85,
+    });
+  }
+
+  if (candidate) {
+    handleSelectDataset(candidate);
+    appliedDatasetQueryKey.value = targetKey;
+    handleOpenLayersMenu();
+    fitDatasetBboxIfAvailable(targetKey, geoCandidate || matchedFromApi);
+    if (hasInitializedLayersFromApi.value && matchedPending) {
+      pendingWebgisDataset.value = null;
+    }
+  }
+}
+
 watch(
   () => layersData.value,
   (val) => {
     if (val && !hasInitializedLayersFromApi.value) {
       applyLayersFromApi(val);
+      // Pastikan dataset dari query (?dataset= / ?layer_name=) tetap disisipkan di atas default layers API
+      appliedDatasetQueryKey.value = null;
     }
+    applyDatasetQueryToMap();
+  },
+  { immediate: true }
+);
+
+watch(
+  [() => route.query.dataset, () => route.query.layer_name],
+  () => {
+    appliedDatasetQueryKey.value = null;
+    fittedDatasetBboxKey.value = null;
+    applyDatasetQueryToMap();
+  }
+);
+
+watch(
+  [() => geoportalCatalogLayers.value.length, () => pendingWebgisDataset.value],
+  () => {
+    applyDatasetQueryToMap();
   },
   { immediate: true }
 );
@@ -1072,8 +1274,11 @@ function handlePopState() {
   const params = new URLSearchParams(window.location.search);
   const basemapParam = params.get("basemap");
 
-  if (basemapParam && validBasemaps.includes(basemapParam as BasemapKey)) {
-    currentBasemap.value = basemapParam as BasemapKey;
+  if (basemapParam) {
+    const normalized = normalizeBasemapAlias(basemapParam);
+    if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+      currentBasemap.value = normalized as BasemapKey;
+    }
   }
 
   if (currentPathView) {
@@ -1165,8 +1370,11 @@ watch(
 
     const urlParams = new URLSearchParams(window.location.search);
     const basemapParam = urlParams.get("basemap") || (route.query.basemap as string);
-    if (basemapParam && validBasemaps.includes(basemapParam as BasemapKey)) {
-      currentBasemap.value = basemapParam as BasemapKey;
+    if (basemapParam) {
+      const normalized = normalizeBasemapAlias(basemapParam);
+      if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+        currentBasemap.value = normalized as BasemapKey;
+      }
     }
   }
 );
@@ -1204,12 +1412,29 @@ onMounted(() => {
     leftPanelOpen.value = true;
     syncSidebarWidth();
   }
-  try {
-    const saved = localStorage.getItem("melarosa_active_basemap");
-    if (saved && validBasemaps.includes(saved as BasemapKey) && !route.query.basemap) {
-      currentBasemap.value = saved as BasemapKey;
+  void basemapStore.ensureLoaded().then(() => {
+    const queryParam = typeof route.query.basemap === "string" ? route.query.basemap.trim() : null;
+    if (queryParam) {
+      const normalized = normalizeBasemapAlias(queryParam);
+      if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+        currentBasemap.value = normalized as BasemapKey;
+        return;
+      }
     }
-  } catch {}
+    try {
+      const saved = localStorage.getItem("melarosa_active_basemap");
+      if (saved && saved.trim()) {
+        const normalized = normalizeBasemapAlias(saved.trim());
+        if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+          currentBasemap.value = normalized as BasemapKey;
+          return;
+        }
+      }
+    } catch {}
+    if (currentBasemap.value !== "none" && !basemapStore.isValidCode(currentBasemap.value, "openlayers")) {
+      currentBasemap.value = (basemapStore.defaultKode || "esri") as BasemapKey;
+    }
+  });
 
   // Filter layer MVT pada inisialisasi jika query kecamatan/wilayah tersedia
   const initialKec = typeof route.query.kecamatan === "string" && route.query.kecamatan.trim()
@@ -1271,7 +1496,50 @@ onUnmounted(() => {
   }
 });
 
-function handleMapClick(coordinate: [number, number]) {
+interface PeekTapContext {
+  wasInspectorOpen: boolean;
+  previousSignature: string | null;
+  coordinate: [number, number];
+}
+
+const activeIdentifiedSignature = ref<string | null>(null);
+const pendingPeekTapContext = ref<PeekTapContext | null>(null);
+
+function isPolygonFeature(feature: IdentifiedFeature | null | undefined): boolean {
+  return String(feature?.geometryType || "").toLowerCase().includes("polygon");
+}
+
+function getIdentifiedFeatureSignature(feature: IdentifiedFeature | null | undefined): string | null {
+  if (!feature) return null;
+  const layerPart = String(feature.layerId || feature.layerName || "").toLowerCase();
+  const keyPart = String(
+    feature.selectionKey ||
+    feature.rawFeatureId ||
+    feature.id ||
+    extractNamobj(feature.properties) ||
+    ""
+  ).toLowerCase();
+  if (!layerPart && !keyPart) return null;
+  return `${layerPart}::${keyPart}`;
+}
+
+function handleMapClick(coordinate: [number, number], meta?: { isPeekTap?: boolean }) {
+  const isPeekTap = Boolean(meta?.isPeekTap) && isMobileScreen.value;
+
+  if (isPeekTap) {
+    // Saat mobile bottom sheet sedang di posisi peek:
+    // Pertahankan isi & sheet sementara query identify berjalan (in-place swap tanpa kedip),
+    // lalu putuskan swap vs soft-dismiss saat hasil identify final tiba.
+    pendingPeekTapContext.value = {
+      wasInspectorOpen: locationBarOpen.value,
+      previousSignature: activeIdentifiedSignature.value,
+      coordinate,
+    };
+    return;
+  }
+
+  pendingPeekTapContext.value = null;
+  activeIdentifiedSignature.value = null;
   clickedCoordinate.value = coordinate;
   searchedLocationLabel.value = null;
   identifiedFeatures.value = [];
@@ -1299,6 +1567,8 @@ function handleMapClick(coordinate: [number, number]) {
 }
 
 function handleCanvasTapDismiss() {
+  pendingPeekTapContext.value = null;
+  activeIdentifiedSignature.value = null;
   if (typeof window !== "undefined" && window.innerWidth < 768) {
     mobileSheetSnap.value = "min";
     if (locationBarOpen.value) {
@@ -1442,9 +1712,11 @@ function extractNamobj(props: Record<string, any> | undefined): string | null {
 function isIgnoredIdentifyFeature(f: IdentifiedFeature): boolean {
   if (!f) return true;
   const layerId = String(f.layerId || "").toLowerCase();
+  const layerName = String(f.layerName || "").toLowerCase();
   const layerTitle = String(f.layerTitle || "").toLowerCase();
   return (
     layerId.includes("bataswilayah_kabupaten") ||
+    layerName.includes("bataswilayah_kabupaten") ||
     layerTitle.includes("bataswilayah_kabupaten") ||
     layerTitle.includes("batas wilayah kabupaten")
   );
@@ -1452,16 +1724,57 @@ function isIgnoredIdentifyFeature(f: IdentifiedFeature): boolean {
 
 function handleIdentifyFeatures(features: IdentifiedFeature[]) {
   const filtered = (features || []).filter((f) => !isIgnoredIdentifyFeature(f));
+  const peekCtx = pendingPeekTapContext.value;
+  const isFinalResult = !isIdentifyingFeatures.value;
+
+  if (peekCtx) {
+    if (filtered.length === 0) {
+      if (isFinalResult) {
+        // Tap area kosong saat peek -> soft dismiss ke min
+        pendingPeekTapContext.value = null;
+        handleCanvasTapDismiss();
+      }
+      return;
+    }
+
+    const candidateTop = filtered[0];
+    const candidateSig = getIdentifiedFeatureSignature(candidateTop);
+    const isSameActivePolygon =
+      peekCtx.wasInspectorOpen &&
+      isPolygonFeature(candidateTop) &&
+      Boolean(candidateSig) &&
+      candidateSig === peekCtx.previousSignature;
+
+    if (isSameActivePolygon) {
+      if (isFinalResult) {
+        // Tap ulang poligon aktif yang sama (misal batas desa/kecamatan) -> toggle off / soft dismiss
+        pendingPeekTapContext.value = null;
+        handleCanvasTapDismiss();
+      }
+      return;
+    }
+
+    if (isFinalResult) {
+      pendingPeekTapContext.value = null;
+    }
+
+    // In-Place Swap: ganti langsung ke feature baru sambil mempertahankan sheet tetap di peek
+    if (currentMainTab.value !== "layers") {
+      previousTabBeforeIdentify.value = currentMainTab.value;
+      handleTabChange("layers");
+    }
+    clickedCoordinate.value = candidateTop.coordinate || peekCtx.coordinate;
+  }
+
   identifiedFeatures.value = filtered;
   if (filtered.length > 0) {
     const topFeature = filtered[0];
+    activeIdentifiedSignature.value = getIdentifiedFeatureSignature(topFeature);
     if (topFeature.coordinate) {
       clickedCoordinate.value = topFeature.coordinate;
     }
     const namobj = extractNamobj(topFeature.properties);
-    if (namobj) {
-      searchedLocationLabel.value = namobj;
-    }
+    searchedLocationLabel.value = namobj || null;
     locationBarOpen.value = true;
     if (isMobileScreen.value) {
       mobileDrawerTab.value = "layer";
@@ -1472,6 +1785,7 @@ function handleIdentifyFeatures(features: IdentifiedFeature[]) {
     // Pasang highlight style trayek UI modern untuk fitur teratas secara instan tanpa fitBounds
     mapCanvasRef.value?.renderSelectedFeature?.(topFeature);
   } else {
+    activeIdentifiedSignature.value = null;
     // Klik area kosong: tidak ada objek fitur, kamera tidak digeser
     mapCanvasRef.value?.renderSelectedFeature?.(null);
   }
@@ -1481,6 +1795,7 @@ function handleSelectFeature(feature: IdentifiedFeature) {
   if (lastRoadZoomedId && feature?.id === lastRoadZoomedId && Date.now() - lastRoadZoomedAt < 400) {
     return;
   }
+  activeIdentifiedSignature.value = getIdentifiedFeatureSignature(feature);
   const namobj = extractNamobj(feature?.properties);
   if (namobj) {
     searchedLocationLabel.value = namobj;
@@ -1499,6 +1814,8 @@ function handleSelectFeature(feature: IdentifiedFeature) {
 let isClosingInspector = false;
 
 function handleClearPin() {
+  pendingPeekTapContext.value = null;
+  activeIdentifiedSignature.value = null;
   roadSelectRequestSeq++;
   isIdentifyingFeatures.value = false;
   previousTabBeforeIdentify.value = null;
@@ -1572,8 +1889,21 @@ function handleInspectorAfterLeave() {
   }
 }
 
-const mobileLeftPanelRef = ref<any>(null);
-const desktopLeftPanelRef = ref<any>(null);
+watch(
+  [() => desktopLeftPanelRef.value, () => mobileLeftPanelRef.value],
+  () => {
+    if (!pendingOpenLayersMenu.value) return;
+    const mobile = typeof window !== "undefined" ? window.innerWidth < 768 : isMobileScreen.value;
+    if (mobile && mobileLeftPanelRef.value?.openOtherLayers) {
+      mobileLeftPanelRef.value.openOtherLayers();
+      pendingOpenLayersMenu.value = false;
+    } else if (!mobile && desktopLeftPanelRef.value?.openOtherLayers) {
+      desktopLeftPanelRef.value.openOtherLayers();
+      pendingOpenLayersMenu.value = false;
+    }
+  },
+  { flush: "post" }
+);
 
 const { sites: geoparkSites } = useGeoparkSites();
 
@@ -1833,6 +2163,7 @@ function applyRouteQueryToViews() {
   }
 
   const rawKec = q.wilayah || q.kecamatan;
+  const rawDesa = q.desa;
   if (rawKec) {
     const matchedKec = KECAMATAN_ENTRIES.find(
       (k) => k.name.toLowerCase() === String(rawKec).toLowerCase()
@@ -1844,8 +2175,15 @@ function applyRouteQueryToViews() {
         mobileDrawerOpen.value = true;
       }
     }
-  } else if (!rawKec && selectedKecamatanFilter.value) {
+    if (!rawDesa && selectedDesaFilter.value) {
+      selectedDesaFilter.value = null;
+    } else if (rawDesa && typeof rawDesa === "string" && selectedDesaFilter.value !== rawDesa) {
+      selectedDesaFilter.value = rawDesa;
+    }
+  } else if (!rawKec && (selectedKecamatanFilter.value || selectedDesaFilter.value)) {
     selectedKecamatanFilter.value = null;
+    selectedDesaFilter.value = null;
+    applyMvtFiltersToActiveLayers(null);
   }
 }
 
@@ -1961,8 +2299,10 @@ function isMvtLayerItem(layer: ActiveLayerItem): boolean {
   return Boolean(
     (layer.protocol || "").toUpperCase() === "MVT" ||
     layer.source_type === "martin" ||
+    (layer.source_type === "internal" && !layer.wmsUrl) ||
     layer.mvtUrl ||
     layer.martinSource ||
+    (layer.url && layer.url.includes("/martin/")) ||
     (layer.layer_name &&
       [
         "infrastruktur_segmen",
@@ -2097,16 +2437,26 @@ function handleRemoveLayer(layerId: string) {
 }
 
 function handleSelectDataset(dataset: any) {
+  const targetLayerName = String(dataset.layer_name || dataset.wmsLayerName || "").trim().toLowerCase();
   const existing = activeLayers.value.find(
-    (l) => l.id === dataset.id || (l.layer_name && dataset.layer_name && l.layer_name === dataset.layer_name)
+    (l) =>
+      l.id === dataset.id ||
+      (targetLayerName && String(l.layer_name || "").trim().toLowerCase() === targetLayerName)
   );
   if (existing) {
-    existing.visible = true;
-    existing.expanded = true;
+    const rest = activeLayers.value.filter((l) => l.id !== existing.id);
+    activeLayers.value = withNormalizedStackOrder([
+      { ...existing, visible: true, expanded: true },
+      ...rest,
+    ]);
   } else {
     // Sisipkan layer baru di posisi teratas tumpukan GIS (paling depan di peta)
     const newActiveItem = mapLayerItemToActive(dataset);
     activeLayers.value = withNormalizedStackOrder([newActiveItem, ...activeLayers.value]);
+  }
+
+  if (selectedKecamatanFilter.value || selectedDesaFilter.value || selectedStatusFilter.value) {
+    applyMvtFiltersToActiveLayers();
   }
 
   leftPanelOpen.value = true;
@@ -2283,9 +2633,9 @@ function handleSelectDataset(dataset: any) {
         </div>
       </Transition>
 
-      <!-- Floating Display & Layer Group (Kiri Bawah di dalam Kanvas Peta) -->
+      <!-- Floating Display, Layer & Basemap Group (Kanan Bawah di dalam Kanvas Peta) -->
       <div
-        class="absolute z-20 pointer-events-auto select-none flex flex-col items-start gap-1.5 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-3 sm:left-4 md:left-[380px] lg:left-[432px]"
+        class="absolute z-20 pointer-events-auto select-none flex flex-col items-end gap-1.5 transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] right-3 sm:right-4 md:right-4"
         :class="[
           mobileDrawerOpen && mobileSheetSnap === 'full'
             ? 'opacity-0 pointer-events-none translate-y-4 md:opacity-100 md:pointer-events-auto md:translate-y-0 md:bottom-4'
@@ -2314,13 +2664,13 @@ function handleSelectDataset(dataset: any) {
 
           <div class="w-full h-px bg-gray-200/80 dark:bg-slate-800" aria-hidden="true" />
 
-          <!-- Tombol Layer (mengarahkan ke Menu Lainnya di Tab Jelajah) -->
+          <!-- Tombol Layer (toggle buka/tutup halaman layer & kembali ke Jelajah) -->
           <UTooltip text="Kelola &amp; Urutkan Layer Peta">
             <button
               type="button"
               class="w-full h-11 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100/80 dark:hover:bg-slate-800/80 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 active:scale-90"
               aria-label="Kelola dan Urutkan Layer Peta"
-              @click="handleOpenLayersMenu"
+              @click="handleToggleLayersMenu"
             >
               <UIcon name="i-lucide-layers" class="size-4 stroke-[2.25]" />
             </button>
@@ -2370,16 +2720,22 @@ function handleSelectDataset(dataset: any) {
       <!-- Tab Switcher: 3 tab teks murni radius 100% tanpa garis atas/bawah -->
       <template #tabs>
         <div class="px-2.5 sm:px-3 pt-1 pb-1.5 bg-transparent">
-          <div class="w-full grid grid-cols-3 gap-1 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10" role="tablist" aria-label="Navigasi Panel Mobile">
+          <div class="relative w-full grid grid-cols-3 p-1 bg-slate-200/60 dark:bg-white/5 rounded-full border border-slate-200/70 dark:border-white/10 overflow-hidden" role="tablist" aria-label="Navigasi Panel Mobile">
+            <span
+              aria-hidden="true"
+              class="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc((100%-8px)/3)] rounded-full bg-white dark:bg-[#0b0f19] shadow-xs transition-transform duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] will-change-transform motion-reduce:transition-none"
+              :style="{ transform: `translate3d(${activeMobileTabIndex * 100}%, 0, 0)` }"
+            />
+
             <!-- Tab 1: Jelajah -->
             <button
               type="button"
               role="tab"
               :aria-selected="currentMainTab === 'layers'"
-              class="py-2 px-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
+              class="relative z-10 py-1.5 px-2 rounded-full text-[13px] tracking-tight transition-colors duration-200 cursor-pointer min-h-[36px] inline-flex items-center justify-center select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
               :class="currentMainTab === 'layers'
-                ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                ? 'text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
               @click="handleMobileTabClick('layer')"
             >
               Jelajah
@@ -2390,10 +2746,10 @@ function handleSelectDataset(dataset: any) {
               type="button"
               role="tab"
               :aria-selected="currentMainTab === 'infrastruktur' || currentMainTab === 'dataset'"
-              class="py-2 px-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
+              class="relative z-10 py-1.5 px-2 rounded-full text-[13px] tracking-tight transition-colors duration-200 cursor-pointer min-h-[36px] inline-flex items-center justify-center select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
               :class="currentMainTab === 'infrastruktur' || currentMainTab === 'dataset'
-                ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                ? 'text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
               @click="handleMobileTabClick('infrastruktur')"
             >
               Infrastruktur
@@ -2404,10 +2760,10 @@ function handleSelectDataset(dataset: any) {
               type="button"
               role="tab"
               :aria-selected="currentMainTab === 'geopark'"
-              class="py-2 px-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer min-h-[44px] select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
+              class="relative z-10 py-1.5 px-2 rounded-full text-[13px] tracking-tight transition-colors duration-200 cursor-pointer min-h-[36px] inline-flex items-center justify-center select-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-hidden active:scale-95 text-center truncate"
               :class="currentMainTab === 'geopark'
-                ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                ? 'text-blue-600 dark:text-blue-400 font-bold'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-semibold'"
               @click="handleMobileTabClick('geopark')"
             >
               Wisata

@@ -12,10 +12,22 @@ import type {
 import ModalPreviewPeta from '~/components/rekap-jalan/ModalPreviewPeta.vue'
 import * as XLSX from 'xlsx'
 
-useSeoMeta({
-  title: 'Statistik & Analitik Infrastruktur Jalan | Melarosa Kabupaten Bojonegoro',
+usePublicSeo({
+  title: 'Statistik & Analitik Infrastruktur Jalan',
   description:
     'Observatorium statistik pembangunan jalan poros desa dan non-ruas Kabupaten Bojonegoro: grafik komparasi 28 kecamatan, distribusi klaster capaian, dan tabel hierarki 4 level hingga rincian segmen fisik.',
+  path: '/statistik',
+  jsonLd: {
+    '@context': 'https://schema.org',
+    '@type': 'Dataset',
+    name: 'Statistik Infrastruktur Jalan Kabupaten Bojonegoro',
+    url: 'https://melarosa.saggaserv.my.id/statistik',
+    inLanguage: 'id-ID',
+    creator: {
+      '@type': 'GovernmentOrganization',
+      name: 'Pemerintah Kabupaten Bojonegoro',
+    },
+  },
 })
 
 const toast = useToast()
@@ -688,33 +700,32 @@ onMounted(() => {
 
 <template>
   <div class="min-h-screen bg-[#F7F8F5] dark:bg-[#070b14] text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300">
-    <main class="flex-1 pt-5 sm:pt-10 pb-16 sm:pb-24">
+    <main class="flex-1 pt-6 sm:pt-10 pb-16 sm:pb-24">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-10">
 
         <!-- 1. Editorial Masthead & Kategori Infrastruktur Switcher -->
-        <header class="pb-6 sm:pb-8 lg:pb-10 border-b border-[#E4EAE3] dark:border-white/[0.07]">
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div class="inline-flex items-center gap-2.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400"></span>
-              <span class="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-400">
-                Data Infrastruktur Jalan · Kabupaten Bojonegoro
+        <header class="pb-8 border-b border-slate-200/80 dark:border-white/[0.08]">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div class="inline-flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-[#2B5B9E] dark:bg-sky-400" />
+              <span class="text-xs font-semibold uppercase tracking-[0.14em] text-[#2B5B9E] dark:text-sky-400">
+                Infrastruktur Jalan · Kab. Bojonegoro
               </span>
             </div>
 
-            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#EAEFE9] dark:bg-[#0c1522] text-[11px] sm:text-xs font-medium text-slate-700 dark:text-slate-300">
-              <UIcon name="i-lucide-activity" class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
-              <span>Data Terintegrasi Simpul Spasial Daerah</span>
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] text-xs font-medium text-slate-700 dark:text-slate-300">
+              <UIcon name="i-lucide-activity" class="w-3.5 h-3.5 text-[#2B5B9E] dark:text-sky-400" />
+              <span>Simpul Spasial Daerah</span>
             </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-end">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-end">
             <div class="lg:col-span-7">
-              <h1 class="text-[clamp(1.7rem,3.5vw,2.75rem)] font-bold text-slate-900 dark:text-white tracking-tight leading-[1.12] mb-3 sm:mb-4">
-                Statistik &amp; Analitik Infrastruktur Jalan
+              <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 dark:text-white tracking-tight leading-[1.15] mb-2.5">
+                Statistik Infrastruktur Jalan
               </h1>
-              <p class="text-sm sm:text-base lg:text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-3xl">
-                Rekapitulasi menyeluruh capaian panjang jalan poros desa, realisasi fisik terbangun, distribusi kondisi perkerasan,
-                serta penelusuran berjenjang dari tingkat kecamatan, desa, ruas jalan, hingga segmen fisik pembangunan.
+              <p class="text-sm sm:text-[15px] text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl">
+                Rekapitulasi panjang jalan desa, realisasi pembangunan fisik, dan kondisi perkerasan dari tingkat kecamatan hingga segmen ruas.
               </p>
             </div>
 
@@ -723,21 +734,21 @@ onMounted(() => {
               <button
                 type="button"
                 :disabled="loadingKecamatan"
-                class="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#EAEFE9] dark:bg-[#0c1522] hover:bg-[#dfe6de] dark:hover:bg-[#132033] text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                class="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] hover:bg-slate-50 dark:hover:bg-[#132033] text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 @click="loadKecamatan"
               >
                 <UIcon
                   name="i-lucide-refresh-cw"
-                  class="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0"
+                  class="w-4 h-4 text-[#2B5B9E] dark:text-sky-400 shrink-0"
                   :class="{ 'animate-spin': loadingKecamatan }"
                 />
-                <span>Segarkan Data</span>
+                <span>Segarkan</span>
               </button>
 
               <button
                 type="button"
                 :disabled="exportingExcel || filteredKecamatanList.length === 0"
-                class="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#EAEFE9] dark:bg-[#0c1522] hover:bg-[#dfe6de] dark:hover:bg-[#132033] text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                class="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] hover:bg-slate-50 dark:hover:bg-[#132033] text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 @click="handleExportCsv"
               >
                 <UIcon name="i-lucide-file-text" class="w-4 h-4 text-slate-600 dark:text-slate-300 shrink-0" />
@@ -747,7 +758,7 @@ onMounted(() => {
               <button
                 type="button"
                 :disabled="exportingExcel || filteredKecamatanList.length === 0"
-                class="col-span-2 sm:col-span-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                class="col-span-2 sm:col-span-1 min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer disabled:opacity-50"
                 @click="handleExportExcel('all')"
               >
                 <UIcon
@@ -755,15 +766,15 @@ onMounted(() => {
                   class="w-4 h-4 shrink-0"
                   :class="{ 'animate-spin': exportingExcel }"
                 />
-                <span>{{ exportingExcel ? 'Menyiapkan Excel...' : 'Unduh Laporan Excel (.xlsx)' }}</span>
+                <span>{{ exportingExcel ? 'Menyiapkan Excel...' : 'Unduh Excel (.xlsx)' }}</span>
               </button>
             </div>
           </div>
 
           <!-- Segmented Scope Switcher: Ruas Poros Desa vs Jalan Non-Ruas -->
-          <div class="mt-6 sm:mt-8 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+          <div class="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div
-              class="grid grid-cols-1 sm:inline-flex sm:flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-[#EAEFE9] dark:bg-[#0c1522]"
+              class="grid grid-cols-1 sm:inline-flex sm:flex-wrap items-center gap-1.5 p-1 rounded-2xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08]"
               role="tablist"
               aria-label="Kategori Infrastruktur Jalan"
             >
@@ -771,10 +782,10 @@ onMounted(() => {
                 type="button"
                 role="tab"
                 :aria-selected="activeKategori === 'ruas'"
-                class="min-h-[44px] inline-flex items-center justify-between sm:justify-start gap-2.5 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer"
+                class="min-h-[44px] inline-flex items-center justify-between sm:justify-start gap-2.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer"
                 :class="
                   activeKategori === 'ruas'
-                    ? 'bg-white dark:bg-emerald-600 text-slate-900 dark:text-white shadow-xs'
+                    ? 'bg-[#2B5B9E] text-white shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 "
                 @click="activeKategori = 'ruas'"
@@ -787,11 +798,11 @@ onMounted(() => {
                   class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
                   :class="
                     activeKategori === 'ruas'
-                      ? 'bg-emerald-600/12 text-emerald-800 dark:bg-white/20 dark:text-white'
-                      : 'bg-white/70 dark:bg-white/[0.06] text-slate-600 dark:text-slate-400'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-slate-100 dark:bg-white/[0.06] text-slate-600 dark:text-slate-400'
                   "
                 >
-                  Dalam Database
+                  Database
                 </span>
               </button>
 
@@ -799,10 +810,10 @@ onMounted(() => {
                 type="button"
                 role="tab"
                 :aria-selected="activeKategori === 'non_ruas'"
-                class="min-h-[44px] inline-flex items-center justify-between sm:justify-start gap-2.5 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer"
+                class="min-h-[44px] inline-flex items-center justify-between sm:justify-start gap-2.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer"
                 :class="
                   activeKategori === 'non_ruas'
-                    ? 'bg-white dark:bg-emerald-600 text-slate-900 dark:text-white shadow-xs'
+                    ? 'bg-[#2B5B9E] text-white shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 "
                 @click="activeKategori = 'non_ruas'"
@@ -815,21 +826,21 @@ onMounted(() => {
                   class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
                   :class="
                     activeKategori === 'non_ruas'
-                      ? 'bg-emerald-600/12 text-emerald-800 dark:bg-white/20 dark:text-white'
-                      : 'bg-white/70 dark:bg-white/[0.06] text-slate-600 dark:text-slate-400'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-slate-100 dark:bg-white/[0.06] text-slate-600 dark:text-slate-400'
                   "
                 >
-                  Diluar Database
+                  Non-Ruas
                 </span>
               </button>
             </div>
 
             <NuxtLink
               to="/maps"
-              class="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white dark:bg-[#0c1522] hover:bg-emerald-700 hover:text-white dark:hover:bg-emerald-600 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors w-full sm:w-auto"
+              class="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] hover:border-[#2B5B9E]/40 hover:text-[#2B5B9E] dark:hover:text-sky-400 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors w-full sm:w-auto"
             >
               <UIcon name="i-lucide-map" class="w-4 h-4" />
-              <span>Buka Peta Interaktif Fullscreen</span>
+              <span>Buka Peta WebGIS</span>
               <UIcon name="i-lucide-arrow-up-right" class="w-3.5 h-3.5" />
             </NuxtLink>
           </div>
@@ -839,13 +850,13 @@ onMounted(() => {
         <section aria-label="Ringkasan Eksekutif Infrastruktur">
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5">
             <!-- KPI 1: Total Panjang Jaringan -->
-            <div class="rounded-2xl bg-white dark:bg-[#0c1522] p-5 sm:p-6 flex flex-col justify-between">
+            <div class="rounded-2xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] p-5 sm:p-6 flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between gap-2 mb-2.5">
                   <span class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     Total Panjang Jaringan
                   </span>
-                  <span class="w-9 h-9 rounded-xl bg-[#EAEFE9] dark:bg-white/[0.06] flex items-center justify-center text-slate-700 dark:text-slate-300">
+                  <span class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-white/[0.06] flex items-center justify-center text-slate-700 dark:text-slate-300">
                     <UIcon name="i-lucide-ruler" class="w-4 h-4" />
                   </span>
                 </div>
@@ -856,7 +867,7 @@ onMounted(() => {
                   Setara {{ formatMetersExact(summaryTotals.totalPanjangMeter) }}
                 </p>
               </div>
-              <div class="mt-4 pt-3.5 border-t border-[#ECEFEB] dark:border-white/[0.06] flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <div class="mt-4 pt-3.5 border-t border-slate-200/70 dark:border-white/[0.06] flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                 <span>Cakupan Wilayah</span>
                 <strong class="font-semibold text-slate-900 dark:text-white tabular-nums">
                   {{ summaryTotals.totalKecamatan }} Kec · {{ formatNumber(summaryTotals.totalDesa) }} Desa
@@ -865,7 +876,7 @@ onMounted(() => {
             </div>
 
             <!-- KPI 2: Realisasi Fisik Terbangun -->
-            <div class="rounded-2xl bg-white dark:bg-[#0c1522] p-5 sm:p-6 flex flex-col justify-between">
+            <div class="rounded-2xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] p-5 sm:p-6 flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between gap-2 mb-2.5">
                   <span class="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
@@ -882,7 +893,7 @@ onMounted(() => {
                   {{ formatMetersExact(summaryTotals.totalPanjangDibangun) }} terealisasi
                 </p>
               </div>
-              <div class="mt-4 pt-3.5 border-t border-[#ECEFEB] dark:border-white/[0.06] flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <div class="mt-4 pt-3.5 border-t border-slate-200/70 dark:border-white/[0.06] flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                 <span>Total Segmen Fisik</span>
                 <strong class="font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
                   {{ formatNumber(summaryTotals.totalSegmen) }} segmen
@@ -891,7 +902,7 @@ onMounted(() => {
             </div>
 
             <!-- KPI 3: Sisa Belum Terbangun -->
-            <div class="rounded-2xl bg-white dark:bg-[#0c1522] p-5 sm:p-6 flex flex-col justify-between">
+            <div class="rounded-2xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] p-5 sm:p-6 flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between gap-2 mb-2.5">
                   <span class="text-xs font-semibold uppercase tracking-wider text-orange-700 dark:text-orange-400">
@@ -908,7 +919,7 @@ onMounted(() => {
                   {{ formatMetersExact(summaryTotals.totalPanjangBelum) }} sisa penanganan
                 </p>
               </div>
-              <div class="mt-4 pt-3.5 border-t border-[#ECEFEB] dark:border-white/[0.06] flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <div class="mt-4 pt-3.5 border-t border-slate-200/70 dark:border-white/[0.06] flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                 <span>Proporsi Sisa</span>
                 <strong class="font-semibold text-orange-600 dark:text-orange-400 tabular-nums">
                   {{ formatPercent(summaryTotals.totalPanjangMeter > 0 ? 100 - summaryTotals.rataRataProgress : 0) }}
@@ -917,9 +928,9 @@ onMounted(() => {
             </div>
 
             <!-- KPI 4: Rata-rata Capaian Fisik & Donut Gauge -->
-            <div class="rounded-2xl bg-[#EAEFE9]/90 dark:bg-[#0c1522] p-5 sm:p-6 flex items-center justify-between gap-4">
+            <div class="rounded-2xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] p-5 sm:p-6 flex items-center justify-between gap-4">
               <div class="space-y-1.5">
-                <span class="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
+                <span class="text-xs font-semibold uppercase tracking-wider text-[#2B5B9E] dark:text-sky-400 block">
                   Capaian Fisik Daerah
                 </span>
                 <p class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
@@ -941,7 +952,7 @@ onMounted(() => {
                     fill="none"
                     stroke="currentColor"
                     stroke-width="10"
-                    class="text-white/80 dark:text-white/[0.08]"
+                    class="text-slate-100 dark:text-white/[0.08]"
                   />
                   <circle
                     cx="50"
@@ -953,7 +964,7 @@ onMounted(() => {
                     stroke-linecap="round"
                     :stroke-dasharray="donutCircumference"
                     :stroke-dashoffset="donutStrokeDashoffset"
-                    class="text-emerald-600 dark:text-emerald-400 transition-all duration-700"
+                    class="text-[#2B5B9E] dark:text-sky-400 transition-all duration-700"
                   />
                 </svg>
                 <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
@@ -971,11 +982,11 @@ onMounted(() => {
         <section aria-label="Visualisasi Grafik Statistik Jalan" class="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
 
           <!-- Left 8 Cols: Interactive Stacked Horizontal Bar Chart per Kecamatan (Sorted by Highest Total Km, Flush Bottom) -->
-          <div class="lg:col-span-8 rounded-2xl bg-white dark:bg-[#0c1522] p-5 sm:p-7 flex flex-col justify-between">
+          <div class="lg:col-span-8 rounded-2xl bg-white dark:bg-[#0c1522] border border-slate-200/80 dark:border-white/[0.08] p-5 sm:p-7 flex flex-col justify-between">
             <div class="flex-1 flex flex-col min-h-0">
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-[#ECEFEB] dark:border-white/[0.06] shrink-0">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-200/70 dark:border-white/[0.06] shrink-0">
                 <div>
-                  <span class="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 block mb-1">
+                  <span class="text-[11px] font-semibold uppercase tracking-wider text-[#2B5B9E] dark:text-sky-400 block mb-1">
                     Grafik Komparasi Spasial Antar Kecamatan · Urut Total Km Tertinggi
                   </span>
                   <h2 class="text-base sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
@@ -985,13 +996,13 @@ onMounted(() => {
 
                 <!-- Chart Display Controls (44px touch targets) -->
                 <div class="flex flex-wrap items-center gap-2 shrink-0">
-                  <div class="inline-flex items-center p-1 rounded-xl bg-[#F4F7F3] dark:bg-white/[0.04] text-xs w-full sm:w-auto">
+                  <div class="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-white/[0.04] text-xs w-full sm:w-auto">
                     <button
                       type="button"
                       class="flex-1 sm:flex-initial min-h-[44px] px-3.5 py-1.5 rounded-lg font-semibold transition-colors cursor-pointer"
                       :class="
                         chartDisplayLimit === 'all'
-                          ? 'bg-white dark:bg-emerald-600 text-slate-900 dark:text-white shadow-xs'
+                          ? 'bg-[#2B5B9E] text-white shadow-xs'
                           : 'text-slate-600 dark:text-slate-400'
                       "
                       @click="chartDisplayLimit = 'all'"

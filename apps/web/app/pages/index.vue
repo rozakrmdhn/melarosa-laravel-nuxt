@@ -8,9 +8,28 @@ import SpatialDataStory from '~/components/landing/SpatialDataStory.vue';
 import MapGuide from '~/components/landing/MapGuide.vue';
 import LandingCTA from '~/components/landing/LandingCTA.vue';
 
-useSeoMeta({
+usePublicSeo({
   title: 'Melarosa Bojonegoro: Observatorium Spasial Pembangunan Desa & Geopark',
   description: 'Pantau 1.187 ruas jalan poros desa, sebaran pembangunan di 28 kecamatan dan 430 desa, serta 31 situs Geopark Nasional Kabupaten Bojonegoro.',
+  path: '/',
+  jsonLd: {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'WebSite',
+        name: 'MELAROSA Bojonegoro',
+        url: 'https://melarosa.saggaserv.my.id/',
+        inLanguage: 'id-ID',
+        description: 'Portal WebGIS dan Observatorium Spasial Pembangunan Desa, Jaringan Jalan Poros, dan Geopark Nasional Kabupaten Bojonegoro.',
+      },
+      {
+        '@type': 'GovernmentOrganization',
+        name: 'BAPPEDA Kabupaten Bojonegoro',
+        url: 'https://melarosa.saggaserv.my.id/',
+        logo: 'https://melarosa.saggaserv.my.id/logo-kabupaten.png',
+      },
+    ],
+  },
 });
 
 // Data Geopark terverifikasi Kabupaten Bojonegoro (31 situs)

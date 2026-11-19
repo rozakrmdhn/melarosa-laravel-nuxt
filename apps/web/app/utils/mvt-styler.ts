@@ -40,10 +40,22 @@ export function resolveLineDash(dash: string | number[] | undefined): number[] |
  * Evaluasi kecocokan aturan kondisional terhadap properti fitur spasial
  */
 export function evaluateRuleMatch(feature: any, rule: StyleRule): boolean {
-  if (!rule.field || rule.value === undefined || rule.value === "") return false;
+  if (!rule.field) return false;
 
   const rawVal = feature.get?.(rule.field) ?? feature.getProperties?.()?.[rule.field];
   if (rawVal === undefined || rawVal === null) return false;
+
+  if (rule.operator === "between") {
+    const numVal = Number(rawVal);
+    const minVal = Number(rule.min_value);
+    const maxVal = Number(rule.max_value);
+    if (!Number.isFinite(numVal) || !Number.isFinite(minVal) || !Number.isFinite(maxVal)) return false;
+    const low = Math.min(minVal, maxVal);
+    const high = Math.max(minVal, maxVal);
+    return numVal >= low && numVal <= high;
+  }
+
+  if (rule.value === undefined || rule.value === "") return false;
 
   const featStr = String(rawVal).trim().toLowerCase();
   const ruleStr = String(rule.value).trim().toLowerCase();
@@ -71,6 +83,29 @@ function extentsIntersect(ext1: number[], ext2: number[]): boolean {
   return ext1[0] <= ext2[2] && ext1[2] >= ext2[0] && ext1[1] <= ext2[3] && ext1[3] >= ext2[1];
 }
 
+function normalizeWilayahToken(val: string, prefixRe: RegExp): string {
+  return val
+    .trim()
+    .toLowerCase()
+    .replace(prefixRe, "")
+    .replace(/\s*\(kota\)\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesWilayahAttribute(rawFeatVal: string, targetVal: string, prefixRe: RegExp): boolean {
+  const cleanTarget = normalizeWilayahToken(targetVal, prefixRe);
+  if (!cleanTarget) return true;
+
+  const tokens = rawFeatVal
+    .split(/[,;|]+/)
+    .map((part) => normalizeWilayahToken(part, prefixRe))
+    .filter(Boolean);
+
+  if (tokens.length === 0) return false;
+  return tokens.some((token) => token === cleanTarget);
+}
+
 /**
  * Filter wilayah kecamatan, desa, kondisi, dan spatial extent secara client-side
  */
@@ -89,18 +124,14 @@ function passesClientFilters(feature: any, targetOlLayer: any): boolean {
       feature.get("wadmkc") ||
       feature.get("KECAMATAN") ||
       ""
-    ).trim().toLowerCase();
+    ).trim();
 
-    const cleanTarget = targetKec.replace(/^(kecamatan|kec\.)\s+/i, "").trim();
-    const cleanFeat = rawFeatKec.replace(/^(kecamatan|kec\.)\s+/i, "").trim();
-
-    if (cleanFeat) {
-      // Jika memiliki atribut kecamatan, verifikasi apakah cocok
-      if (!cleanFeat.includes(cleanTarget) && !cleanTarget.includes(cleanFeat)) {
+    if (rawFeatKec) {
+      if (!matchesWilayahAttribute(rawFeatKec, targetKec, /^(kecamatan|kec\.)\s+/i)) {
         return false;
       }
     } else if (filterExtent && Array.isArray(filterExtent) && filterExtent.length === 4) {
-      // Solusi 2: Spatial Extent fallback jika layer tidak menyimpan field kecamatan
+      // Fallback spatial extent jika layer tidak menyimpan field kecamatan
       const geom = feature.getGeometry?.();
       if (geom) {
         const featExt = geom.getExtent?.();
@@ -123,17 +154,14 @@ function passesClientFilters(feature: any, targetOlLayer: any): boolean {
       feature.get("namobj") ||
       feature.get("DESA") ||
       ""
-    ).trim().toLowerCase();
+    ).trim();
 
-    const cleanTargetDesa = targetDesa.replace(/^(desa|kelurahan|kel\.)\s+/i, "").trim();
-    const cleanFeatDesa = rawFeatDesa.replace(/^(desa|kelurahan|kel\.)\s+/i, "").trim();
-
-    if (cleanFeatDesa) {
-      if (!cleanFeatDesa.includes(cleanTargetDesa) && !cleanTargetDesa.includes(cleanFeatDesa)) {
+    if (rawFeatDesa) {
+      if (!matchesWilayahAttribute(rawFeatDesa, targetDesa, /^(desa|kelurahan|kel\.)\s+/i)) {
         return false;
       }
     } else if (filterExtent && Array.isArray(filterExtent) && filterExtent.length === 4) {
-      // Solusi 2: Spatial Extent fallback untuk Desa
+      // Fallback spatial extent untuk Desa
       const geom = feature.getGeometry?.();
       if (geom) {
         const featExt = geom.getExtent?.();
@@ -178,32 +206,278 @@ function getOrSetCache<T>(cache: Map<string, T>, key: string, create: () => T): 
   return value;
 }
 
+const BASE_ROW_PK_KEYS = [
+  "id",
+  "ID",
+  "gid",
+  "GID",
+  "fid",
+  "FID",
+  "ogc_fid",
+  "OGC_FID",
+  "objectid",
+  "OBJECTID",
+] as const;
+
+export interface MvtFeatureSelectionKey {
+  layerName: string;
+  uniqueId: string | null;
+  /** Komposit kanonik `<layer_name>::<unique_id>` (null jika tidak ada unique ID). */
+  key: string | null;
+  /** @deprecated Alias ke `key` untuk kompatibilitas internal. */
+  id: string | null;
+}
+
+function isSyntheticFeatureId(raw: string): boolean {
+  if (!raw) return true;
+  if (raw.startsWith("synthetic:")) return true;
+  // Nilai float acak Math.random() berbentuk "0.12345...", sedangkan integer "0" tetap valid.
+  return /^0\.\d+$/.test(raw);
+}
+
+function extractMartinSourceFromUrl(url?: string | null): string {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/\/martin\/([^/?#{]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1]).trim() : "";
+}
+
+export function resolveMvtLayerSelectionHint(
+  layer?: {
+    id?: string;
+    layer_name?: string;
+    martinSource?: string;
+    mvtUrl?: string;
+    url?: string;
+    name?: string;
+  } | null,
+  featureLayerName?: string | null
+): string {
+  const fromUrl = extractMartinSourceFromUrl(layer?.mvtUrl || layer?.url);
+  return String(
+    layer?.layer_name ||
+      layer?.martinSource ||
+      fromUrl ||
+      featureLayerName ||
+      layer?.id ||
+      layer?.name ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function getLayerSpecificUniqueIdKeys(layerHint: string): readonly string[] {
+  if (layerHint.includes("segmen") || layerHint.includes("infrastruktur")) {
+    return ["id_segmen", "ID_SEGMEN", "kode_segmen", "KODE_SEGMEN"];
+  }
+  if (layerHint.includes("jalan") || layerHint.includes("poros")) {
+    return ["id_ruas", "ID_RUAS", "kode_ruas", "KODE_RUAS", "no_ruas", "NO_RUAS"];
+  }
+  if (
+    (layerHint.includes("desa") || layerHint.includes("kelurahan")) &&
+    !layerHint.includes("jalan") &&
+    !layerHint.includes("segmen") &&
+    !layerHint.includes("infrastruktur")
+  ) {
+    return ["id_desa", "ID_DESA", "kdepum", "KDEPUM", "kode_desa", "KODE_DESA", "wiadkd", "WIADKD"];
+  }
+  if (
+    layerHint.includes("kecamatan") &&
+    !layerHint.includes("desa") &&
+    !layerHint.includes("kelurahan") &&
+    !layerHint.includes("jalan") &&
+    !layerHint.includes("segmen") &&
+    !layerHint.includes("infrastruktur")
+  ) {
+    return ["id_kecamatan", "ID_KECAMATAN", "kdcpum", "KDCPUM", "wiadkc", "WIADKC"];
+  }
+  return [];
+}
+
+function normalizeCandidateUniqueId(rawVal: unknown, layerKey: string): string | null {
+  if (rawVal === undefined || rawVal === null) return null;
+  let idStr = String(rawVal).trim();
+  if (!idStr || isSyntheticFeatureId(idStr)) return null;
+
+  // Lepaskan prefix "<layer_name>::" jika sudah dikompositkan sebelumnya.
+  const sepIdx = idStr.indexOf("::");
+  if (sepIdx !== -1) {
+    const prefix = idStr.slice(0, sepIdx).trim().toLowerCase();
+    const suffix = idStr.slice(sepIdx + 2).trim();
+    if (!suffix || isSyntheticFeatureId(suffix)) return null;
+    if (!layerKey || prefix === layerKey || layerKey.endsWith(`.${prefix}`) || prefix.endsWith(`.${layerKey}`)) {
+      idStr = suffix;
+    }
+  }
+
+  return idStr;
+}
+
+export function extractMvtFeatureSelectionKey(
+  props: Record<string, any> | null | undefined,
+  olFeatureId?: string | number | null,
+  layerHint?: string | null
+): MvtFeatureSelectionKey {
+  const safeProps = props || {};
+  const propLayer = String(safeProps.layer || "").trim().toLowerCase();
+  const layerKey = String(layerHint || propLayer || "").trim().toLowerCase();
+
+  // 1. Prioritaskan OpenLayers feature.getId() karena MVT({ idProperty: "id" }) memindahkan properti "id" ke feature.getId().
+  const olId = normalizeCandidateUniqueId(olFeatureId, layerKey);
+  if (olId !== null) {
+    const key = layerKey ? `${layerKey}::${olId}` : olId;
+    return { layerName: layerKey, uniqueId: olId, key, id: key };
+  }
+
+  // 2. Fallback ke kolom primary key baris (id, gid, fid, ogc_fid, objectid) di properties.
+  for (const pkKey of BASE_ROW_PK_KEYS) {
+    const candidate = normalizeCandidateUniqueId(safeProps[pkKey], layerKey);
+    if (candidate !== null) {
+      const key = layerKey ? `${layerKey}::${candidate}` : candidate;
+      return { layerName: layerKey, uniqueId: candidate, key, id: key };
+    }
+  }
+
+  // 3. Fallback terakhir ke identifier unik spesifik layer (tidak pernah memakai foreign key antar tabel / nama wilayah).
+  const layerSpecificKeys = getLayerSpecificUniqueIdKeys(layerKey);
+  for (const specificKey of layerSpecificKeys) {
+    const candidate = normalizeCandidateUniqueId(safeProps[specificKey], layerKey);
+    if (candidate !== null) {
+      const key = layerKey ? `${layerKey}::${candidate}` : candidate;
+      return { layerName: layerKey, uniqueId: candidate, key, id: key };
+    }
+  }
+
+  return { layerName: layerKey, uniqueId: null, key: null, id: null };
+}
+
+function isLayerNameCompatible(featureLayer: string, selectedLayer: string): boolean {
+  if (!featureLayer || !selectedLayer) return true;
+  if (featureLayer === selectedLayer) return true;
+  return featureLayer.endsWith(`.${selectedLayer}`) || selectedLayer.endsWith(`.${featureLayer}`);
+}
+
+/**
+ * Mencocokkan fitur MVT terpilih secara ketat berdasarkan `(layer_name, unique_id)`.
+ */
+export function isMvtFeatureSelected(feature: any, targetOlLayer: any, layerHint?: string): boolean {
+  if (!targetOlLayer || !feature) return false;
+  const selKey = String(
+    targetOlLayer.get?.("selectedFeatureKey") || targetOlLayer.get?.("selectedFeatureId") || ""
+  ).trim();
+  if (!selKey) return false;
+
+  const selLayerName = String(targetOlLayer.get?.("selectedLayerName") || layerHint || "")
+    .trim()
+    .toLowerCase();
+  const featureLayer = String(feature.get?.("layer") || "").trim().toLowerCase();
+  if (selLayerName && featureLayer && !isLayerNameCompatible(featureLayer, selLayerName)) {
+    return false;
+  }
+
+  const effectiveLayerHint = selLayerName || String(layerHint || featureLayer || "").trim().toLowerCase();
+  const props = feature.getProperties?.() || {};
+  const fKey = extractMvtFeatureSelectionKey(props, feature.getId?.(), effectiveLayerHint);
+  return fKey.key !== null && fKey.key === selKey;
+}
+
+/**
+ * Generator Style Function khusus overlay highlight MVT di layer teratas agar highlight layer bawah tidak tertimbun layer atas.
+ */
+export function createMvtSelectionOverlayStyleFn(
+  olModules: any,
+  overlayOlLayer: any
+) {
+  const OlStyle = olModules?.OlStyle || olModules?.Style;
+  const Stroke = olModules?.Stroke;
+  const Fill = olModules?.Fill;
+  const OlCircle = olModules?.CircleStyle || olModules?.OlCircle || olModules?.Circle;
+
+  const haloStroke = Stroke
+    ? new Stroke({
+        color: "rgba(0, 0, 0, 0.9)",
+        width: 6,
+        lineCap: "round",
+        lineJoin: "round",
+      })
+    : null;
+  const coreStroke = Stroke
+    ? new Stroke({
+        color: "#ffffff",
+        width: 2.75,
+        lineCap: "round",
+        lineJoin: "round",
+      })
+    : null;
+  const polyFill = Fill ? new Fill({ color: "rgba(0, 0, 0, 0)" }) : null;
+
+  const polygonStyle =
+    OlStyle && haloStroke && coreStroke && polyFill
+      ? [
+          new OlStyle({
+            stroke: haloStroke,
+            fill: polyFill,
+            zIndex: 99,
+          }),
+          new OlStyle({
+            stroke: coreStroke,
+            zIndex: 100,
+          }),
+        ]
+      : null;
+
+  const lineStyle =
+    OlStyle && haloStroke && coreStroke
+      ? [
+          new OlStyle({
+            stroke: haloStroke,
+            zIndex: 99,
+          }),
+          new OlStyle({
+            stroke: coreStroke,
+            zIndex: 100,
+          }),
+        ]
+      : null;
+
+  const pointStyle =
+    OlStyle && OlCircle && Fill && Stroke
+      ? new OlStyle({
+          image: new OlCircle({
+            radius: 7,
+            fill: new Fill({ color: "#ffffff" }),
+            stroke: new Stroke({ color: "#000000", width: 2.5 }),
+          }),
+          zIndex: 100,
+        })
+      : null;
+
+  return (feature: any) => {
+    if (!OlStyle || !Stroke || !Fill) return null;
+    if (!passesClientFilters(feature, overlayOlLayer)) return null;
+
+    const geomCategory = String(overlayOlLayer?.get?.("selectedGeomCategory") || "").toLowerCase();
+    const geomType = String(feature.getGeometry?.()?.getType?.() || "").toLowerCase();
+    if (geomCategory === "polygon" && !geomType.includes("polygon")) return null;
+    if (geomCategory === "line" && !geomType.includes("line")) return null;
+    if (geomCategory === "point" && !geomType.includes("point")) return null;
+
+    const selLayerName = String(overlayOlLayer?.get?.("selectedLayerName") || "").trim().toLowerCase();
+    if (!isMvtFeatureSelected(feature, overlayOlLayer, selLayerName)) {
+      return null;
+    }
+
+    if (geomType.includes("polygon")) return polygonStyle;
+    if (geomType.includes("line")) return lineStyle;
+    if (geomType.includes("point")) return pointStyle;
+    return lineStyle;
+  };
+}
+
 /**
  * Generator Style Function OpenLayers dinamis berdasarkan LayerStyleConfig
  */
-function isMvtFeatureSelected(feature: any, targetOlLayer: any): boolean {
-  if (!targetOlLayer || !feature) return false;
-  const selId = targetOlLayer.get?.("selectedFeatureId");
-  const selName = targetOlLayer.get?.("selectedFeatureName");
-  if (!selId && !selName) return false;
-
-  const props = feature.getProperties?.() || {};
-  const fId = props.id ?? props.gid ?? props.objectid ?? props.OBJECTID ?? props.fid ?? props.id_kecamatan ?? props.id_desa ?? feature.getId?.();
-  if (selId) {
-    return fId !== undefined && fId !== null && String(fId) === String(selId);
-  }
-
-  if (selName) {
-    const fName = String(
-      props.nama_kecamatan ?? props.wadmkc ?? props.nama_desa ?? props.wadmkd ?? props.namobj ?? props.nama ?? ""
-    ).trim().toLowerCase();
-    if (fName && fName === String(selName).trim().toLowerCase()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export function createDynamicMvtStyleFn(
   styleConfig: LayerStyleConfig | null | undefined,
   options: MvtStyleOptions
@@ -219,6 +493,8 @@ export function createDynamicMvtStyleFn(
   const fillCache = new Map<string, any>();
   const circleImageCache = new Map<string, any>();
   const staticStyleCache = new Map<string, any>();
+
+  const layerSelectionHint = resolveMvtLayerSelectionHint(layer);
 
   return (feature: any) => {
     if (!OlStyle || !Stroke || !Fill) {
@@ -239,8 +515,8 @@ export function createDynamicMvtStyleFn(
     const isPolygon = geomType.includes("Polygon") || styleConfig?.geom_type === "polygon";
     const isPoint = geomType.includes("Point") || styleConfig?.geom_type === "point";
 
-    // Highlight poligon MVT langsung di VectorTileLayer (terpotong rapi per-tile oleh OpenLayers tanpa garis grid internal)
-    if (isPolygon && isMvtFeatureSelected(feature, targetOlLayer)) {
+    // Highlight poligon MVT (terpotong rapi per-tile tanpa garis grid internal) jika diaktifkan pada layer ini
+    if (isPolygon && isMvtFeatureSelected(feature, targetOlLayer, layerSelectionHint)) {
       return [
         new OlStyle({
           stroke: getOrSetCache(strokeCache, "selected_halo|rgba(0,0,0,0.9)|6", () =>
@@ -283,13 +559,25 @@ export function createDynamicMvtStyleFn(
     let lineDash = resolveLineDash(styleConfig.dash);
     let fillColor = styleConfig.fill_color || (isPolygon ? "rgba(59, 130, 246, 0.12)" : undefined);
 
-    // 2. Evaluasi Aturan Kondisional (Rules)
-    if (Array.isArray(styleConfig.rules) && styleConfig.rules.length > 0) {
+    // 2. Evaluasi Aturan Kondisional (Rules / Categorized / Graduated)
+    let matchedPointColor: string | undefined;
+    if (
+      styleConfig.symbol_mode !== "single" &&
+      Array.isArray(styleConfig.rules) &&
+      styleConfig.rules.length > 0
+    ) {
       for (const rule of styleConfig.rules) {
         if (evaluateRuleMatch(feature, rule)) {
-          if (rule.color) strokeColor = rule.color;
+          if (rule.color) {
+            strokeColor = rule.color;
+            matchedPointColor = rule.color;
+          }
           if (typeof rule.width === "number") strokeWidth = rule.width;
-          if (rule.fill_color) fillColor = rule.fill_color;
+          if (rule.fill_color) {
+            fillColor = rule.fill_color;
+          } else if (isPolygon && rule.color) {
+            fillColor = rule.color;
+          }
           if (rule.dash) lineDash = resolveLineDash(rule.dash);
           break; // Aturan pertama yang cocok menang
         }
@@ -338,12 +626,54 @@ export function createDynamicMvtStyleFn(
       );
     }
 
-    // 5. Label Fitur Spasial
+    // 5. Label Fitur Spasial (Single Labels & Rule Based Labelling)
     let textStyle: any = undefined;
-    if (OlText && styleConfig.label?.enabled && styleConfig.label.field) {
-      const minZoom = styleConfig.label.min_zoom ?? 13;
-      if (currentZoom >= minZoom) {
-        const fieldName = styleConfig.label.field;
+    if (OlText && styleConfig.label?.enabled) {
+      let activeLbl = {
+        field: styleConfig.label.field,
+        min_zoom: styleConfig.label.min_zoom ?? 13,
+        color: styleConfig.label.color,
+        halo_color: styleConfig.label.halo_color,
+        halo_width: styleConfig.label.halo_width,
+        font_size: styleConfig.label.font_size,
+        font_family: styleConfig.label.font_family,
+        font_style: styleConfig.label.font_style,
+        opacity: styleConfig.label.opacity,
+      };
+      let shouldRenderLabel = Boolean(activeLbl.field);
+
+      if (styleConfig.label.mode === "rule_based") {
+        shouldRenderLabel = false;
+        const lblRules = styleConfig.label.rules || [];
+        for (const lr of lblRules) {
+          if (
+            evaluateRuleMatch(feature, {
+              field: lr.filter_field,
+              operator: lr.operator,
+              value: lr.value,
+              min_value: lr.min_value,
+              max_value: lr.max_value,
+            })
+          ) {
+            activeLbl = {
+              field: lr.label_field || styleConfig.label.field,
+              min_zoom: lr.min_zoom ?? styleConfig.label.min_zoom ?? 13,
+              color: lr.color || styleConfig.label.color,
+              halo_color: lr.halo_color || styleConfig.label.halo_color,
+              halo_width: lr.halo_width ?? styleConfig.label.halo_width,
+              font_size: lr.font_size ?? styleConfig.label.font_size,
+              font_family: lr.font_family || styleConfig.label.font_family,
+              font_style: lr.font_style || styleConfig.label.font_style,
+              opacity: lr.opacity ?? styleConfig.label.opacity,
+            };
+            shouldRenderLabel = Boolean(activeLbl.field);
+            break;
+          }
+        }
+      }
+
+      if (shouldRenderLabel && currentZoom >= activeLbl.min_zoom) {
+        const fieldName = activeLbl.field;
         const rawLabel = feature.get(fieldName) ||
           feature.get(fieldName.toLowerCase()) ||
           feature.get(fieldName.toUpperCase()) ||
@@ -353,10 +683,35 @@ export function createDynamicMvtStyleFn(
 
         const labelText = String(rawLabel).trim();
         if (labelText && labelText !== "-") {
-          const fontSize = styleConfig.label.font_size ?? 11;
-          const textColor = styleConfig.label.color || (isDark ? "#f1f5f9" : "#0f172a");
-          const haloColor = styleConfig.label.halo_color || (isDark ? "#0f172a" : "#ffffff");
-          const haloWidth = styleConfig.label.halo_width ?? 3;
+          const fontSize = activeLbl.font_size ?? 11;
+          const labelAlpha = Number.isFinite(Number(activeLbl.opacity))
+            ? Math.max(0, Math.min(1, Number(activeLbl.opacity)))
+            : 1;
+          const rawTextColor = activeLbl.color || (isDark ? "#f1f5f9" : "#0f172a");
+          const rawHaloColor = activeLbl.halo_color || (isDark ? "#0f172a" : "#ffffff");
+          const applyLabelAlpha = (hexOrCss: string) => {
+            if (labelAlpha >= 0.99 || !hexOrCss.startsWith("#") || hexOrCss.length !== 7) return hexOrCss;
+            const r = parseInt(hexOrCss.slice(1, 3), 16);
+            const g = parseInt(hexOrCss.slice(3, 5), 16);
+            const b = parseInt(hexOrCss.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${labelAlpha})`;
+          };
+          const textColor = applyLabelAlpha(rawTextColor);
+          const haloColor = applyLabelAlpha(rawHaloColor);
+          const haloWidth = activeLbl.halo_width ?? 3;
+
+          const fontStyleKey = activeLbl.font_style || "bold";
+          const cssFontWeight = fontStyleKey === "bold" || fontStyleKey === "bold_italic" ? "600" : "400";
+          const cssFontStyle = fontStyleKey === "italic" || fontStyleKey === "bold_italic" ? "italic" : "normal";
+          const familyRaw = activeLbl.font_family || "SansSerif";
+          const cssFontFamily =
+            familyRaw === "Serif"
+              ? "Georgia, serif"
+              : familyRaw === "Monospace"
+                ? "ui-monospace, monospace"
+                : familyRaw === "Arial"
+                  ? "Arial, sans-serif"
+                  : "Inter, sans-serif";
 
           // Penentuan mode penempatan label (centroid point vs kontur line)
           const placement = styleConfig.label.placement || (isPolygon || isPoint ? "point" : isLine ? "line" : "point");
@@ -373,12 +728,13 @@ export function createDynamicMvtStyleFn(
 
           textStyle = new OlText({
             text: labelText,
-            font: `600 ${fontSize}px Inter, sans-serif`,
+            font: `${cssFontStyle} ${cssFontWeight} ${fontSize}px ${cssFontFamily}`,
             fill: getOrSetCache(fillCache, textColor, () => new Fill({ color: textColor })),
             stroke: getOrSetCache(strokeCache, `${haloColor}|${haloWidth}`, () =>
               new Stroke({ color: haloColor, width: haloWidth })
             ),
             placement,
+            textAlign: placement === "line" ? undefined : (styleConfig.label.align || "center"),
             rotation: placement === "line" ? 0 : rotation,
             offsetX: Number(styleConfig.label.offset_x ?? 0),
             offsetY: Number(styleConfig.label.offset_y ?? 0),
@@ -391,7 +747,7 @@ export function createDynamicMvtStyleFn(
     // 6. Main Style
     if (isPoint && OlCircle) {
       const pointRadius = Number(styleConfig.point_radius ?? 6);
-      const pointColor = styleConfig.point_color || strokeColor;
+      const pointColor = matchedPointColor || styleConfig.point_color || strokeColor;
       const pointBorderColor = styleConfig.point_border_color || "#ffffff";
       const pointBorderWidth = Number(styleConfig.point_border_width ?? 2);
       const imageKey = `pt|${pointRadius}|${pointColor}|${pointBorderColor}|${pointBorderWidth}`;
@@ -560,6 +916,9 @@ function getFallbackMvtStyle(
     }
   }
 
+  const geomType = String(feature.getGeometry?.()?.getType?.() || "");
+  const isPolygon = geomType.includes("Polygon");
+
   const lineStroke = getOrSetCache(strokeCache, `fb|${strokeColor}|${strokeWidth}|round|round`, () =>
     new Stroke({
       color: strokeColor,
@@ -569,17 +928,27 @@ function getFallbackMvtStyle(
     })
   );
 
+  const polyFillColor = isDark ? "rgba(56, 189, 248, 0.05)" : "rgba(2, 132, 199, 0.04)";
+  const polyFill = isPolygon
+    ? getOrSetCache(fillCache, polyFillColor, () => new Fill({ color: polyFillColor }))
+    : undefined;
+
   if (!textStyle) {
-    return getOrSetCache(staticStyleCache, `fb-line|${strokeColor}|${strokeWidth}|${zIndex}`, () =>
-      new OlStyle({
-        stroke: lineStroke,
-        zIndex,
-      })
+    return getOrSetCache(
+      staticStyleCache,
+      `fb-geom|${isPolygon ? 1 : 0}|${strokeColor}|${strokeWidth}|${zIndex}|${isDark ? 1 : 0}`,
+      () =>
+        new OlStyle({
+          stroke: lineStroke,
+          fill: polyFill,
+          zIndex,
+        })
     );
   }
 
   return new OlStyle({
     stroke: lineStroke,
+    fill: polyFill,
     text: textStyle,
     zIndex,
   });

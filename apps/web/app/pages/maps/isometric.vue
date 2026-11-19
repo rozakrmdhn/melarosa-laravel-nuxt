@@ -12,14 +12,13 @@ useHead({
   htmlAttrs: {
     class: 'overflow-hidden h-full',
   },
-  title: 'Peta 3D RDTR & Isometrik Kota Bojonegoro | Melarosa GIS',
-  meta: [
-    {
-      name: 'description',
-      content:
-        'Peta 3D RDTR 1:5.000 Kecamatan Bojonegoro dengan MapLibre GL JS: bangunan eksisting OSM dan generate RDTR, lebar jalan dan rel KAI, Bengawan Solo, RTH pohon 3D, serta area pertanian.',
-    },
-  ],
+})
+
+usePublicSeo({
+  title: 'Peta 3D RDTR & Isometrik Kota Bojonegoro',
+  description:
+    'Peta 3D RDTR 1:5.000 Kecamatan Bojonegoro dengan MapLibre GL JS: bangunan eksisting OSM dan generate RDTR, lebar jalan dan rel KAI, Bengawan Solo, RTH pohon 3D, serta area pertanian.',
+  path: '/maps/isometric',
 })
 
 const isMapsReady = useState<boolean>('melarosa_maps_ready', () => false)

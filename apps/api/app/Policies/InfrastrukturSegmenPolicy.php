@@ -15,7 +15,7 @@ class InfrastrukturSegmenPolicy
         }
 
         foreach ($perms as $perm) {
-            if ($user->hasPermissionTo($perm)) {
+            if ($user->checkPermissionTo($perm)) {
                 return true;
             }
         }
@@ -50,13 +50,8 @@ class InfrastrukturSegmenPolicy
             return false;
         }
 
-        if ($user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+        if ($user->isAdminOrBappeda()) {
             return true;
-        }
-
-        // Verifier Kecamatan dapat mengelola seluruh segmen di kecamatannya
-        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
-            return (int) $segmen->id_kecamatan === (int) $user->id_kecamatan;
         }
 
         // Operator Desa hanya dapat mengedit segmen desanya saat status draft atau rejected_kecamatan
@@ -69,6 +64,11 @@ class InfrastrukturSegmenPolicy
                 StatusVerifikasi::Draft->value,
                 StatusVerifikasi::RejectedKecamatan->value,
             ], true);
+        }
+
+        // Verifier Kecamatan dapat mengelola seluruh segmen di kecamatannya
+        if ($user->hasAnyRole(['verifierKecamatan', 'verifikator-kecamatan', 'kecamatan']) || $user->id_kecamatan) {
+            return (int) $segmen->id_kecamatan === (int) $user->id_kecamatan;
         }
 
         return false;
@@ -85,12 +85,12 @@ class InfrastrukturSegmenPolicy
             return false;
         }
 
-        if ($user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+        if ($user->isAdminOrBappeda()) {
             return true;
         }
 
         // Verifier Kecamatan hanya dapat menghapus segmen berstatus draft di wilayahnya
-        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
+        if ($user->hasAnyRole(['verifierKecamatan', 'verifikator-kecamatan', 'kecamatan']) || $user->id_kecamatan) {
             if ((int) $segmen->id_kecamatan !== (int) $user->id_kecamatan) {
                 return false;
             }
@@ -105,7 +105,7 @@ class InfrastrukturSegmenPolicy
     }
 
     /**
-     * Otorisasi pengajuan verifikasi oleh Desa.
+     * Otorisasi pengajuan verifikasi (draft / revisi -> submitted_desa).
      */
     public function submitDesa(User $user, InfrastrukturSegmen $segmen): bool
     {
@@ -117,16 +117,21 @@ class InfrastrukturSegmenPolicy
             return false;
         }
 
+        if (!$user->id_desa && $user->id_kecamatan && (int) $segmen->id_kecamatan !== (int) $user->id_kecamatan) {
+            return false;
+        }
+
         $currentStatus = $segmen->status_verifikasi?->value ?? $segmen->status_verifikasi;
 
         return in_array($currentStatus, [
             StatusVerifikasi::Draft->value,
             StatusVerifikasi::RejectedKecamatan->value,
+            StatusVerifikasi::RejectedBappeda->value,
         ], true);
     }
 
     /**
-     * Otorisasi verifikasi tingkat Kecamatan (hanya untuk segmen di kecamatannya yang statusnya submitted_desa).
+     * Otorisasi verifikasi tingkat Kecamatan (untuk segmen submitted_desa atau revisi Bappeda di kecamatannya).
      */
     public function verifyKecamatan(User $user, InfrastrukturSegmen $segmen): bool
     {
@@ -143,10 +148,13 @@ class InfrastrukturSegmenPolicy
             return false;
         }
 
-        // Status harus sudah diajukan oleh desa
+        // Status harus sudah diajukan desa atau dikembalikan Bappeda
         $currentStatus = $segmen->status_verifikasi?->value ?? $segmen->status_verifikasi;
 
-        return $currentStatus === StatusVerifikasi::SubmittedDesa->value;
+        return in_array($currentStatus, [
+            StatusVerifikasi::SubmittedDesa->value,
+            StatusVerifikasi::RejectedBappeda->value,
+        ], true);
     }
 
     /**

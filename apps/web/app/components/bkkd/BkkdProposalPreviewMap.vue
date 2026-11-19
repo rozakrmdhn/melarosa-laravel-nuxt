@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BkkdProposal } from '~/types/bkkd';
+import BasemapSwitcher from '~/components/common/BasemapSwitcher.vue';
+import { useBasemapStore } from '~/stores/basemap';
+import { createOpenLayersBasemapSource } from '~/utils/basemap-sources';
 
 interface Props {
   proposal: BkkdProposal | null;
@@ -13,11 +16,12 @@ const emit = defineEmits<{
 }>();
 
 const bkkdApi = useBkkdApi();
+const basemapStore = useBasemapStore();
 
 const mapContainerRef = ref<HTMLElement | null>(null);
 const loading = ref(false);
 const errorState = ref<string | null>(null);
-const basemap = ref<'osm' | 'satellite' | 'carto'>('osm');
+const basemap = ref<string>('osm');
 const featureCount = ref(0);
 const crossYearCount = ref(0);
 const segmenCount = ref(0);
@@ -29,7 +33,7 @@ const lastSummary = ref<{
 } | null>(null);
 
 let mapInstance: any = null;
-let tileLayers: Record<'osm' | 'satellite' | 'carto', any> | null = null;
+let baseTileLayer: any = null;
 let olModules: any = null;
 let batasSource: any = null;
 let porosSource: any = null;
@@ -86,34 +90,13 @@ async function initPreviewMap() {
     import('ol/proj'),
   ]);
 
-  olModules = { GeoJSON, Style, Stroke, Fill, Text, fromLonLat };
+  olModules = { GeoJSON, Style, Stroke, Fill, Text, fromLonLat, XYZ };
 
-  tileLayers = {
-    osm: new TileLayer({
-      visible: basemap.value === 'osm',
-      source: new XYZ({
-        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        crossOrigin: 'anonymous',
-        maxZoom: 19,
-      }),
-    }),
-    satellite: new TileLayer({
-      visible: basemap.value === 'satellite',
-      source: new XYZ({
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        crossOrigin: 'anonymous',
-        maxZoom: 19,
-      }),
-    }),
-    carto: new TileLayer({
-      visible: basemap.value === 'carto',
-      source: new XYZ({
-        url: 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-        crossOrigin: 'anonymous',
-        maxZoom: 19,
-      }),
-    }),
-  };
+  const initialBasemapItem = basemapStore.getByCode(basemap.value, 'openlayers');
+  baseTileLayer = new TileLayer({
+    visible: true,
+    source: createOpenLayersBasemapSource(initialBasemapItem ?? basemap.value, { XYZ }) ?? undefined,
+  });
 
   batasSource = new VectorSource();
   porosSource = new VectorSource();
@@ -224,9 +207,7 @@ async function initPreviewMap() {
   mapInstance = new Map({
     target: mapContainerRef.value,
     layers: [
-      tileLayers.osm,
-      tileLayers.satellite,
-      tileLayers.carto,
+      baseTileLayer,
       batasLayer,
       porosLayer,
       kabupatenLayer,
@@ -243,13 +224,23 @@ async function initPreviewMap() {
   });
 }
 
-function switchBasemap(mode: 'osm' | 'satellite' | 'carto') {
+function switchBasemap(mode: string) {
   basemap.value = mode;
-  if (!tileLayers) return;
-  tileLayers.osm.setVisible(mode === 'osm');
-  tileLayers.satellite.setVisible(mode === 'satellite');
-  tileLayers.carto.setVisible(mode === 'carto');
+  if (!baseTileLayer || !olModules) return;
+  const item = basemapStore.getByCode(mode, 'openlayers');
+  const source = createOpenLayersBasemapSource(item ?? mode, olModules);
+  baseTileLayer.setSource(source);
+  baseTileLayer.setVisible(Boolean(source));
 }
+
+watch(
+  () => basemapStore.items,
+  () => {
+    if (baseTileLayer && olModules) {
+      switchBasemap(basemap.value);
+    }
+  },
+);
 
 function fitToProposalExtent() {
   if (!mapInstance || !selectedSource || !batasSource) return;
@@ -410,28 +401,15 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- Basemap & Focus Controls -->
+    <!-- Basemap & Focus Controls (Medium Basemap) -->
     <div class="px-3.5 py-2 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900">
-      <div class="inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
-        <button
-          v-for="mode in [
-            { id: 'osm', label: 'OSM' },
-            { id: 'satellite', label: 'Satelit' },
-            { id: 'carto', label: 'Terang' },
-          ]"
-          :key="mode.id"
-          type="button"
-          class="px-2.5 min-h-[36px] sm:min-h-[30px] rounded-md text-xs font-semibold cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-700"
-          :class="
-            basemap === mode.id
-              ? 'bg-slate-900 text-white dark:bg-sky-700'
-              : 'text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700'
-          "
-          @click="switchBasemap(mode.id as 'osm' | 'satellite' | 'carto')"
-        >
-          {{ mode.label }}
-        </button>
-      </div>
+      <BasemapSwitcher
+        :model-value="basemap"
+        variant="medium"
+        engine="openlayers"
+        placement="top-left"
+        @update:model-value="switchBasemap($event)"
+      />
 
       <button
         type="button"

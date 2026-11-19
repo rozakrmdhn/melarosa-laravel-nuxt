@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import "ol/ol.css";
+import BasemapSwitcher from "~/components/common/BasemapSwitcher.vue";
+import { useBasemapStore } from "~/stores/basemap";
+import { createOpenLayersBasemapSource } from "~/utils/basemap-sources";
 
 definePageMeta({
   middleware: ["auth", "permission"],
@@ -244,39 +247,33 @@ let tileLayer: any = null;
 let tooltipOverlay: any = null;
 let olModules: any = null;
 
+const basemapStore = useBasemapStore();
 const mapLoaded = ref(false);
-const currentBasemap = ref<"dark" | "light" | "satellite">("light");
+const currentBasemap = ref<string>("osm");
 const hoveredFeature = ref<any>(null);
 const tooltipContent = ref<{ nama_kecamatan: string; luas_hektar: number; pimpinan: string; jumlah_desa: number } | null>(null);
 
-function getBasemapSource(type: "dark" | "light" | "satellite") {
+function getBasemapSource(type: string) {
   if (!olModules) return null;
-  const { OSM, XYZ } = olModules;
-
-  if (type === "satellite") {
-    return new XYZ({
-      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      maxZoom: 19,
-    });
-  }
-
-  if (type === "dark") {
-    return new XYZ({
-      url: "https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png",
-      attributions: '&copy; <a href="https://carto.com/">CARTO</a>',
-      maxZoom: 19,
-    });
-  }
-
-  return new OSM();
+  const item = basemapStore.getByCode(type, "openlayers");
+  return createOpenLayersBasemapSource(item ?? type, olModules);
 }
 
-function switchBasemap(type: "dark" | "light" | "satellite") {
+function switchBasemap(type: string) {
   currentBasemap.value = type;
   if (tileLayer && olModules) {
     tileLayer.setSource(getBasemapSource(type));
   }
 }
+
+watch(
+  () => basemapStore.items,
+  () => {
+    if (tileLayer && olModules) {
+      tileLayer.setSource(getBasemapSource(currentBasemap.value));
+    }
+  },
+);
 
 // Fit map to county bounds or summary bbox
 function fitMapToBounds() {
@@ -1062,39 +1059,14 @@ onUnmounted(() => {
         <!-- Right Side: Basemap Switcher + View Mode + Actions -->
         <div class="pointer-events-auto flex items-center flex-wrap gap-1.5 p-1.5 rounded-xl border border-gray-200/80 dark:border-white/[0.1] bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md shadow-lg shadow-black/5 dark:shadow-black/25">
           
-          <!-- Basemap Switcher -->
-          <div class="flex items-center p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
-            <button
-              type="button"
-              :class="[
-                'px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                currentBasemap === 'dark' ? 'bg-white dark:bg-[#1e293b] text-gray-900 dark:text-white shadow-xs' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white',
-              ]"
-              @click="switchBasemap('dark')"
-            >
-              Dark
-            </button>
-            <button
-              type="button"
-              :class="[
-                'px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                currentBasemap === 'light' ? 'bg-white dark:bg-[#1e293b] text-gray-900 dark:text-white shadow-xs' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white',
-              ]"
-              @click="switchBasemap('light')"
-            >
-              Light
-            </button>
-            <button
-              type="button"
-              :class="[
-                'px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                currentBasemap === 'satellite' ? 'bg-white dark:bg-[#1e293b] text-gray-900 dark:text-white shadow-xs' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white',
-              ]"
-              @click="switchBasemap('satellite')"
-            >
-              Satelit
-            </button>
-          </div>
+          <!-- Medium Basemap Switcher -->
+          <BasemapSwitcher
+            :model-value="currentBasemap"
+            variant="medium"
+            engine="openlayers"
+            placement="top-right"
+            @update:model-value="switchBasemap($event)"
+          />
 
           <div class="h-4 w-px bg-gray-200 dark:bg-white/[0.1]" />
 

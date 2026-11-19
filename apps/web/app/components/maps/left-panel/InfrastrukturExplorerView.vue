@@ -143,26 +143,73 @@ watch(
 onMounted(async () => {
   await ensureKecamatanStats();
   syncSelectedDistrictFromFilter();
+  syncSelectedDesaFromFilter();
   updateCategoryScrollButtons();
 });
 
 watch(
-  () => props.selectedKecamatanFilter,
+  () => [props.selectedKecamatanFilter, props.selectedDesaFilter],
   () => {
     syncSelectedDistrictFromFilter();
+    syncSelectedDesaFromFilter();
+  }
+);
+
+watch(
+  () => [props.selectedKecamatanFilter, kecamatanStats.value.length],
+  () => {
+    if (props.selectedKecamatanFilter && !selectedDistrict.value) {
+      syncSelectedDistrictFromFilter();
+    }
   }
 );
 
 function syncSelectedDistrictFromFilter() {
-  if (!props.selectedKecamatanFilter) return;
+  if (!props.selectedKecamatanFilter) {
+    selectedDistrict.value = null;
+    selectedDesa.value = null;
+    selectedRuasYear.value = null;
+    filterQuery.value = "";
+    return;
+  }
   const key = normalizeWilayahKey(props.selectedKecamatanFilter);
   const found = kecamatanStats.value.find((k) => normalizeWilayahKey(k.nama_kecamatan) === key);
   if (found && selectedDistrict.value?.id_kecamatan !== found.id_kecamatan) {
     selectedDistrict.value = found;
     selectedDesa.value = null;
+    selectedRuasYear.value = null;
+    filterQuery.value = "";
     fetchDesaForKecamatan(found.id_kecamatan);
   }
 }
+
+function syncSelectedDesaFromFilter() {
+  if (!props.selectedDesaFilter) {
+    if (selectedDesa.value) {
+      selectedDesa.value = null;
+      selectedRuasYear.value = null;
+      filterQuery.value = "";
+    }
+    return;
+  }
+  if (!selectedDistrict.value) return;
+  const targetKey = normalizeWilayahKey(props.selectedDesaFilter);
+  const list = desaCache.value[selectedDistrict.value.id_kecamatan] || [];
+  const foundDesa = list.find((d) => normalizeWilayahKey(d.nama_desa) === targetKey);
+  if (foundDesa && selectedDesa.value?.id_desa !== foundDesa.id_desa) {
+    selectedDesa.value = foundDesa;
+    selectedRuasYear.value = null;
+    filterQuery.value = "";
+    fetchRuasForDesa(foundDesa.id_desa);
+  }
+}
+
+watch(
+  () => (selectedDistrict.value ? desaCache.value[selectedDistrict.value.id_kecamatan] : null),
+  () => {
+    syncSelectedDesaFromFilter();
+  }
+);
 
 const filteredDistricts = computed(() => {
   const q = filterQuery.value.trim().toLowerCase();

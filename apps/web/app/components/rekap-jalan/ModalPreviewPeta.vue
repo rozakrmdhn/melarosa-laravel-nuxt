@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import 'ol/ol.css';
 import type { RekapRuasItem, RekapSegmenItem } from '~/types/rekap-jalan';
+import BasemapSwitcher from '~/components/common/BasemapSwitcher.vue';
+import { useBasemapStore } from '~/stores/basemap';
+import { createOpenLayersBasemapSource } from '~/utils/basemap-sources';
 
 interface Props {
   modelValue?: boolean;
@@ -71,7 +74,8 @@ const fetchError = ref<string | null>(null);
 const fetchedSegments = ref<RekapSegmenItem[]>([]);
 const activeSegmentId = ref<string | null>(null);
 const selectedFeatureInfo = ref<any | null>(null);
-const activeBasemap = ref<'osm' | 'esri' | 'carto'>('osm');
+const basemapStore = useBasemapStore();
+const activeBasemap = ref<string>('osm');
 const mouseCoordinates = ref<{ lat: number; lon: number } | null>(null);
 
 // ─── Formatters & Value Helpers ──────────────────────────────────────────────
@@ -316,33 +320,27 @@ async function loadOLModules() {
   return OLModules;
 }
 
-function getBasemapSource(type: 'osm' | 'esri' | 'carto') {
+function getBasemapSource(type: string) {
   if (!OLModules) return null;
-  if (type === 'esri') {
-    return new OLModules.XYZ({
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      maxZoom: 19,
-      crossOrigin: 'anonymous',
-    });
-  }
-  if (type === 'carto') {
-    return new OLModules.XYZ({
-      url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      maxZoom: 19,
-      crossOrigin: 'anonymous',
-    });
-  }
-  return new OLModules.OSM({
-    crossOrigin: 'anonymous',
-  });
+  const item = basemapStore.getByCode(type, 'openlayers');
+  return createOpenLayersBasemapSource(item ?? type, OLModules);
 }
 
-function switchBasemap(type: 'osm' | 'esri' | 'carto') {
+function switchBasemap(type: string) {
   activeBasemap.value = type;
   if (baseTileLayer && OLModules) {
     baseTileLayer.setSource(getBasemapSource(type));
   }
 }
+
+watch(
+  () => basemapStore.items,
+  () => {
+    if (baseTileLayer && OLModules) {
+      baseTileLayer.setSource(getBasemapSource(activeBasemap.value));
+    }
+  },
+);
 
 function updateMarkerPoints(featureOrGeom: any) {
   if (!markerSourceInstance || !OLModules) return;
@@ -1070,51 +1068,14 @@ onBeforeUnmount(() => {
 
           <!-- Floating Map Header Controls (Top-Right of Map) -->
           <div class="absolute top-3.5 right-3.5 z-20 flex items-center gap-1.5">
-            <!-- Basemap Switcher Toolbar -->
-            <div class="hidden sm:flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-md p-0.5 rounded-xl text-xs border border-gray-200/80 dark:border-gray-800 shadow-md">
-              <button
-                type="button"
-                :class="[
-                  'px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1',
-                  activeBasemap === 'osm'
-                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white',
-                ]"
-                title="Peta Jalan Standar OpenStreetMap"
-                @click="switchBasemap('osm')"
-              >
-                <UIcon name="i-lucide-map" class="size-3.5" />
-                <span>Jalan</span>
-              </button>
-              <button
-                type="button"
-                :class="[
-                  'px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1',
-                  activeBasemap === 'esri'
-                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white',
-                ]"
-                title="Foto Udara Satelit Esri Resolusi Tinggi"
-                @click="switchBasemap('esri')"
-              >
-                <UIcon name="i-lucide-globe" class="size-3.5" />
-                <span>Satelit</span>
-              </button>
-              <button
-                type="button"
-                :class="[
-                  'px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1',
-                  activeBasemap === 'carto'
-                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-semibold shadow-xs'
-                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white',
-                ]"
-                title="Peta Voyager / Minimalis Terang"
-                @click="switchBasemap('carto')"
-              >
-                <UIcon name="i-lucide-compass" class="size-3.5" />
-                <span>Voyager</span>
-              </button>
-            </div>
+            <!-- Medium Basemap Switcher (Dialog) -->
+            <BasemapSwitcher
+              :model-value="activeBasemap"
+              variant="medium"
+              engine="openlayers"
+              placement="top-right"
+              @update:model-value="switchBasemap($event)"
+            />
 
             <!-- Open Panel Button (when right panel is collapsed) -->
             <button

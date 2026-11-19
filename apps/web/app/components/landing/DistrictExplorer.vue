@@ -478,7 +478,7 @@ function openDistrictInMap(kec: KecamatanEntry) {
 
                     <button
                       type="button"
-                      class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:focus-visible:ring-blue-400"
+                      class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-4 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E] dark:focus-visible:ring-blue-400"
                       @click="openDistrictInMap(kec)"
                     >
                       <UIcon name="i-lucide-map" class="size-4" />
@@ -530,7 +530,7 @@ function openDistrictInMap(kec: KecamatanEntry) {
             </p>
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:focus-visible:ring-blue-400"
+              class="inline-flex items-center justify-center rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E] dark:focus-visible:ring-blue-400"
               @click="resetFilters"
             >
               Reset Pencarian & Filter
@@ -664,7 +664,7 @@ function openDistrictInMap(kec: KecamatanEntry) {
 
           <button
             type="button"
-            class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-3 text-sm font-semibold text-white transition-colors cursor-pointer min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#0c1522]"
+            class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-5 py-3 text-sm font-semibold text-white transition-colors cursor-pointer min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E] dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#0c1522]"
             @click="openDistrictInMap(selectedKecamatan)"
           >
             <UIcon name="i-lucide-map" class="size-4" />

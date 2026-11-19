@@ -33,7 +33,7 @@
       <div class="pt-4 flex flex-wrap items-center justify-center gap-4">
         <NuxtLink
           to="/maps"
-          class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-black/30 transition-all min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          class="inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-black/30 transition-all min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           <UIcon name="i-lucide-map" class="size-5" />
           <span>Buka Peta MELAROSA</span>

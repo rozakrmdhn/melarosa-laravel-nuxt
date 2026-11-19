@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import DOMPurify from 'dompurify';
 import { useGeoparkSites, type GeoparkSite } from '~/composables/useGeoparkSites';
+import GeoparkMinimapViewer from '~/components/geopark/GeoparkMinimapViewer.vue';
 
 const route = useRoute();
 const slug = computed(() => String(route.params.slug || ''));
@@ -47,10 +48,32 @@ const pageDescription = computed(
   () => site.value?.desc || 'Ulasan resmi situs Geopark Nasional Bojonegoro.'
 );
 
-useSeoMeta({
+usePublicSeo({
   title: () => `${pageTitle.value} (${site.value?.code || 'Geosite'})`,
   description: () => pageDescription.value,
-  ogImage: () => site.value?.image || undefined,
+  path: () => `/geopark/${slug.value}`,
+  image: () => site.value?.image || undefined,
+  type: 'article',
+  jsonLd: () =>
+    site.value
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'TouristAttraction',
+          name: site.value.name,
+          description: site.value.desc,
+          url: `https://melarosa.saggaserv.my.id/geopark/${site.value.slug}`,
+          image: site.value.image || undefined,
+          ...(site.value.hasCoordinate
+            ? {
+                geo: {
+                  '@type': 'GeoCoordinates',
+                  latitude: site.value.coordinate[1],
+                  longitude: site.value.coordinate[0],
+                },
+              }
+            : {}),
+        }
+      : null,
 });
 
 const activePhotoIndex = ref(0);
@@ -179,6 +202,8 @@ function copyArticleLink() {
     isLinkCopied.value = false;
   }, 2000);
 }
+
+const isMinimapOpen = ref(false);
 
 function openSiteInMap(item: GeoparkSite) {
   if (item.hasCoordinate) {
@@ -466,7 +491,16 @@ function openSiteInMap(item: GeoparkSite) {
           <div class="space-y-2.5">
             <button
               type="button"
-              class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-3 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:focus-visible:ring-blue-400"
+              class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-5 py-3 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E] dark:focus-visible:ring-sky-400"
+              @click="isMinimapOpen = true"
+            >
+              <UIcon name="i-lucide-map" class="size-4" />
+              <span>Pratinjau Minimap Lokasi</span>
+            </button>
+
+            <button
+              type="button"
+              class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#F4F7F3] dark:bg-white/[0.06] hover:bg-[#EAEFE9] dark:hover:bg-white/[0.1] px-5 py-3 text-xs sm:text-sm font-semibold text-[#17251F] dark:text-slate-100 transition-colors cursor-pointer min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E]"
               @click="openSiteInMap(site)"
             >
               <UIcon name="i-lucide-map-pin" class="size-4" />
@@ -587,5 +621,9 @@ function openSiteInMap(item: GeoparkSite) {
         </NuxtLink>
       </div>
     </div>
+    <GeoparkMinimapViewer
+      v-model:open="isMinimapOpen"
+      :site="site"
+    />
   </main>
 </template>

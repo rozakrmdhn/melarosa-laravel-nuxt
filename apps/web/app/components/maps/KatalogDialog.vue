@@ -110,6 +110,7 @@ const allDatasets = computed<DatasetItem[]>(() => {
         category: item.category,
         opd_name: item.opd_name,
         legend_url: item.legend_url,
+        style_config: item.style_config || null,
         csw_metadata: item.csw_metadata,
         last_synced_at: item.last_synced_at,
       };

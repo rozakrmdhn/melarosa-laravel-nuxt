@@ -152,4 +152,12 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return !is_null($this->id_kecamatan) || !is_null($this->id_desa);
     }
+
+    /**
+     * Check if user has unrestricted kabupaten-wide authority (admin or Bappeda).
+     */
+    public function isAdminOrBappeda(): bool
+    {
+        return $this->hasAnyRole(['admin', 'verifierBappeda', 'verifikator-bappeda', 'bappeda']);
+    }
 }

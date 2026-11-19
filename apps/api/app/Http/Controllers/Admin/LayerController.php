@@ -144,8 +144,11 @@ class LayerController extends Controller
     {
         $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'category' => ['nullable', 'string', 'max:150'],
+            'opd_name' => ['nullable', 'string', 'max:200'],
             'protocol' => ['sometimes', 'required', 'string', 'max:255'],
             'url' => ['sometimes', 'required', 'string', 'max:500'],
+            'legend_url' => ['nullable', 'string', 'max:1000'],
             'layer_name' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'default_visible' => ['sometimes', 'boolean'],
@@ -361,10 +364,27 @@ class LayerController extends Controller
                         }
                     }
 
+                    $uniqueValues = [];
+                    $numericValues = [];
+                    foreach ($sampleRows as $row) {
+                        if (isset($row[$name]) && $row[$name] !== null && $row[$name] !== '') {
+                            $strVal = is_string($row[$name]) ? trim($row[$name]) : json_encode($row[$name]);
+                            if ($strVal !== '' && !in_array($strVal, $uniqueValues, true) && count($uniqueValues) < 20) {
+                                $uniqueValues[] = $strVal;
+                            }
+                            if (is_numeric($row[$name])) {
+                                $numericValues[] = (float) $row[$name];
+                            }
+                        }
+                    }
+
                     $attributes[] = [
                         'name' => $name,
                         'type' => $col->data_type,
                         'sample_value' => $sampleVal,
+                        'unique_values' => $uniqueValues,
+                        'min_value' => !empty($numericValues) ? min($numericValues) : null,
+                        'max_value' => !empty($numericValues) ? max($numericValues) : null,
                     ];
                 }
             }
@@ -387,10 +407,26 @@ class LayerController extends Controller
                                 break;
                             }
                         }
+                        $uniqueValues = [];
+                        $numericValues = [];
+                        foreach ($sampleData as $sRow) {
+                            if (isset($sRow[$attrName]) && $sRow[$attrName] !== null && $sRow[$attrName] !== '') {
+                                $strVal = is_scalar($sRow[$attrName]) ? trim((string) $sRow[$attrName]) : json_encode($sRow[$attrName]);
+                                if ($strVal !== '' && !in_array($strVal, $uniqueValues, true) && count($uniqueValues) < 20) {
+                                    $uniqueValues[] = $strVal;
+                                }
+                                if (is_numeric($sRow[$attrName])) {
+                                    $numericValues[] = (float) $sRow[$attrName];
+                                }
+                            }
+                        }
                         $attributes[] = [
                             'name' => $attrName,
                             'type' => $attr['type'] ?? 'string',
                             'sample_value' => $sampleVal,
+                            'unique_values' => $uniqueValues,
+                            'min_value' => !empty($numericValues) ? min($numericValues) : null,
+                            'max_value' => !empty($numericValues) ? max($numericValues) : null,
                         ];
                     }
                 }

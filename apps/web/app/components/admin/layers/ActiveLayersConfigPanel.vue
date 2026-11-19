@@ -59,6 +59,22 @@ const catalogAvailabilityFilter = ref<"all" | "not_in_maps" | "in_maps">("all");
 // Right panel filter (Active /maps stack)
 const stackSearch = ref("");
 
+// Mobile/tablet segmented pane switcher (< lg)
+const mobilePane = ref<"active" | "all">("active");
+
+const catalogAvailabilityOptions = computed(() => [
+  { label: `Semua (${catalogCounts.value.all})`, value: "all" },
+  { label: `Belum di /maps (${catalogCounts.value.notInMaps})`, value: "not_in_maps" },
+  { label: `Aktif /maps (${catalogCounts.value.inMaps})`, value: "in_maps" },
+]);
+
+const catalogSourceOptions = [
+  { label: "Semua Sumber", value: "ALL" },
+  { label: "Geoportal WMS", value: "geoportal" },
+  { label: "Internal MVT", value: "internal" },
+  { label: "External WMS", value: "external" },
+];
+
 // Drag and touch reorder states (aligned with /maps ActiveLayersView.vue)
 const draggedLayerIndex = ref<number | null>(null);
 const recentlyMovedLayerId = ref<string | null>(null);
@@ -730,94 +746,143 @@ defineExpose({
       </div>
     </div>
 
-    <!-- Main Transfer Studio: [Panel Kiri: Semua Layer] <-> [Panah Kanan & Kiri] <-> [Panel Kanan: Layer Aktif /maps] -->
+    <!-- Main Transfer Studio -->
     <template v-else>
-      <!-- Top Studio Command & Stacking Summary Bar -->
-      <div class="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] p-4 sm:p-5 space-y-4">
-        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div class="space-y-1.5 min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <h2 class="text-base font-bold text-slate-900 dark:text-white">
-                Konfigurasi Layer Aktif dan Urutan Peta (/maps)
-              </h2>
-              <span
-                v-if="hasUnsavedChanges"
-                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold tabular-nums bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300/70 dark:border-amber-700/50"
-              >
-                <span class="size-2 rounded-full bg-amber-600 dark:bg-amber-400" aria-hidden="true" />
-                {{ changedPayloadItems.length }} Perubahan Belum Disimpan
-              </span>
-            </div>
-            <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
-              Pilih layer di panel kiri lalu tekan panah kanan (<span class="font-semibold text-slate-800 dark:text-slate-100">-></span>) untuk memasukkan ke daftar aktif, atau panah kiri (<span class="font-semibold text-slate-800 dark:text-slate-100">&lt;-</span>) untuk mengeluarkan. Panel kanan hanya menampilkan kartu layer yang aktif dan tampil di halaman <span class="font-semibold text-slate-800 dark:text-slate-100">/maps</span> dari urutan teratas ke dasar.
-            </p>
+      <!-- Top Studio Command Strip -->
+      <div class="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0c1424] px-4 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="space-y-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm font-bold text-slate-900 dark:text-white">
+              Tumpukan Layer Aktif di /maps
+            </span>
+            <span class="px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
+              {{ activeStack.length }} aktif
+            </span>
+            <span
+              v-if="hasUnsavedChanges"
+              class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300"
+            >
+              <span class="size-1.5 rounded-full bg-amber-600 dark:bg-amber-400" aria-hidden="true" />
+              {{ changedPayloadItems.length }} belum disimpan
+            </span>
           </div>
-
-          <div class="flex items-center gap-2 flex-wrap shrink-0">
-            <UButton
-              label="Muat Ulang"
-              icon="i-heroicons-arrow-path"
-              color="neutral"
-              variant="outline"
-              :disabled="saving"
-              class="min-h-[44px] cursor-pointer"
-              @click="fetchStack"
-            />
-            <UButton
-              v-if="canEdit && hasUnsavedChanges"
-              label="Batalkan"
-              icon="i-lucide-rotate-ccw"
-              color="neutral"
-              variant="subtle"
-              :disabled="saving"
-              class="min-h-[44px] cursor-pointer"
-              @click="resetDraft"
-            />
-            <UButton
-              v-if="canEdit"
-              :label="hasUnsavedChanges ? `Simpan (${changedPayloadItems.length} Perubahan)` : 'Tersimpan'"
-              :icon="hasUnsavedChanges ? 'i-heroicons-check' : 'i-lucide-check-check'"
-              color="primary"
-              :variant="hasUnsavedChanges ? 'solid' : 'subtle'"
-              :disabled="!hasUnsavedChanges || saving"
-              :loading="saving"
-              class="min-h-[44px] cursor-pointer font-semibold"
-              @click="saveConfiguration"
-            />
-          </div>
+          <p class="text-xs text-slate-600 dark:text-slate-300">
+            Atur layer yang otomatis tampil di peta publik beserta urutan lapisannya (urutan #1 tampil paling depan).
+          </p>
         </div>
 
-        <div
-          v-if="!canEdit"
-          class="px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-white/[0.03] flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300"
-        >
-          <UIcon name="i-lucide-lock" class="size-4 text-slate-500 dark:text-slate-400 shrink-0" />
-          <span>Mode lihat saja: akun Anda dapat melihat susunan layer, namun tidak memiliki izin mengubah keaktifan atau urutan layer.</span>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <UButton
+            label="Muat Ulang"
+            icon="i-heroicons-arrow-path"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            :disabled="saving"
+            class="min-h-[44px] sm:min-h-[38px] cursor-pointer"
+            @click="fetchStack"
+          />
+          <UButton
+            v-if="canEdit && hasUnsavedChanges"
+            label="Batalkan"
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+            :disabled="saving"
+            class="min-h-[44px] sm:min-h-[38px] cursor-pointer"
+            @click="resetDraft"
+          />
+          <UButton
+            v-if="canEdit"
+            :label="hasUnsavedChanges ? `Simpan (${changedPayloadItems.length})` : 'Tersimpan'"
+            :icon="hasUnsavedChanges ? 'i-heroicons-check' : 'i-lucide-check-check'"
+            color="primary"
+            size="sm"
+            :variant="hasUnsavedChanges ? 'solid' : 'subtle'"
+            :disabled="!hasUnsavedChanges || saving"
+            :loading="saving"
+            class="min-h-[44px] sm:min-h-[38px] cursor-pointer font-semibold"
+            @click="saveConfiguration"
+          />
         </div>
       </div>
 
-      <!-- 3-Track Dual-List Transfer Workspace -->
+      <div
+        v-if="!canEdit"
+        class="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-white/[0.03] flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300"
+      >
+        <UIcon name="i-lucide-lock" class="size-4 text-slate-500 dark:text-slate-400 shrink-0" aria-hidden="true" />
+        <span>Mode lihat saja: akun Anda dapat melihat susunan layer, namun tidak memiliki izin mengubah keaktifan atau urutan layer.</span>
+      </div>
+
+      <!-- Mobile / Tablet Pane Switcher (< lg) -->
+      <div
+        class="lg:hidden grid grid-cols-2 gap-1 p-1 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-100/80 dark:bg-[#0c1424]"
+        role="tablist"
+        aria-label="Pilih daftar layer"
+      >
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="mobilePane === 'active'"
+          class="min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2"
+          :class="mobilePane === 'active'
+            ? 'bg-blue-600 text-white shadow-xs'
+            : 'text-slate-700 dark:text-slate-300'"
+          @click="mobilePane = 'active'"
+        >
+          <span>Aktif di /maps</span>
+          <span
+            class="px-1.5 py-0.5 rounded text-[11px] font-bold tabular-nums"
+            :class="mobilePane === 'active' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-white/10 text-slate-800 dark:text-slate-200'"
+          >
+            {{ activeStack.length }}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="mobilePane === 'all'"
+          class="min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2"
+          :class="mobilePane === 'all'
+            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+            : 'text-slate-700 dark:text-slate-300'"
+          @click="mobilePane = 'all'"
+        >
+          <span>Semua Layer</span>
+          <span class="px-1.5 py-0.5 rounded text-[11px] font-bold tabular-nums bg-slate-200/80 dark:bg-white/10 text-slate-800 dark:text-slate-200">
+            {{ allDraftLayersSorted.length }}
+          </span>
+        </button>
+      </div>
+
+      <!-- 3-Track Dual-List Transfer Workspace (Desktop) / Tabbed Single-Pane (Mobile) -->
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.15fr)] gap-4 items-stretch">
-        <!-- LEFT PANEL: Nama Semua Layer -->
-        <div class="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden flex flex-col">
-          <div class="p-4 border-b border-slate-200 dark:border-white/[0.08] space-y-3 bg-slate-50/70 dark:bg-[#070b14]/60">
+        <!-- LEFT PANEL: Semua Layer -->
+        <div
+          class="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0c1424] overflow-hidden flex-col"
+          :class="mobilePane === 'all' ? 'flex' : 'hidden lg:flex'"
+        >
+          <div class="p-3.5 sm:p-4 border-b border-slate-200 dark:border-white/[0.08] space-y-2.5 bg-slate-50/70 dark:bg-[#070b14]/60">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
                   Semua Layer
                 </span>
-                <span class="px-2 py-0.5 rounded-full text-xs font-bold tabular-nums bg-slate-200/80 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                  {{ allDraftLayersSorted.length }}
+                <span class="px-2 py-0.5 rounded-md text-xs font-bold tabular-nums bg-slate-200/80 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                  {{ filteredCatalogLayers.length }}
                 </span>
               </div>
 
               <button
                 v-if="canEdit && selectableNotInMapsFilteredIds.length > 0"
                 type="button"
-                class="min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer shrink-0"
+                class="min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer shrink-0"
                 @click="toggleSelectAllFilteredNotInMaps"
               >
-                {{ allFilteredNotInMapsSelected ? 'Batal Pilih Belum Aktif' : 'Pilih Belum di /maps' }}
+                {{ allFilteredNotInMapsSelected ? 'Batal Pilih' : 'Pilih Belum Aktif' }}
               </button>
             </div>
 
@@ -830,48 +895,37 @@ defineExpose({
               class="w-full"
             />
 
-            <!-- Compact Availability + Source Filters -->
-            <div class="flex items-center justify-between gap-2 flex-wrap">
-              <div class="flex items-center gap-1 flex-wrap" role="group" aria-label="Filter status layer pada peta">
-                <button
-                  v-for="av in [
-                    { value: 'all', label: `Semua (${catalogCounts.all})` },
-                    { value: 'not_in_maps', label: `Belum di /maps (${catalogCounts.notInMaps})` },
-                    { value: 'in_maps', label: `Aktif /maps (${catalogCounts.inMaps})` },
-                  ]"
-                  :key="av.value"
-                  type="button"
-                  :aria-pressed="catalogAvailabilityFilter === av.value"
-                  class="px-2.5 py-2 min-h-[44px] rounded-lg text-xs font-medium transition-colors cursor-pointer"
-                  :class="catalogAvailabilityFilter === av.value
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-semibold'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-white/[0.06]'"
-                  @click="catalogAvailabilityFilter = av.value as typeof catalogAvailabilityFilter"
-                >
-                  <span class="tabular-nums">{{ av.label }}</span>
-                </button>
-              </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <USelect
+                v-model="catalogAvailabilityFilter"
+                :items="catalogAvailabilityOptions"
+                aria-label="Filter status pada peta"
+                class="w-full"
+              />
+              <USelect
+                v-model="catalogSourceFilter"
+                :items="catalogSourceOptions"
+                aria-label="Filter sumber data"
+                class="w-full"
+              />
+            </div>
 
-              <div class="flex items-center gap-1 flex-wrap" role="group" aria-label="Filter sumber layer">
-                <button
-                  v-for="src in [
-                    { value: 'ALL', label: 'Semua' },
-                    { value: 'geoportal', label: 'Geoportal' },
-                    { value: 'internal', label: 'MVT' },
-                    { value: 'external', label: 'Ext' },
-                  ]"
-                  :key="src.value"
-                  type="button"
-                  :aria-pressed="catalogSourceFilter === src.value"
-                  class="px-2.5 py-2 min-h-[44px] rounded-md text-xs font-semibold border transition-colors cursor-pointer"
-                  :class="catalogSourceFilter === src.value
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white dark:bg-[#0b0f19] border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'"
-                  @click="catalogSourceFilter = src.value as typeof catalogSourceFilter"
-                >
-                  {{ src.label }}
-                </button>
-              </div>
+            <!-- Mobile Batch Action Bar saat ada item terpilih -->
+            <div
+              v-if="canEdit && selectedLeftCandidatesForMaps.length > 0"
+              class="lg:hidden flex items-center justify-between gap-2 pt-1"
+            >
+              <span class="text-xs font-medium text-blue-700 dark:text-blue-300 tabular-nums">
+                {{ selectedLeftCandidatesForMaps.length }} layer dipilih
+              </span>
+              <UButton
+                label="Masukkan ke /maps"
+                icon="i-lucide-plus"
+                size="xs"
+                color="primary"
+                class="min-h-[40px] cursor-pointer font-semibold"
+                @click="moveSelectedRight(); mobilePane = 'active'"
+              />
             </div>
           </div>
 
@@ -883,7 +937,7 @@ defineExpose({
             <p class="text-xs font-semibold text-slate-800 dark:text-slate-200">
               Tidak ada layer yang cocok dengan filter
             </p>
-            <p class="text-xs text-slate-600 dark:text-slate-400">
+            <p class="text-xs text-slate-600 dark:text-slate-300">
               Ubah kata kunci pencarian atau tampilkan semua status.
             </p>
             <UButton
@@ -896,10 +950,10 @@ defineExpose({
             />
           </div>
 
-          <!-- Left List: Streamlined Layer Names -->
+          <!-- Left List -->
           <ul
             v-else
-            class="divide-y divide-slate-100 dark:divide-white/[0.06] max-h-[400px] lg:max-h-[640px] overflow-y-auto flex-1"
+            class="divide-y divide-slate-100 dark:divide-white/[0.06] max-h-[520px] lg:max-h-[640px] overflow-y-auto flex-1"
           >
             <li
               v-for="layer in filteredCatalogLayers"
@@ -909,25 +963,30 @@ defineExpose({
                 selectedLeftSet.has(layer.id)
                   ? 'bg-blue-50 dark:bg-blue-950/35'
                   : activeIdSet.has(layer.id)
-                  ? 'bg-slate-50/70 dark:bg-white/[0.02] hover:bg-slate-100/70 dark:hover:bg-white/[0.04]'
+                  ? 'bg-slate-50/70 dark:bg-white/[0.02]'
                   : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]',
               ]"
             >
               <div
-                class="w-full min-h-[52px] px-3.5 py-2.5 flex items-center justify-between gap-2.5"
+                class="w-full min-h-[56px] px-3 py-2.5 flex items-center justify-between gap-2"
                 :class="canEdit ? 'cursor-pointer' : ''"
                 @click="toggleLeftSelection(layer.id)"
-                @dblclick="!activeIdSet.has(layer.id) && addSingleLayerToMaps(layer.id)"
               >
-                <div class="flex items-center gap-3 min-w-0 flex-1">
-                  <input
+                <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div
                     v-if="canEdit"
-                    type="checkbox"
-                    :checked="selectedLeftSet.has(layer.id)"
-                    :aria-label="`Pilih layer ${layer.name}`"
-                    class="size-5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
+                    class="flex items-center justify-center min-w-[36px] min-h-[36px] shrink-0"
                     @click.stop="toggleLeftSelection(layer.id)"
-                  />
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="selectedLeftSet.has(layer.id)"
+                      :aria-label="`Pilih layer ${layer.name}`"
+                      class="size-4.5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      @click.stop
+                      @change="toggleLeftSelection(layer.id)"
+                    />
+                  </div>
 
                   <div class="min-w-0 flex-1">
                     <div class="flex items-center gap-1.5 min-w-0">
@@ -943,30 +1002,34 @@ defineExpose({
                         title="Perubahan belum disimpan"
                       />
                     </div>
-                    <p class="text-xs text-slate-600 dark:text-slate-400 truncate mt-0.5">
+                    <p class="text-[11px] text-slate-600 dark:text-slate-300 truncate mt-0.5">
                       {{ layer.opd_name || layer.attribution || getLayerSourceGroup(layer).name }} · {{ layer.protocol.toUpperCase() }}
                     </p>
                   </div>
                 </div>
 
-                <div class="flex items-center gap-1.5 shrink-0">
+                <div class="flex items-center gap-1.5 shrink-0" @click.stop>
                   <span
                     v-if="activeRankById.get(layer.id)"
-                    class="px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300"
+                    class="px-2 py-0.5 rounded-md text-[11px] font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300"
                   >
                     Aktif #{{ activeRankById.get(layer.id) }}
                   </span>
-                  <span
-                    v-else-if="layer.is_active"
-                    class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300"
+                  <button
+                    v-else-if="canEdit"
+                    type="button"
+                    :aria-label="`Tambahkan ${layer.name} ke /maps`"
+                    class="min-h-[38px] px-2.5 py-1 rounded-lg border border-blue-200 dark:border-blue-800/60 bg-blue-50/70 dark:bg-blue-950/30 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer inline-flex items-center gap-1"
+                    @click="addSingleLayerToMaps(layer.id)"
                   >
-                    Katalog
-                  </span>
+                    <UIcon name="i-lucide-plus" class="size-3.5" aria-hidden="true" />
+                    <span>Aktifkan</span>
+                  </button>
                   <span
                     v-else
-                    class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
                   >
-                    Nonaktif
+                    {{ layer.is_active ? 'Katalog' : 'Nonaktif' }}
                   </span>
                 </div>
               </div>
@@ -974,85 +1037,81 @@ defineExpose({
           </ul>
         </div>
 
-        <!-- CENTER TRANSFER ARROWS: Masukkan ke / Keluarkan dari Layer Aktif /maps -->
+        <!-- CENTER TRANSFER ARROWS (Desktop lg+) -->
         <div
-          class="flex lg:flex-col items-center justify-center gap-3 py-1 lg:px-1 shrink-0"
+          class="hidden lg:flex flex-col items-center justify-center gap-2.5 px-1 shrink-0"
           role="group"
           aria-label="Kontrol panah pemindah layer ke daftar aktif peta"
         >
-          <div class="flex lg:flex-col items-center gap-2">
-            <UTooltip :text="`Masukkan ${selectedLeftCandidatesForMaps.length} layer terpilih ke Layer Aktif (/maps)`">
-              <button
-                type="button"
-                :disabled="!canEdit || selectedLeftCandidatesForMaps.length === 0"
-                :aria-label="`Masukkan layer terpilih ke layer aktif peta (${selectedLeftCandidatesForMaps.length} dipilih)`"
-                class="min-h-[44px] min-w-[44px] px-3.5 lg:px-3 py-2.5 rounded-xl border font-semibold text-xs inline-flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                :class="canEdit && selectedLeftCandidatesForMaps.length > 0
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm'
-                  : 'bg-white dark:bg-[#0b0f19] border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300'"
-                @click="moveSelectedRight"
+          <UTooltip :text="`Masukkan ${selectedLeftCandidatesForMaps.length} layer terpilih ke Layer Aktif (/maps)`">
+            <button
+              type="button"
+              :disabled="!canEdit || selectedLeftCandidatesForMaps.length === 0"
+              :aria-label="`Masukkan layer terpilih ke layer aktif peta (${selectedLeftCandidatesForMaps.length} dipilih)`"
+              class="min-h-[44px] min-w-[44px] px-3 py-2.5 rounded-xl border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+              :class="canEdit && selectedLeftCandidatesForMaps.length > 0
+                ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-xs'
+                : 'bg-white dark:bg-[#0c1424] border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300'"
+              @click="moveSelectedRight"
+            >
+              <UIcon name="i-lucide-arrow-right" class="size-4.5 shrink-0" aria-hidden="true" />
+              <span
+                v-if="selectedLeftCandidatesForMaps.length > 0"
+                class="tabular-nums px-1.5 py-0.5 rounded text-[11px] font-bold bg-white/20 text-white"
               >
-                <span class="lg:hidden">Masuk Aktif</span>
-                <UIcon name="i-lucide-arrow-right" class="size-5 shrink-0" />
-                <span
-                  v-if="selectedLeftCandidatesForMaps.length > 0"
-                  class="tabular-nums px-1.5 py-0.5 rounded-md text-[11px] font-bold bg-white/20 text-white"
-                >
-                  {{ selectedLeftCandidatesForMaps.length }}
-                </span>
-              </button>
-            </UTooltip>
+                {{ selectedLeftCandidatesForMaps.length }}
+              </span>
+            </button>
+          </UTooltip>
 
-            <UTooltip :text="`Keluarkan ${selectedActiveIdsForRemoval.length} layer terpilih dari Layer Aktif (/maps)`">
-              <button
-                type="button"
-                :disabled="!canEdit || selectedActiveIdsForRemoval.length === 0"
-                :aria-label="`Keluarkan layer terpilih dari layer aktif peta (${selectedActiveIdsForRemoval.length} dipilih)`"
-                class="min-h-[44px] min-w-[44px] px-3.5 lg:px-3 py-2.5 rounded-xl border font-semibold text-xs inline-flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                :class="canEdit && selectedActiveIdsForRemoval.length > 0
-                  ? 'bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-sm'
-                  : 'bg-white dark:bg-[#0b0f19] border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300'"
-                @click="moveSelectedLeft"
+          <UTooltip :text="`Keluarkan ${selectedActiveIdsForRemoval.length} layer terpilih dari Layer Aktif (/maps)`">
+            <button
+              type="button"
+              :disabled="!canEdit || selectedActiveIdsForRemoval.length === 0"
+              :aria-label="`Keluarkan layer terpilih dari layer aktif peta (${selectedActiveIdsForRemoval.length} dipilih)`"
+              class="min-h-[44px] min-w-[44px] px-3 py-2.5 rounded-xl border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+              :class="canEdit && selectedActiveIdsForRemoval.length > 0
+                ? 'bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-xs'
+                : 'bg-white dark:bg-[#0c1424] border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300'"
+              @click="moveSelectedLeft"
+            >
+              <UIcon name="i-lucide-arrow-left" class="size-4.5 shrink-0" aria-hidden="true" />
+              <span
+                v-if="selectedActiveIdsForRemoval.length > 0"
+                class="tabular-nums px-1.5 py-0.5 rounded text-[11px] font-bold bg-white/20 text-white"
               >
-                <UIcon name="i-lucide-arrow-left" class="size-5 shrink-0" />
-                <span class="lg:hidden">Keluarkan</span>
-                <span
-                  v-if="selectedActiveIdsForRemoval.length > 0"
-                  class="tabular-nums px-1.5 py-0.5 rounded-md text-[11px] font-bold bg-white/20 text-white"
-                >
-                  {{ selectedActiveIdsForRemoval.length }}
-                </span>
-              </button>
-            </UTooltip>
-          </div>
-
-          <p class="hidden lg:block text-[11px] text-center font-medium text-slate-600 dark:text-slate-400 max-w-[92px] leading-tight">
-            Centang lalu klik panah
-          </p>
+                {{ selectedActiveIdsForRemoval.length }}
+              </span>
+            </button>
+          </UTooltip>
         </div>
 
-        <!-- RIGHT PANEL: Layer Aktif pada /maps (UI Selaras 1:1 dengan ActiveLayersView.vue di /maps) -->
-        <div class="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden flex flex-col">
-          <!-- /maps-aligned Header -->
-          <div class="p-4 border-b border-slate-200 dark:border-white/[0.08] space-y-3 bg-slate-50/70 dark:bg-[#070b14]/60">
+        <!-- RIGHT PANEL: Layer Aktif (/maps) -->
+        <div
+          class="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0c1424] overflow-hidden flex-col"
+          :class="mobilePane === 'active' ? 'flex' : 'hidden lg:flex'"
+        >
+          <div class="p-3.5 sm:p-4 border-b border-slate-200 dark:border-white/[0.08] space-y-2.5 bg-slate-50/70 dark:bg-[#070b14]/60">
             <div class="flex items-center justify-between gap-2 flex-wrap">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
                   Layer Aktif (/maps)
                 </span>
-                <span class="px-2 py-0.5 rounded-full text-xs font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
+                <span class="px-2 py-0.5 rounded-md text-xs font-bold tabular-nums bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
                   {{ activeStack.length }}
                 </span>
               </div>
 
-              <button
-                v-if="canEdit && filteredActiveStack.length > 0"
-                type="button"
-                class="min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
-                @click="toggleSelectAllFilteredActive"
-              >
-                {{ allFilteredActiveSelected ? 'Batal Pilih' : 'Pilih Semua' }}
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="canEdit && filteredActiveStack.length > 0"
+                  type="button"
+                  class="min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
+                  @click="toggleSelectAllFilteredActive"
+                >
+                  {{ allFilteredActiveSelected ? 'Batal Pilih' : 'Pilih Semua' }}
+                </button>
+              </div>
             </div>
 
             <UInput
@@ -1064,6 +1123,25 @@ defineExpose({
               class="w-full"
             />
 
+            <!-- Mobile Batch Remove Bar -->
+            <div
+              v-if="canEdit && selectedActiveIdsForRemoval.length > 0"
+              class="lg:hidden flex items-center justify-between gap-2 pt-0.5"
+            >
+              <span class="text-xs font-medium text-red-700 dark:text-red-300 tabular-nums">
+                {{ selectedActiveIdsForRemoval.length }} layer dipilih
+              </span>
+              <UButton
+                label="Keluarkan Terpilih"
+                icon="i-lucide-trash-2"
+                size="xs"
+                color="error"
+                variant="subtle"
+                class="min-h-[40px] cursor-pointer font-semibold"
+                @click="moveSelectedLeft"
+              />
+            </div>
+
             <div
               v-if="isStackFiltered"
               class="px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/40 text-xs text-blue-900 dark:text-blue-200 flex items-center justify-between gap-2"
@@ -1071,7 +1149,7 @@ defineExpose({
               <span>Kosongkan kolom saring untuk mengubah urutan layer.</span>
               <button
                 type="button"
-                class="font-semibold underline cursor-pointer shrink-0 min-h-[44px] px-2"
+                class="font-semibold underline cursor-pointer shrink-0 min-h-[36px] px-2"
                 @click="stackSearch = ''"
               >
                 Bersihkan
@@ -1082,19 +1160,28 @@ defineExpose({
           <!-- Empty State: No active layers in /maps -->
           <div
             v-if="activeStack.length === 0"
-            class="p-10 text-center space-y-3 flex-1 flex flex-col items-center justify-center"
+            class="p-8 sm:p-10 text-center space-y-3 flex-1 flex flex-col items-center justify-center"
           >
-            <div class="size-12 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 mx-auto flex items-center justify-center">
-              <UIcon name="i-lucide-layers-2" class="size-6" />
+            <div class="size-11 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 mx-auto flex items-center justify-center">
+              <UIcon name="i-lucide-layers-2" class="size-5" aria-hidden="true" />
             </div>
             <div class="space-y-1">
               <h4 class="text-sm font-bold text-slate-900 dark:text-white">
                 Belum Ada Layer Aktif di /maps
               </h4>
               <p class="text-xs text-slate-600 dark:text-slate-300 max-w-sm mx-auto leading-relaxed">
-                Pilih layer dari daftar Semua Layer di panel kiri lalu klik panah kanan untuk menambahkannya ke tampilan aktif /maps. Jika dibiarkan kosong, /maps akan memakai layer bawaan sistem.
+                Tambahkan layer dari daftar Semua Layer untuk menampilkannya otomatis pada peta publik.
               </p>
             </div>
+            <UButton
+              label="Pilih dari Semua Layer"
+              icon="i-lucide-plus"
+              size="sm"
+              color="primary"
+              variant="outline"
+              class="lg:hidden min-h-[44px] cursor-pointer"
+              @click="mobilePane = 'all'"
+            />
           </div>
 
           <!-- Search Empty State in Right Panel -->
@@ -1115,13 +1202,11 @@ defineExpose({
             />
           </div>
 
-          <!-- Active Layer Stack List (Visual & Structural Mirror of /maps ActiveLayersView.vue) -->
-          <div v-else class="p-3.5 sm:p-4 space-y-2.5 max-h-[460px] lg:max-h-[640px] overflow-y-auto flex-1">
-            <!-- Top Position Hint matching /maps stacking -->
-            <div class="flex items-center justify-between px-2.5 py-1 rounded-lg bg-blue-50/70 dark:bg-blue-950/25 text-xs text-blue-800 dark:text-blue-300 font-medium">
-              <span>Urutan teratas = tampil paling depan di peta (/maps)</span>
-              <span class="tabular-nums font-semibold">z-index tertinggi</span>
-            </div>
+          <!-- Active Layer Stack List -->
+          <div v-else class="p-3 sm:p-4 space-y-2.5 max-h-[520px] lg:max-h-[640px] overflow-y-auto flex-1">
+            <p class="text-[11px] font-medium text-slate-600 dark:text-slate-300 px-1">
+              Urutan #1 berada di lapisan paling depan. Klik baris untuk atur posisi &amp; opasitas.
+            </p>
 
             <TransitionGroup
               name="layer-card"
@@ -1133,10 +1218,10 @@ defineExpose({
                 :key="layer.id"
                 :data-stack-card-index="stackIndex"
                 :draggable="canEdit && !isTouchDevice && !isStackFiltered"
-                class="rounded-xl border border-slate-200/90 dark:border-white/10 bg-white dark:bg-[#0c1424] shadow-xs transition-all duration-200 overflow-hidden select-none"
+                class="rounded-xl border border-slate-200/90 dark:border-white/10 bg-white dark:bg-[#0c1424] transition-colors overflow-hidden select-none"
                 :class="[
                   draggedLayerIndex === stackIndex ? 'opacity-40 border-dashed border-blue-500 ring-2 ring-blue-500/30' : '',
-                  recentlyMovedLayerId === layer.id ? 'ring-2 ring-blue-500/70 border-blue-500 bg-blue-50/40 dark:bg-blue-950/30 shadow-md shadow-blue-500/10' : '',
+                  recentlyMovedLayerId === layer.id ? 'ring-2 ring-blue-500/70 border-blue-500 bg-blue-50/40 dark:bg-blue-950/30' : '',
                   selectedRightSet.has(layer.id) ? 'ring-2 ring-blue-600/40 border-blue-500' : '',
                 ]"
                 @dragstart="onDragStart(stackIndex, $event)"
@@ -1144,33 +1229,32 @@ defineExpose({
                 @drop="onDrop(stackIndex)"
                 @dragend="draggedLayerIndex = null"
               >
-                <!-- Main Compact Row (/maps ActiveLayersView.vue visual parity) -->
+                <!-- Compact Stack Row -->
                 <div
                   class="flex items-center justify-between px-2.5 py-2 gap-1.5 hover:bg-slate-50/80 dark:hover:bg-white/[0.03] transition-colors cursor-pointer"
                   @click="toggleCardExpand(layer.id)"
                 >
                   <div class="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
-                    <!-- Select checkbox for left transfer arrow (44x44px hit target) -->
                     <div
                       v-if="canEdit"
-                      class="shrink-0 flex items-center justify-center min-w-[44px] min-h-[44px] -ml-1.5 cursor-pointer"
+                      class="hidden sm:flex items-center justify-center min-w-[36px] min-h-[36px] shrink-0 cursor-pointer"
                       @click.stop="toggleRightSelection(layer.id)"
                     >
                       <input
                         type="checkbox"
                         :checked="selectedRightSet.has(layer.id)"
                         :aria-label="`Pilih layer aktif ${layer.name} untuk dikeluarkan`"
-                        class="size-5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        class="size-4.5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
                         @click.stop
                         @change="toggleRightSelection(layer.id)"
                       />
                     </div>
 
-                    <!-- Grip Drag Handle (Desktop HTML5 + Mobile Touch-Drag) -->
+                    <!-- Grip Handle -->
                     <div
                       v-if="canEdit && !isStackFiltered"
-                      class="flex items-center shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1 select-none touch-none cursor-grab active:cursor-grabbing"
-                      title="Seret atau gunakan panah atas/bawah untuk menggeser urutan"
+                      class="hidden sm:flex items-center shrink-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 p-1 select-none touch-none cursor-grab active:cursor-grabbing"
+                      title="Seret untuk menggeser urutan"
                       @touchstart.passive="false"
                       @touchstart="onGripTouchStart(stackIndex, $event)"
                       @touchmove.passive="false"
@@ -1179,38 +1263,10 @@ defineExpose({
                       @touchcancel="onGripTouchEnd($event)"
                       @click.stop
                     >
-                      <UIcon name="i-lucide-grip-vertical" class="size-4 text-slate-400 dark:text-slate-500" />
+                      <UIcon name="i-lucide-grip-vertical" class="size-4" aria-hidden="true" />
                     </div>
 
-                    <!-- 1-Tap Vertical Chevron Reorder Buttons (matches /maps lines 277-298) -->
-                    <div
-                      v-if="canEdit"
-                      class="flex flex-col items-center justify-center shrink-0 -my-1"
-                      @click.stop
-                    >
-                      <button
-                        type="button"
-                        class="relative after:absolute after:-inset-1.5 after:content-[''] size-6 rounded flex items-center justify-center transition-colors text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none cursor-pointer"
-                        :disabled="stackIndex === 0 || isStackFiltered"
-                        :aria-label="`Naikkan urutan layer ${layer.name}`"
-                        title="Naikkan urutan layer"
-                        @click.stop="moveStackItem(stackIndex, stackIndex - 1)"
-                      >
-                        <UIcon name="i-lucide-chevron-up" class="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        class="relative after:absolute after:-inset-1.5 after:content-[''] size-6 rounded flex items-center justify-center transition-colors text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none cursor-pointer"
-                        :disabled="stackIndex === activeStack.length - 1 || isStackFiltered"
-                        :aria-label="`Turunkan urutan layer ${layer.name}`"
-                        title="Turunkan urutan layer"
-                        @click.stop="moveStackItem(stackIndex, stackIndex + 1)"
-                      >
-                        <UIcon name="i-lucide-chevron-down" class="size-3.5" />
-                      </button>
-                    </div>
-
-                    <!-- Order Rank + Two-Line Layer Identity (aligned with /maps ActiveLayersView.vue) -->
+                    <!-- Order Rank + Identity -->
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center gap-1.5 min-w-0">
                         <span
@@ -1221,7 +1277,7 @@ defineExpose({
                         >
                           #{{ stackIndex + 1 }}
                         </span>
-                        <span class="block text-xs sm:text-sm font-semibold truncate tracking-tight text-slate-900 dark:text-slate-100">
+                        <span class="block text-xs sm:text-sm font-semibold truncate text-slate-900 dark:text-slate-100">
                           {{ layer.name }}
                         </span>
                         <span
@@ -1230,42 +1286,57 @@ defineExpose({
                           title="Memiliki perubahan belum disimpan"
                         />
                       </div>
-                      <span class="block text-xs text-slate-600 dark:text-slate-400 truncate mt-0.5">
-                        {{ layer.opd_name || layer.attribution || getLayerSourceGroup(layer).name }} · {{ layer.protocol.toUpperCase() }}
+                      <span class="block text-[11px] text-slate-600 dark:text-slate-300 truncate mt-0.5 tabular-nums">
+                        {{ layer.opd_name || layer.attribution || getLayerSourceGroup(layer).name }} · {{ layer.protocol.toUpperCase() }} · {{ Math.round((layer.opacity ?? 1) * 100) }}%
                       </span>
                     </div>
                   </div>
 
-                  <!-- Right Actions (Active /maps Eye Indicator + Expand Chevron) -->
+                  <!-- Reorder & Expand Controls (min 44px touch targets) -->
                   <div class="flex items-center gap-0.5 shrink-0" @click.stop>
-                    <span
-                      class="size-8 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400"
-                      title="Aktif dan tampil di /maps"
-                      aria-hidden="true"
+                    <button
+                      v-if="canEdit"
+                      type="button"
+                      class="size-10 sm:size-8 rounded-lg flex items-center justify-center transition-colors text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none cursor-pointer"
+                      :disabled="stackIndex === 0 || isStackFiltered"
+                      :aria-label="`Naikkan urutan layer ${layer.name}`"
+                      title="Naikkan urutan"
+                      @click.stop="moveStackItem(stackIndex, stackIndex - 1)"
                     >
-                      <UIcon name="i-lucide-eye" class="size-4" />
-                    </span>
-
+                      <UIcon name="i-lucide-chevron-up" class="size-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      v-if="canEdit"
+                      type="button"
+                      class="size-10 sm:size-8 rounded-lg flex items-center justify-center transition-colors text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none cursor-pointer"
+                      :disabled="stackIndex === activeStack.length - 1 || isStackFiltered"
+                      :aria-label="`Turunkan urutan layer ${layer.name}`"
+                      title="Turunkan urutan"
+                      @click.stop="moveStackItem(stackIndex, stackIndex + 1)"
+                    >
+                      <UIcon name="i-lucide-chevron-down" class="size-4" aria-hidden="true" />
+                    </button>
                     <button
                       type="button"
-                      class="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                      class="size-10 sm:size-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
                       :aria-label="`Pengaturan detail layer ${layer.name}`"
                       :aria-expanded="expandedLayerSet.has(layer.id)"
                       @click="toggleCardExpand(layer.id)"
                     >
                       <UIcon
-                        name="i-lucide-chevron-right"
-                        class="size-4 transition-transform duration-200"
-                        :class="expandedLayerSet.has(layer.id) ? 'rotate-90 text-blue-600 dark:text-blue-400' : ''"
+                        name="i-lucide-sliders-horizontal"
+                        class="size-3.5 transition-colors"
+                        :class="expandedLayerSet.has(layer.id) ? 'text-blue-600 dark:text-blue-400' : ''"
+                        aria-hidden="true"
                       />
                     </button>
                   </div>
                 </div>
 
-                <!-- Expanded Controls Drawer (Opacity, Direct Rank Jump, Technical Identity, Remove) -->
+                <!-- Expanded Controls Drawer -->
                 <div
                   v-if="expandedLayerSet.has(layer.id)"
-                  class="px-3 py-3 border-t border-slate-100 dark:border-white/[0.06] bg-slate-50/70 dark:bg-white/[0.02] space-y-3"
+                  class="px-3.5 py-3 border-t border-slate-100 dark:border-white/[0.06] bg-slate-50/70 dark:bg-white/[0.02] space-y-3"
                 >
                   <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div class="flex items-center gap-1.5 flex-wrap">
@@ -1286,17 +1357,16 @@ defineExpose({
                       </span>
                     </div>
 
-                    <span v-if="layer.layer_name" class="text-xs text-slate-600 dark:text-slate-400 truncate max-w-xs">
+                    <span v-if="layer.layer_name" class="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate max-w-xs">
                       {{ layer.layer_name }}
                     </span>
                   </div>
 
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-                    <!-- Direct Position Selector -->
                     <div v-if="canEdit" class="flex items-center gap-2">
                       <label
                         :for="`rank-select-${layer.id}`"
-                        class="text-xs font-medium text-slate-700 dark:text-slate-300 shrink-0"
+                        class="text-xs font-medium text-slate-700 dark:text-slate-200 shrink-0"
                       >
                         Pindah Urutan:
                       </label>
@@ -1304,7 +1374,7 @@ defineExpose({
                         :id="`rank-select-${layer.id}`"
                         :value="stackIndex + 1"
                         :disabled="isStackFiltered || activeStack.length <= 1"
-                        class="min-h-[44px] flex-1 px-2.5 rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-slate-900 text-xs font-semibold tabular-nums text-slate-800 dark:text-slate-100 disabled:opacity-45 cursor-pointer"
+                        class="min-h-[44px] sm:min-h-[38px] flex-1 px-2.5 rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-slate-900 text-xs font-semibold tabular-nums text-slate-800 dark:text-slate-100 disabled:opacity-45 cursor-pointer"
                         @change="handleRankSelectChange(stackIndex, $event)"
                       >
                         <option
@@ -1317,11 +1387,10 @@ defineExpose({
                       </select>
                     </div>
 
-                    <!-- Opacity Slider -->
                     <div class="flex items-center gap-2.5">
                       <label
                         :for="`opacity-range-${layer.id}`"
-                        class="text-xs font-medium text-slate-700 dark:text-slate-300 shrink-0"
+                        class="text-xs font-medium text-slate-700 dark:text-slate-200 shrink-0"
                       >
                         Opasitas
                       </label>
@@ -1342,10 +1411,14 @@ defineExpose({
                     </div>
                   </div>
 
-                  <div class="flex items-center justify-between gap-2 pt-1">
-                    <span class="text-xs text-slate-600 dark:text-slate-300">
-                      Status di /maps: <strong class="text-slate-900 dark:text-white">Aktif & Tampil Langsung</strong>
-                    </span>
+                  <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <NuxtLink
+                      :to="`/admin/layers/${layer.id}?tab=style`"
+                      class="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline min-h-[36px] inline-flex items-center gap-1"
+                    >
+                      <UIcon name="i-lucide-palette" class="size-3.5" aria-hidden="true" />
+                      <span>Atur Style Layer</span>
+                    </NuxtLink>
 
                     <UButton
                       v-if="canEdit"
@@ -1354,19 +1427,13 @@ defineExpose({
                       size="xs"
                       color="error"
                       variant="subtle"
-                      class="min-h-[44px] cursor-pointer"
+                      class="min-h-[40px] cursor-pointer"
                       @click="removeSingleLayerFromMaps(layer.id)"
                     />
                   </div>
                 </div>
               </div>
             </TransitionGroup>
-
-            <!-- Bottom Base Layer Cue -->
-            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-white/[0.04] text-xs text-slate-700 dark:text-slate-300 font-medium">
-              <span>Lapisan bawah = digambar pertama tepat di atas Basemap Peta</span>
-              <span class="tabular-nums">Dasar</span>
-            </div>
           </div>
         </div>
       </div>
@@ -1374,10 +1441,10 @@ defineExpose({
       <!-- Sticky Bottom Save Reminder Bar -->
       <div
         v-if="canEdit && hasUnsavedChanges"
-        class="sticky bottom-3 z-20 rounded-xl border border-blue-300 dark:border-blue-700/60 bg-white/95 dark:bg-[#0c1424]/95 backdrop-blur-xs shadow-lg p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        class="sticky bottom-3 z-20 rounded-xl border border-blue-300 dark:border-blue-700/60 bg-white dark:bg-[#0c1424] shadow-lg p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
       >
         <div class="flex items-center gap-2.5 text-xs text-slate-800 dark:text-slate-100">
-          <UIcon name="i-lucide-layers-2" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" />
+          <UIcon name="i-lucide-layers-2" class="size-4 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
           <span>
             <strong class="tabular-nums">{{ changedPayloadItems.length }}</strong> perubahan konfigurasi layer aktif belum disimpan ke halaman /maps.
           </span>
@@ -1388,7 +1455,7 @@ defineExpose({
             color="neutral"
             variant="outline"
             :disabled="saving"
-            class="min-h-[44px] cursor-pointer"
+            class="min-h-[44px] sm:min-h-[38px] cursor-pointer"
             @click="resetDraft"
           />
           <UButton
@@ -1396,7 +1463,7 @@ defineExpose({
             icon="i-heroicons-check"
             color="primary"
             :loading="saving"
-            class="min-h-[44px] cursor-pointer font-semibold"
+            class="min-h-[44px] sm:min-h-[38px] cursor-pointer font-semibold"
             @click="saveConfiguration"
           />
         </div>
@@ -1407,17 +1474,25 @@ defineExpose({
 
 <style scoped>
 .layer-card-move {
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .layer-card-enter-active,
 .layer-card-leave-active {
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .layer-card-enter-from,
 .layer-card-leave-to {
   opacity: 0;
-  transform: translateY(8px) scale(0.98);
+  transform: translateY(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer-card-move,
+  .layer-card-enter-active,
+  .layer-card-leave-active {
+    transition: none;
+  }
 }
 </style>

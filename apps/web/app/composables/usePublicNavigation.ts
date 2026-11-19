@@ -32,6 +32,30 @@ const publicNavTreeState = ref<PublicNavItem[]>([
     exact: true,
     description: 'Pusat dashboard analitik dan statistik data geospasial Kabupaten Bojonegoro',
   },
+  {
+    label: 'Sumber Data',
+    to: '/sumber-data',
+    exact: true,
+    description: 'Informasi sumber data Simpul Jaringan Geoportal, Martin Tile Server, dan basemap',
+  },
+  {
+    label: 'Publikasi',
+    description: 'Terbitan Peta Digital Desa dan panduan penggunaan portal WebGIS MELAROSA.',
+    children: [
+      {
+        label: 'Peta Digital',
+        to: '/peta-digital',
+        exact: false,
+        icon: 'i-lucide-file-down',
+      },
+      {
+        label: 'Panduan',
+        to: '/panduan',
+        exact: true,
+        icon: 'i-lucide-book-open',
+      },
+    ],
+  },
 ]);
 
 export function usePublicNavigation() {

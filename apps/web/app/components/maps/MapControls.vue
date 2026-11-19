@@ -7,6 +7,7 @@ interface Props {
   heading?: number | null; // derajat 0-360
   accuracy?: number | null; // meter
   rotation?: number; // derajat rotasi map canvas
+  align?: "left" | "right";
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -17,6 +18,7 @@ const props = withDefaults(defineProps<Props>(), {
   heading: null,
   accuracy: null,
   rotation: 0,
+  align: "left",
 });
 
 const emit = defineEmits<{
@@ -70,7 +72,8 @@ const locationTooltip = computed(() => {
 
 <template>
   <div
-    class="flex flex-col items-end gap-1.5 pointer-events-none select-none"
+    class="flex flex-col gap-1.5 pointer-events-none select-none"
+    :class="align === 'left' ? 'items-start' : 'items-end'"
     role="toolbar"
     aria-label="Kontrol Navigasi Peta"
   >
@@ -129,12 +132,16 @@ const locationTooltip = computed(() => {
         : 'border-gray-200/90 dark:border-gray-800'"
     >
       <UTooltip :text="locationTooltip">
-        <div class="flex items-center">
+        <div
+          class="flex items-center"
+          :class="align === 'left' ? 'flex-row-reverse' : ''"
+        >
           <Transition name="speed-expand">
             <button
               v-if="hasLocation && speed !== null"
               type="button"
-              class="flex items-center pl-3 pr-2 h-[44px] whitespace-nowrap overflow-hidden select-none cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+              class="flex items-center h-[44px] whitespace-nowrap overflow-hidden select-none cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+              :class="align === 'left' ? 'pl-2 pr-3 flex-row-reverse' : 'pl-3 pr-2'"
               aria-label="Status Kecepatan GPS"
               @click="emit('locate')"
             >
@@ -146,7 +153,11 @@ const locationTooltip = computed(() => {
                   km/j
                 </span>
               </div>
-              <div class="w-px h-5 bg-blue-200/80 dark:bg-blue-900/60 ml-2.5 mr-0.5" aria-hidden="true" />
+              <div
+                class="w-px h-5 bg-blue-200/80 dark:bg-blue-900/60"
+                :class="align === 'left' ? 'mr-2.5 ml-0.5' : 'ml-2.5 mr-0.5'"
+                aria-hidden="true"
+              />
             </button>
           </Transition>
 

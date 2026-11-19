@@ -18,7 +18,10 @@ import { $http } from "~/utils/helpers";
 
 export interface IdentifiedFeature {
   id?: string;
+  rawFeatureId?: string | null;
   layerId: string;
+  layerName?: string | null;
+  selectionKey?: string | null;
   layerTitle: string;
   layerAttribution?: string | null;
   layerInstansi?: string | null;

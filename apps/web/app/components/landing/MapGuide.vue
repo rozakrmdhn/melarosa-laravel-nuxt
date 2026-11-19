@@ -225,7 +225,7 @@ const steps: GuideStep[] = [
 
               <NuxtLink
                 to="/maps"
-                class="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-all min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                class="inline-flex items-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-5 py-2.5 text-sm font-semibold text-white shadow-xs transition-all min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E]"
               >
                 <span>Buka Peta Interaktif Sekarang</span>
                 <UIcon name="i-lucide-arrow-right" class="size-4" />

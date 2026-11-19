@@ -8,6 +8,7 @@ import {
   getLayerSourceGroup,
   getHostName,
 } from "~/utils/layer-meta";
+import { hasWmsCustomStyle } from "~/utils/wms-sld";
 
 definePageMeta({
   middleware: ["auth", "permission"],
@@ -183,6 +184,25 @@ const loading = computed(() => status.value === "pending");
 watch([search, protocolFilter, sourceTypeFilter, statusFilter, defaultVisibleFilter], () => {
   page.value = 1;
 });
+
+const hasActiveCatalogFilters = computed(() =>
+  Boolean(
+    search.value.trim() ||
+      protocolFilter.value !== "ALL" ||
+      activeSourceTab.value !== "ALL" ||
+      statusFilter.value !== "ALL" ||
+      defaultVisibleFilter.value !== "ALL"
+  )
+);
+
+function resetCatalogFilters() {
+  search.value = "";
+  protocolFilter.value = "ALL";
+  activeSourceTab.value = "ALL";
+  sourceTypeFilter.value = "ALL";
+  statusFilter.value = "ALL";
+  defaultVisibleFilter.value = "ALL";
+}
 
 // Dropdown options
 const protocolOptions = [
@@ -790,6 +810,16 @@ const {
   checkConnection: refreshMartinStatus,
 } = useMartinStatus();
 
+const isServiceStatusModalOpen = ref(false);
+
+const overallServiceIndicatorClass = computed(() => {
+  const geo = geoportalStatus.value?.status;
+  const mar = martinStatus.value?.status;
+  if (geo === "online" && mar === "online") return "bg-emerald-500";
+  if (geo === "offline" || mar === "offline") return "bg-red-500";
+  return "bg-amber-500";
+});
+
 function formatLastSync(iso?: string | null): string {
   if (!iso) return "Belum pernah disinkronkan";
   const date = new Date(iso);
@@ -961,471 +991,94 @@ async function handleSyncMartin() {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Header Section -->
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-      <div>
-        <div class="flex items-center gap-2">
-          <UIcon name="i-lucide-layers" class="size-6 text-blue-600 dark:text-blue-400" />
-          <h1 class="text-xl font-bold text-gray-900 dark:text-white">
+  <div class="space-y-5">
+    <!-- Header Section: Bersih & Proporsional -->
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="space-y-1">
+        <div class="flex items-center gap-2.5">
+          <UIcon name="i-lucide-layers" class="size-5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+          <h1 class="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
             Manajemen Layer Peta
           </h1>
         </div>
-        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          Katalog data spasial WMS, WFS, XYZ, dan Vector Tiles.
+        <p class="text-xs text-gray-600 dark:text-gray-300">
+          Kelola katalog layer Geoportal WMS, Martin MVT, custom style SLD, dan urutan tumpukan peta.
         </p>
       </div>
 
-      <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex flex-wrap items-center gap-2">
         <UButton
-          :label="workspaceMode === 'stack' ? 'Katalog Semua Layer' : 'Atur Layer Aktif & Urutan'"
-          :icon="workspaceMode === 'stack' ? 'i-lucide-table-properties' : 'i-lucide-list-ordered'"
-          :color="workspaceMode === 'stack' ? 'neutral' : 'primary'"
-          :variant="workspaceMode === 'stack' ? 'outline' : 'subtle'"
-          class="min-h-[44px] cursor-pointer font-semibold"
-          @click="switchWorkspaceMode(workspaceMode === 'stack' ? 'catalog' : 'stack')"
-        />
-        <UButton
-          v-if="canSyncGeoportal"
-          label="Sync Geoportal"
-          icon="i-lucide-globe-2"
-          color="info"
-          variant="subtle"
-          :loading="syncingGeoportal"
-          class="min-h-[44px] cursor-pointer"
-          @click="openSyncModal"
-        />
-        <UButton
-          v-if="canSyncGeoportal"
-          label="Sync Martin"
-          icon="i-lucide-server"
-          color="primary"
-          variant="subtle"
-          :loading="syncingMartin"
-          class="min-h-[44px] cursor-pointer"
-          @click="openMartinSyncModal"
-        />
+          color="neutral"
+          variant="outline"
+          size="sm"
+          aria-label="Info Status Layanan Geoportal dan Martin"
+          class="min-h-[44px] sm:min-h-[38px] px-3 whitespace-nowrap cursor-pointer"
+          @click="isServiceStatusModalOpen = true"
+        >
+          <template #leading>
+            <span class="size-2 rounded-full shrink-0" :class="overallServiceIndicatorClass" />
+          </template>
+          <span>Info Layanan</span>
+        </UButton>
         <UButton
           v-if="canSyncGeoportal"
           label="Riwayat Sync"
           icon="i-lucide-history"
           color="neutral"
           variant="outline"
-          class="min-h-[44px] cursor-pointer hidden sm:inline-flex"
+          size="sm"
+          class="min-h-[44px] sm:min-h-[38px] px-3 whitespace-nowrap cursor-pointer"
           @click="openSyncHistoryModal('all')"
         />
         <UButton
-          v-if="canCreate"
-          label="Layer"
-          icon="i-heroicons-plus"
-          color="primary"
-          class="min-h-[44px] cursor-pointer"
-          @click="openCreateModal"
-        />
-        <UButton
           icon="i-heroicons-arrow-path"
+          label="Refresh"
+          aria-label="Muat ulang data layer"
           color="neutral"
           variant="outline"
-          aria-label="Muat ulang daftar layer"
+          size="sm"
           :loading="loading"
-          class="min-h-[44px] min-w-[44px] cursor-pointer"
+          class="min-h-[44px] sm:min-h-[38px] px-3 whitespace-nowrap cursor-pointer"
           @click="handleRefreshPage"
         />
+        <UButton
+          v-if="canCreate"
+          label="Tambah"
+          aria-label="Tambah layer baru"
+          icon="i-heroicons-plus"
+          color="primary"
+          size="sm"
+          class="min-h-[44px] sm:min-h-[38px] px-3.5 whitespace-nowrap cursor-pointer font-semibold"
+          @click="openCreateModal"
+        />
       </div>
-    </div>
+    </header>
 
-    <!-- Status Layanan Simpul Geoportal & Martin Tile Server -->
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-      <!-- Kartu 1: Simpul Jaringan Geoportal Bojonegoro -->
+    <!-- Workspace Tab Menu: Semua Katalog vs Konfigurasi Layer Aktif -->
+    <div class="border-b border-gray-200 dark:border-white/[0.08] flex flex-col sm:flex-row sm:items-end justify-between gap-2">
       <div
-        class="p-4 sm:p-4.5 rounded-xl border transition-all shadow-2xs flex flex-col justify-between"
-        :class="[
-          geoportalStatus?.status === 'online'
-            ? 'border-emerald-500/25 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/20'
-            : geoportalStatus?.status === 'fallback'
-            ? 'border-amber-500/30 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20'
-            : 'border-red-500/30 dark:border-red-500/20 bg-red-50/50 dark:bg-red-950/20'
-        ]"
+        class="flex items-center gap-5 sm:gap-6 overflow-x-auto -mb-px"
+        role="tablist"
+        aria-label="Mode Pengelolaan Layer"
       >
-        <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3.5">
-          <!-- Kolom Kiri: Ikon, Judul, Status & Metadata Singkat -->
-          <div class="flex items-start gap-3 min-w-0">
-            <div
-              class="size-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
-              :class="[
-                geoportalStatus?.status === 'online'
-                  ? 'bg-emerald-600 text-white'
-                  : geoportalStatus?.status === 'fallback'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-red-600 text-white'
-              ]"
-            >
-              <UIcon name="i-lucide-globe-2" class="size-5" />
-            </div>
-
-            <div class="min-w-0 space-y-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <h2 class="text-sm font-bold text-gray-900 dark:text-white">
-                  Simpul Geoportal Bojonegoro (JIGN)
-                </h2>
-
-                <!-- Status Dot & Badge -->
-                <span
-                  class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
-                  :class="[
-                    geoportalStatus?.status === 'online'
-                      ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
-                      : geoportalStatus?.status === 'fallback'
-                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
-                      : 'bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300'
-                  ]"
-                >
-                  <span class="relative flex size-2">
-                    <span
-                      v-if="geoportalStatus?.status === 'online'"
-                      class="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
-                    />
-                    <span
-                      class="relative inline-flex rounded-full size-2"
-                      :class="[
-                        geoportalStatus?.status === 'online'
-                          ? 'bg-emerald-500'
-                          : geoportalStatus?.status === 'fallback'
-                          ? 'bg-amber-500'
-                          : 'bg-red-500'
-                      ]"
-                    />
-                  </span>
-                  <span>
-                    {{
-                      checkingGeoportalStatus
-                        ? 'Memeriksa status...'
-                        : geoportalStatus?.status === 'online'
-                        ? 'Terhubung'
-                        : geoportalStatus?.status === 'fallback'
-                        ? 'Data Cadangan Aktif'
-                        : 'Koneksi Terputus'
-                    }}
-                  </span>
-                </span>
-
-                <span
-                  v-if="geoportalStatus?.response_time_ms && geoportalStatus.status === 'online'"
-                  class="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40"
-                >
-                  {{ geoportalStatus.response_time_ms }} ms
-                </span>
-
-                <span
-                  class="text-[11px] font-medium text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-200/60 dark:border-blue-900/40"
-                >
-                  {{ geoportalStatus?.remote_matched ?? geoportalStatus?.total_local_layers ?? 0 }} Layer Live
-                </span>
-              </div>
-
-              <!-- Metadata Singkat: Waktu Sinkron & Tautan CSW -->
-              <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 flex-wrap">
-                <span>Sinkron: <strong class="font-semibold text-gray-800 dark:text-gray-200">{{ formatLastSync(geoportalStatus?.last_synced_at) }}</strong> ({{ timeAgo(geoportalStatus?.last_synced_at) }})</span>
-                <span class="text-gray-400 dark:text-gray-600">|</span>
-                <a
-                  :href="geoportalStatus?.csw_url || 'https://geoportal.bojonegorokab.go.id/csw/'"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  <span>pyCSW 2.6.0</span>
-                  <UIcon name="i-lucide-external-link" class="size-3" />
-                </a>
-              </div>
-            </div>
-          </div>
-
-          <!-- Kolom Kanan: Aksi Cepat Ringkas -->
-          <div class="flex items-center gap-2 shrink-0 self-end sm:self-start flex-wrap">
-            <UButton
-              label="Cek Status"
-              icon="i-heroicons-arrow-path"
-              color="neutral"
-              variant="outline"
-              size="xs"
-              :loading="checkingGeoportalStatus"
-              class="cursor-pointer text-xs"
-              @click="refreshGeoportalStatus(true)"
-            />
-            <UButton
-              v-if="canSyncGeoportal"
-              label="Sinkronkan"
-              icon="i-lucide-refresh-cw"
-              color="primary"
-              size="xs"
-              :loading="syncingGeoportal"
-              class="cursor-pointer text-xs font-semibold"
-              @click="openSyncModal"
-            />
-          </div>
-        </div>
-
-        <div
-          v-if="geoportalStatus?.status === 'fallback'"
-          class="mt-3 pt-3 border-t border-amber-200/60 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2"
-        >
-          <UIcon name="i-lucide-alert-triangle" class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <span>Layanan server Geoportal sedang lambat. Melarosa menyajikan {{ geoportalStatus?.total_local_layers ?? 0 }} layer dari data cadangan lokal.</span>
-        </div>
-      </div>
-
-      <!-- Kartu 2: Martin Vector Tile Server -->
-      <div
-        class="p-4 sm:p-4.5 rounded-xl border transition-all shadow-2xs flex flex-col justify-between"
-        :class="[
-          martinStatus?.status === 'online'
-            ? 'border-blue-500/25 dark:border-blue-500/20 bg-blue-50/40 dark:bg-blue-950/20'
-            : martinStatus?.status === 'fallback'
-            ? 'border-amber-500/30 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20'
-            : 'border-red-500/30 dark:border-red-500/20 bg-red-50/50 dark:bg-red-950/20'
-        ]"
-      >
-        <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3.5">
-          <div class="flex items-start gap-3 min-w-0">
-            <div
-              class="size-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
-              :class="[
-                martinStatus?.status === 'online'
-                  ? 'bg-blue-600 text-white'
-                  : martinStatus?.status === 'fallback'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-red-600 text-white'
-              ]"
-            >
-              <UIcon name="i-lucide-server" class="size-5" />
-            </div>
-
-            <div class="min-w-0 space-y-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <h2 class="text-sm font-bold text-gray-900 dark:text-white">
-                  Martin Tile Server (Vector Tiles MVT)
-                </h2>
-
-                <span
-                  class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
-                  :class="[
-                    martinStatus?.status === 'online'
-                      ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300'
-                      : martinStatus?.status === 'fallback'
-                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
-                      : 'bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300'
-                  ]"
-                >
-                  <span class="relative flex size-2">
-                    <span
-                      v-if="martinStatus?.status === 'online'"
-                      class="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"
-                    />
-                    <span
-                      class="relative inline-flex rounded-full size-2"
-                      :class="[
-                        martinStatus?.status === 'online'
-                          ? 'bg-blue-500'
-                          : martinStatus?.status === 'fallback'
-                          ? 'bg-amber-500'
-                          : 'bg-red-500'
-                      ]"
-                    />
-                  </span>
-                  <span>
-                    {{
-                      checkingMartinStatus
-                        ? 'Memeriksa status...'
-                        : martinStatus?.status === 'online'
-                        ? 'Terhubung'
-                        : martinStatus?.status === 'fallback'
-                        ? 'Tersimpan Lokal'
-                        : 'Server Offline'
-                    }}
-                  </span>
-                </span>
-
-                <span
-                  v-if="martinStatus?.response_time_ms !== null && martinStatus?.response_time_ms !== undefined && martinStatus?.status === 'online'"
-                  class="text-[10px] font-mono text-blue-700 dark:text-blue-300 font-semibold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/40"
-                >
-                  {{ martinStatus.response_time_ms }} ms
-                </span>
-
-                <span
-                  class="text-[11px] font-medium text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/60 dark:border-indigo-900/40"
-                >
-                  {{ martinStatus?.remote_sources ?? martinStatus?.total_local_layers ?? 0 }} Sumber MVT
-                </span>
-              </div>
-
-              <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 flex-wrap">
-                <span>Sinkron: <strong class="font-semibold text-gray-800 dark:text-gray-200">{{ formatLastSync(martinStatus?.last_synced_at) }}</strong> ({{ timeAgo(martinStatus?.last_synced_at) }})</span>
-                <span class="text-gray-400 dark:text-gray-600">|</span>
-                <code class="font-mono text-[11px] text-gray-700 dark:text-gray-300 bg-white/80 dark:bg-white/[0.06] px-1.5 py-0.5 rounded border border-gray-200/80 dark:border-white/[0.08]">
-                  {{ martinStatus?.martin_url || 'http://localhost:9090' }}/catalog
-                </code>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2 shrink-0 self-end sm:self-start flex-wrap">
-            <UButton
-              label="Cek Status"
-              icon="i-heroicons-arrow-path"
-              color="neutral"
-              variant="outline"
-              size="xs"
-              :loading="checkingMartinStatus"
-              class="cursor-pointer text-xs"
-              @click="refreshMartinStatus(true)"
-            />
-            <UButton
-              v-if="canSyncGeoportal"
-              label="Sinkronkan"
-              icon="i-lucide-database-zap"
-              color="primary"
-              size="xs"
-              :loading="syncingMartin"
-              class="cursor-pointer text-xs font-semibold"
-              @click="openMartinSyncModal"
-            />
-          </div>
-        </div>
-
-        <div
-          v-if="martinStatus?.status === 'fallback'"
-          class="mt-3 pt-3 border-t border-amber-200/60 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2"
-        >
-          <UIcon name="i-lucide-alert-triangle" class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <span>Martin Tile Server tidak merespons. Sistem menyimpan {{ martinStatus?.total_local_layers ?? 0 }} layer internal di basis data.</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Summary KPI Cards: Grouped by Source Data & Total -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- Total -->
-      <button
-        type="button"
-        class="p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between"
-        :class="activeSourceTab === 'ALL'
-          ? 'border-blue-500 bg-blue-50/30 dark:bg-blue-950/20 ring-2 ring-blue-500/25'
-          : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] hover:border-gray-300 dark:hover:border-white/[0.15]'"
-        @click="handleSourceTabChange('ALL')"
-      >
-        <div class="flex items-center justify-between">
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Total Katalog Layer</p>
-          <div class="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
-            <UIcon name="i-lucide-layers" class="size-4" />
-          </div>
-        </div>
-        <div class="mt-2">
-          <p class="text-2xl font-bold text-gray-900 dark:text-white">
-            {{ data?.summary?.total ?? 0 }}
-          </p>
-          <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-            {{ data?.summary?.active ?? 0 }} aktif di sistem
-          </p>
-        </div>
-      </button>
-
-      <!-- Geoportal Bojonegoro (WMS) -->
-      <button
-        type="button"
-        class="p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between"
-        :class="activeSourceTab === 'geoportal'
-          ? 'border-emerald-500 bg-emerald-50/30 dark:bg-emerald-950/20 ring-2 ring-emerald-500/25'
-          : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] hover:border-emerald-300 dark:hover:border-emerald-800/60'"
-        @click="handleSourceTabChange('geoportal')"
-      >
-        <div class="flex items-center justify-between">
-          <p class="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Geoportal Bojonegoro</p>
-          <div class="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
-            <UIcon name="i-lucide-globe-2" class="size-4" />
-          </div>
-        </div>
-        <div class="mt-2">
-          <p class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-            {{ data?.summary?.geoportal ?? 0 }}
-          </p>
-          <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-            WMS Service Resmi JIGN
-          </p>
-        </div>
-      </button>
-
-      <!-- Internal Melarosa (Martin Tile Server MVT) -->
-      <button
-        type="button"
-        class="p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between"
-        :class="activeSourceTab === 'internal'
-          ? 'border-blue-500 bg-blue-50/30 dark:bg-blue-950/20 ring-2 ring-blue-500/25'
-          : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] hover:border-blue-300 dark:hover:border-blue-800/60'"
-        @click="handleSourceTabChange('internal')"
-      >
-        <div class="flex items-center justify-between">
-          <p class="text-xs font-semibold text-blue-700 dark:text-blue-400">Internal Melarosa</p>
-          <div class="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-            <UIcon name="i-lucide-server" class="size-4" />
-          </div>
-        </div>
-        <div class="mt-2">
-          <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {{ data?.summary?.internal ?? 0 }}
-          </p>
-          <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-            Martin Tile Server (MVT)
-          </p>
-        </div>
-      </button>
-
-      <!-- External WMS (Luar Geoportal) -->
-      <button
-        type="button"
-        class="p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between"
-        :class="activeSourceTab === 'external'
-          ? 'border-amber-500 bg-amber-50/30 dark:bg-amber-950/20 ring-2 ring-amber-500/25'
-          : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] hover:border-amber-300 dark:hover:border-amber-800/60'"
-        @click="handleSourceTabChange('external')"
-      >
-        <div class="flex items-center justify-between">
-          <p class="text-xs font-semibold text-amber-700 dark:text-amber-400">External GIS</p>
-          <div class="p-2 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
-            <UIcon name="i-lucide-cloud" class="size-4" />
-          </div>
-        </div>
-        <div class="mt-2">
-          <p class="text-2xl font-bold text-amber-600 dark:text-amber-400">
-            {{ data?.summary?.external ?? 0 }}
-          </p>
-          <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-            WMS di Luar Geoportal
-          </p>
-        </div>
-      </button>
-    </div>
-
-    <!-- Workspace Mode Switcher: Katalog Semua Layer vs Konfigurasi Layer Aktif & Urutan -->
-    <div
-      class="p-1.5 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-100/80 dark:bg-[#0b0f19] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-      role="tablist"
-      aria-label="Mode Pengelolaan Layer"
-    >
-      <div class="grid grid-cols-1 sm:flex sm:items-center gap-1.5 flex-1">
         <button
           type="button"
           role="tab"
           :aria-selected="workspaceMode === 'catalog'"
-          class="min-h-[44px] px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2"
+          class="min-h-[44px] px-1 py-2.5 border-b-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400"
           :class="workspaceMode === 'catalog'
-            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs border border-slate-200/80 dark:border-white/[0.08]'
-            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'"
+            ? 'border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+            : 'border-transparent text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:border-gray-300 dark:hover:border-white/20'"
           @click="switchWorkspaceMode('catalog')"
         >
-          <UIcon name="i-lucide-table-properties" class="size-4 shrink-0" />
-          <span>Katalog Semua Layer</span>
-          <span class="px-1.5 py-0.5 rounded-md text-[11px] font-bold tabular-nums bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200">
+          <UIcon name="i-lucide-table-properties" class="size-4 shrink-0" aria-hidden="true" />
+          <span>Semua Katalog</span>
+          <span
+            class="px-1.5 py-0.5 rounded-md text-[11px] font-bold tabular-nums"
+            :class="workspaceMode === 'catalog'
+              ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300'
+              : 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300'"
+          >
             {{ data?.summary?.total ?? 0 }}
           </span>
         </button>
@@ -1434,32 +1087,33 @@ async function handleSyncMartin() {
           type="button"
           role="tab"
           :aria-selected="workspaceMode === 'stack'"
-          class="min-h-[44px] px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2"
+          class="min-h-[44px] px-1 py-2.5 border-b-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400"
           :class="workspaceMode === 'stack'
-            ? 'bg-blue-600 text-white shadow-xs'
-            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'"
+            ? 'border-blue-600 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+            : 'border-transparent text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:border-gray-300 dark:hover:border-white/20'"
           @click="switchWorkspaceMode('stack')"
         >
-          <UIcon name="i-lucide-list-ordered" class="size-4 shrink-0" />
-          <span>Konfigurasi Layer Aktif &amp; Urutan Peta</span>
+          <UIcon name="i-lucide-list-ordered" class="size-4 shrink-0" aria-hidden="true" />
+          <span>Konfigurasi Layer Aktif</span>
           <span
             class="px-1.5 py-0.5 rounded-md text-[11px] font-bold tabular-nums"
             :class="workspaceMode === 'stack'
-              ? 'bg-white/20 text-white'
-              : 'bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300'"
+              ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300'
+              : 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300'"
           >
             {{ data?.summary?.active ?? 0 }} aktif
           </span>
           <span
             v-if="stackHasUnsavedChanges"
-            class="size-2 rounded-full bg-amber-400 shrink-0"
+            class="size-2 rounded-full bg-amber-500 shrink-0"
             title="Ada perubahan konfigurasi belum disimpan"
+            aria-label="Ada perubahan konfigurasi belum disimpan"
           />
         </button>
       </div>
 
-      <p class="hidden xl:block text-xs text-slate-600 dark:text-slate-400 px-3 shrink-0 tabular-nums">
-        {{ data?.summary?.default_visible ?? 0 }} layer tampil otomatis di /maps
+      <p class="hidden md:block text-xs text-gray-600 dark:text-gray-300 pb-2.5 shrink-0 tabular-nums">
+        {{ data?.summary?.default_visible ?? 0 }} tampil otomatis di /maps
       </p>
     </div>
 
@@ -1475,112 +1129,103 @@ async function handleSyncMartin() {
     />
 
     <!-- Catalog Workspace -->
-    <div v-show="workspaceMode === 'catalog'" class="space-y-6">
-    <!-- Error Alert -->
-    <div
-      v-if="error"
-      class="p-4 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 flex items-center justify-between"
-    >
-      <div class="flex items-center gap-3 text-sm">
-        <UIcon name="i-heroicons-exclamation-triangle" class="size-5 flex-shrink-0" />
-        <span>Gagal memuat katalog layer. Pastikan koneksi backend tersedia.</span>
+    <div v-show="workspaceMode === 'catalog'" class="space-y-4">
+      <!-- Error Alert -->
+      <div
+        v-if="error"
+        class="p-4 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 flex items-center justify-between gap-3"
+      >
+        <div class="flex items-center gap-3 text-xs sm:text-sm">
+          <UIcon name="i-heroicons-exclamation-triangle" class="size-5 shrink-0" aria-hidden="true" />
+          <span>Gagal memuat katalog layer. Pastikan koneksi backend tersedia.</span>
+        </div>
+        <UButton
+          label="Coba Lagi"
+          size="xs"
+          color="error"
+          variant="subtle"
+          class="cursor-pointer shrink-0"
+          @click="() => refresh()"
+        />
       </div>
-      <UButton
-        label="Coba Lagi"
-        size="xs"
-        color="error"
-        variant="subtle"
-        @click="() => refresh()"
-      />
-    </div>
 
-    <!-- Filter & Search Toolbar -->
-    <div class="p-4 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] space-y-3">
-      <!-- Quick Source Tabs Filter with Counter Badges -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-gray-100 dark:border-white/[0.04]">
-        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-          <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 mr-1 shrink-0 flex items-center gap-1.5">
-            <UIcon name="i-lucide-filter" class="size-3.5" />
-            <span>Sumber:</span>
-          </span>
-          <button
-            v-for="tab in sourceTabs"
-            :key="tab.value"
-            type="button"
-            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-2 shrink-0 border"
-            :class="activeSourceTab === tab.value
-              ? 'bg-blue-600 text-white border-blue-600 shadow-xs font-semibold'
-              : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
-            @click="handleSourceTabChange(tab.value)"
-          >
-            <UIcon :name="tab.icon" class="size-3.5" />
-            <span>{{ tab.label }}</span>
-            <span
-              class="text-[10px] tabular-nums px-1.5 py-0.2 rounded-full font-bold"
+      <!-- Unified Source Filter & Search Toolbar (Tanpa Duplikasi KPI Card / Dropdown Sumber) -->
+      <div class="p-4 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0c1424] space-y-3">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-gray-100 dark:border-white/[0.06]">
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
+            <button
+              v-for="tab in sourceTabs"
+              :key="tab.value"
+              type="button"
+              class="px-3 py-1.5 min-h-[38px] rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-2 shrink-0 border"
               :class="activeSourceTab === tab.value
-                ? 'bg-white/20 text-white'
-                : 'bg-gray-200/80 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                ? 'bg-blue-600 text-white border-blue-600 font-semibold'
+                : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.06]'"
+              @click="handleSourceTabChange(tab.value)"
             >
-              {{ data?.summary?.[tab.countKey] ?? 0 }}
-            </span>
+              <UIcon :name="tab.icon" class="size-3.5 shrink-0" aria-hidden="true" />
+              <span>{{ tab.label }}</span>
+              <span
+                class="text-[11px] tabular-nums px-1.5 py-0.5 rounded font-bold"
+                :class="activeSourceTab === tab.value
+                  ? 'bg-white/20 text-white'
+                  : 'bg-gray-200/80 dark:bg-white/10 text-gray-700 dark:text-gray-200'"
+              >
+                {{ data?.summary?.[tab.countKey] ?? 0 }}
+              </span>
+            </button>
+          </div>
+
+          <button
+            v-if="hasActiveCatalogFilters"
+            type="button"
+            class="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer shrink-0 self-start sm:self-center"
+            @click="resetCatalogFilters"
+          >
+            Reset Filter
           </button>
         </div>
 
-        <div v-if="activeSourceTab !== 'ALL'" class="text-[11px] text-gray-500 dark:text-gray-400 shrink-0 flex items-center gap-1.5">
-          <UIcon name="i-lucide-info" class="size-3.5 text-blue-500 shrink-0" />
-          <span>{{ sourceTabs.find(t => t.value === activeSourceTab)?.description }}</span>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div class="sm:col-span-2">
+            <UInput
+              v-model="search"
+              icon="i-heroicons-magnifying-glass"
+              placeholder="Cari nama layer, kode layer, atau instansi..."
+              aria-label="Cari layer"
+              class="w-full"
+              clearable
+            />
+          </div>
+
+          <div>
+            <USelect
+              v-model="protocolFilter"
+              :items="protocolOptions"
+              aria-label="Filter protokol"
+              class="w-full"
+            />
+          </div>
+
+          <div>
+            <USelect
+              v-model="statusFilter"
+              :items="statusOptions"
+              aria-label="Filter status aktif"
+              class="w-full"
+            />
+          </div>
+
+          <div>
+            <USelect
+              v-model="defaultVisibleFilter"
+              :items="defaultVisibleOptions"
+              aria-label="Filter tampil awal"
+              class="w-full"
+            />
+          </div>
         </div>
       </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <!-- Search Input -->
-        <div class="sm:col-span-2 lg:col-span-1">
-          <UInput
-            v-model="search"
-            icon="i-heroicons-magnifying-glass"
-            placeholder="Cari nama layer atau instansi/atribusi..."
-            class="w-full"
-            clearable
-          />
-        </div>
-
-        <!-- Protocol Filter -->
-        <div>
-          <USelect
-            v-model="protocolFilter"
-            :items="protocolOptions"
-            class="w-full"
-          />
-        </div>
-
-        <!-- Source Type Filter -->
-        <div>
-          <USelect
-            v-model="sourceTypeFilter"
-            :items="sourceTypeOptions"
-            class="w-full"
-          />
-        </div>
-
-        <!-- Status Filter -->
-        <div>
-          <USelect
-            v-model="statusFilter"
-            :items="statusOptions"
-            class="w-full"
-          />
-        </div>
-
-        <!-- Default Visible Filter -->
-        <div>
-          <USelect
-            v-model="defaultVisibleFilter"
-            :items="defaultVisibleOptions"
-            class="w-full"
-          />
-        </div>
-      </div>
-    </div>
 
     <!-- Layer Catalog Table -->
     <div class="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#0b0f19] overflow-hidden">
@@ -1615,8 +1260,86 @@ async function handleSyncMartin() {
         </div>
       </div>
 
-      <!-- Table Content -->
-      <div v-else class="overflow-x-auto">
+      <!-- Mobile Card View -->
+      <div v-else class="divide-y divide-gray-200 dark:divide-white/[0.06] md:hidden">
+        <div
+          v-for="layer in data.data"
+          :key="`mob-${layer.id}`"
+          class="p-4 space-y-3"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 space-y-1">
+              <NuxtLink
+                :to="`/admin/layers/${layer.id}`"
+                class="font-semibold text-sm text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 block break-words"
+              >
+                {{ layer.name }}
+              </NuxtLink>
+              <div v-if="layer.layer_name" class="font-mono text-[11px] text-gray-600 dark:text-gray-300 break-all">
+                {{ layer.layer_name }}
+              </div>
+            </div>
+            <USwitch
+              :model-value="layer.is_active"
+              :disabled="!canEdit || togglingIds.has(layer.id)"
+              :aria-label="`Aktifkan layer ${layer.name}`"
+              @update:model-value="() => handleToggleActive(layer)"
+            />
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <UBadge
+              :label="getLayerSourceGroup(layer).badgeLabel"
+              :color="getLayerSourceGroup(layer).badgeColor"
+              variant="subtle"
+              size="xs"
+            />
+            <UBadge
+              :label="layer.protocol.toUpperCase()"
+              :color="getProtocolBadgeColor(layer.protocol)"
+              variant="outline"
+              size="xs"
+              class="font-mono"
+            />
+            <UBadge
+              v-if="layer.protocol?.toLowerCase() === 'wms' && hasWmsCustomStyle(layer.style_config)"
+              label="Custom SLD"
+              color="primary"
+              variant="outline"
+              size="xs"
+            />
+            <span class="text-gray-600 dark:text-gray-300 tabular-nums">
+              #{{ layer.order }} · {{ Math.round((layer.opacity ?? 1) * 100) }}%
+            </span>
+          </div>
+
+          <div v-if="hasAnyAction" class="flex items-center gap-2 pt-1">
+            <UButton
+              v-if="canEdit"
+              :to="`/admin/layers/${layer.id}`"
+              label="Edit Layer"
+              icon="i-heroicons-pencil"
+              size="xs"
+              color="neutral"
+              variant="outline"
+              class="flex-1 justify-center min-h-[44px] cursor-pointer"
+            />
+            <UButton
+              v-if="canDelete"
+              label="Hapus"
+              icon="i-heroicons-trash"
+              size="xs"
+              color="error"
+              variant="outline"
+              class="min-h-[44px] cursor-pointer"
+              @click="confirmDelete(layer)"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Desktop Table Content -->
+      <div v-if="data?.data && data.data.length > 0 && !loading" class="hidden md:block overflow-x-auto">
         <table class="w-full text-left text-xs text-gray-600 dark:text-gray-300">
           <thead class="bg-gray-50 dark:bg-[#070b14] text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/[0.08]">
             <tr>
@@ -1676,9 +1399,12 @@ async function handleSyncMartin() {
               <td class="py-3 px-4">
                 <div class="space-y-1">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-semibold text-gray-900 dark:text-white text-sm">
+                    <NuxtLink
+                      :to="`/admin/layers/${layer.id}`"
+                      class="font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-sm transition-colors"
+                    >
                       {{ layer.name }}
-                    </span>
+                    </NuxtLink>
                     <UBadge
                       v-if="layer.category"
                       :label="layer.category"
@@ -1745,6 +1471,15 @@ async function handleSyncMartin() {
                       class="text-[9px] px-1 py-0 h-4 font-mono"
                       :title="`Geometri: ${layer.style_config.geom_type || 'auto'}`"
                     />
+                    <UBadge
+                      v-else-if="layer.protocol?.toLowerCase() === 'wms' && hasWmsCustomStyle(layer.style_config)"
+                      label="Custom SLD"
+                      color="primary"
+                      variant="outline"
+                      size="xs"
+                      class="text-[9px] px-1 py-0 h-4 font-mono"
+                      title="Menggunakan Custom SLD di luar bawaan GeoServer"
+                    />
                   </div>
                   <span v-if="layer.protocol?.toLowerCase() === 'mvt'" class="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
                     Vector Tile
@@ -1800,34 +1535,15 @@ async function handleSyncMartin() {
               <!-- Actions -->
               <td v-if="hasAnyAction" class="py-3 px-4 text-right">
                 <div class="flex items-center justify-end gap-1">
-                  <UTooltip text="Lihat Rincian Metadata">
+                  <UTooltip v-if="canEdit" text="Edit, Custom Style & Metadata Layer">
                     <UButton
-                      icon="i-lucide-info"
-                      size="xs"
-                      color="neutral"
-                      variant="ghost"
-                      class="hover:text-sky-600 dark:hover:text-sky-400 cursor-pointer"
-                      @click="openMetadataModal(layer)"
-                    />
-                  </UTooltip>
-                  <UTooltip v-if="canEdit && layer.protocol?.toLowerCase() === 'mvt'" text="Kustomisasi Style MVT">
-                    <UButton
-                      icon="i-lucide-palette"
-                      size="xs"
-                      color="primary"
-                      variant="ghost"
-                      class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
-                      @click="openStyleModal(layer)"
-                    />
-                  </UTooltip>
-                  <UTooltip v-if="canEdit" text="Edit Konfigurasi Layer">
-                    <UButton
+                      :to="`/admin/layers/${layer.id}`"
                       icon="i-heroicons-pencil"
                       size="xs"
                       color="neutral"
                       variant="ghost"
+                      aria-label="Edit Layer"
                       class="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
-                      @click="openEditModal(layer)"
                     />
                   </UTooltip>
                   <UTooltip v-if="canDelete" text="Hapus Layer">
@@ -1836,6 +1552,7 @@ async function handleSyncMartin() {
                       size="xs"
                       color="neutral"
                       variant="ghost"
+                      aria-label="Hapus Layer"
                       class="hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
                       @click="confirmDelete(layer)"
                     />
@@ -1891,15 +1608,11 @@ async function handleSyncMartin() {
           <button
             type="button"
             class="flex-1 py-1.5 px-3 rounded-md transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
-            :class="activeModalTab === 'style' ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+            :class="activeModalTab === 'style' ? 'bg-white dark:bg-[#0b0f19] text-blue-600 dark:text-blue-400 shadow-xs' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'"
             @click="activeModalTab = 'style'; hasOpenedStyleTab = true"
           >
-            <UIcon name="i-lucide-palette" class="size-4" />
-            <span>Styling Vektor (MVT)</span>
-            <span
-              v-if="formState.protocol === 'mvt'"
-              class="size-1.5 rounded-full bg-blue-500 animate-pulse"
-            />
+            <UIcon name="i-lucide-palette" class="size-4" aria-hidden="true" />
+            <span>{{ formState.protocol === 'wms' ? 'Custom Style (SLD)' : 'Styling Vektor (MVT)' }}</span>
           </button>
         </div>
 
@@ -2086,6 +1799,7 @@ async function handleSyncMartin() {
               :protocol="formState.protocol"
               :layer-id="editingLayerId"
               :layer-name="formState.layer_name || formState.name"
+              :wms-url="formState.url"
             />
           </div>
         </div>
@@ -2742,6 +2456,206 @@ async function handleSyncMartin() {
             variant="ghost"
             class="cursor-pointer"
             @click="isMetadataModalOpen = false"
+          />
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Dialog Status Layanan Simpul Geoportal & Martin Tile Server -->
+    <UModal
+      v-model:open="isServiceStatusModalOpen"
+      title="Status Layanan Simpul JIGN &amp; Martin"
+      description="Pantau konektivitas layanan CSW/WMS Geoportal Bojonegoro dan Martin Vector Tile Server serta jalankan sinkronisasi."
+      :ui="{ content: 'sm:max-w-2xl dark:bg-[#0b0f19] dark:border-white/[0.08]' }"
+    >
+      <template #body>
+        <div class="space-y-4">
+          <!-- Geoportal Bojonegoro -->
+          <div class="p-4 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50/70 dark:bg-white/[0.02] space-y-3">
+            <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div class="space-y-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span
+                    class="size-2.5 rounded-full shrink-0"
+                    :class="[
+                      geoportalStatus?.status === 'online'
+                        ? 'bg-emerald-500'
+                        : geoportalStatus?.status === 'fallback'
+                        ? 'bg-amber-500'
+                        : 'bg-red-500'
+                    ]"
+                  />
+                  <h3 class="text-sm font-bold text-gray-900 dark:text-white">
+                    Simpul Geoportal Bojonegoro (JIGN)
+                  </h3>
+                  <span
+                    class="text-[11px] font-semibold px-2 py-0.5 rounded-md tabular-nums"
+                    :class="[
+                      geoportalStatus?.status === 'online'
+                        ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300'
+                        : geoportalStatus?.status === 'fallback'
+                        ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                        : 'bg-red-100 dark:bg-red-950/70 text-red-800 dark:text-red-300'
+                    ]"
+                  >
+                    {{
+                      checkingGeoportalStatus
+                        ? 'Memeriksa...'
+                        : geoportalStatus?.status === 'online'
+                        ? `Terhubung${geoportalStatus?.response_time_ms ? ` · ${geoportalStatus.response_time_ms} ms` : ''}`
+                        : geoportalStatus?.status === 'fallback'
+                        ? 'Data Cadangan Aktif'
+                        : 'Koneksi Terputus'
+                    }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-600 dark:text-gray-300 tabular-nums">
+                  {{ geoportalStatus?.remote_matched ?? geoportalStatus?.total_local_layers ?? 0 }} layer terindeks · Sinkron terakhir: {{ formatLastSync(geoportalStatus?.last_synced_at) }} ({{ timeAgo(geoportalStatus?.last_synced_at) }})
+                </p>
+                <a
+                  :href="geoportalStatus?.csw_url || 'https://geoportal.bojonegorokab.go.id/csw/'"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline break-all"
+                >
+                  <span>{{ geoportalStatus?.csw_url || 'https://geoportal.bojonegorokab.go.id/csw/' }}</span>
+                  <UIcon name="i-lucide-external-link" class="size-3 shrink-0" aria-hidden="true" />
+                </a>
+              </div>
+
+              <div class="flex items-center gap-2 shrink-0">
+                <UButton
+                  label="Cek Status"
+                  icon="i-heroicons-arrow-path"
+                  color="neutral"
+                  variant="outline"
+                  size="xs"
+                  :loading="checkingGeoportalStatus"
+                  class="min-h-[36px] cursor-pointer"
+                  @click="refreshGeoportalStatus(true)"
+                />
+                <UButton
+                  v-if="canSyncGeoportal"
+                  label="Sync CSW"
+                  icon="i-lucide-refresh-cw"
+                  color="primary"
+                  size="xs"
+                  :loading="syncingGeoportal"
+                  class="min-h-[36px] cursor-pointer font-semibold"
+                  @click="isServiceStatusModalOpen = false; openSyncModal()"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="geoportalStatus?.status === 'fallback'"
+              class="pt-2 border-t border-amber-200/70 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2"
+            >
+              <UIcon name="i-lucide-alert-triangle" class="size-4 shrink-0" aria-hidden="true" />
+              <span>Server Geoportal sedang lambat; menampilkan {{ geoportalStatus?.total_local_layers ?? 0 }} layer dari data cadangan lokal.</span>
+            </div>
+          </div>
+
+          <!-- Martin Vector Tile Server -->
+          <div class="p-4 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50/70 dark:bg-white/[0.02] space-y-3">
+            <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div class="space-y-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span
+                    class="size-2.5 rounded-full shrink-0"
+                    :class="[
+                      martinStatus?.status === 'online'
+                        ? 'bg-blue-500'
+                        : martinStatus?.status === 'fallback'
+                        ? 'bg-amber-500'
+                        : 'bg-red-500'
+                    ]"
+                  />
+                  <h3 class="text-sm font-bold text-gray-900 dark:text-white">
+                    Martin Tile Server (Vector Tiles MVT)
+                  </h3>
+                  <span
+                    class="text-[11px] font-semibold px-2 py-0.5 rounded-md tabular-nums"
+                    :class="[
+                      martinStatus?.status === 'online'
+                        ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300'
+                        : martinStatus?.status === 'fallback'
+                        ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                        : 'bg-red-100 dark:bg-red-950/70 text-red-800 dark:text-red-300'
+                    ]"
+                  >
+                    {{
+                      checkingMartinStatus
+                        ? 'Memeriksa...'
+                        : martinStatus?.status === 'online'
+                        ? `Terhubung${martinStatus?.response_time_ms !== null && martinStatus?.response_time_ms !== undefined ? ` · ${martinStatus.response_time_ms} ms` : ''}`
+                        : martinStatus?.status === 'fallback'
+                        ? 'Tersimpan Lokal'
+                        : 'Server Offline'
+                    }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-600 dark:text-gray-300 tabular-nums">
+                  {{ martinStatus?.remote_sources ?? martinStatus?.total_local_layers ?? 0 }} sumber MVT · Sinkron terakhir: {{ formatLastSync(martinStatus?.last_synced_at) }} ({{ timeAgo(martinStatus?.last_synced_at) }})
+                </p>
+                <code class="inline-block font-mono text-[11px] text-gray-700 dark:text-gray-300 bg-white dark:bg-white/[0.06] px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.08] break-all">
+                  {{ martinStatus?.martin_url || 'http://localhost:9090' }}/catalog
+                </code>
+              </div>
+
+              <div class="flex items-center gap-2 shrink-0">
+                <UButton
+                  label="Cek Status"
+                  icon="i-heroicons-arrow-path"
+                  color="neutral"
+                  variant="outline"
+                  size="xs"
+                  :loading="checkingMartinStatus"
+                  class="min-h-[36px] cursor-pointer"
+                  @click="refreshMartinStatus(true)"
+                />
+                <UButton
+                  v-if="canSyncGeoportal"
+                  label="Sync MVT"
+                  icon="i-lucide-database-zap"
+                  color="primary"
+                  size="xs"
+                  :loading="syncingMartin"
+                  class="min-h-[36px] cursor-pointer font-semibold"
+                  @click="isServiceStatusModalOpen = false; openMartinSyncModal()"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="martinStatus?.status === 'fallback'"
+              class="pt-2 border-t border-amber-200/70 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2"
+            >
+              <UIcon name="i-lucide-alert-triangle" class="size-4 shrink-0" aria-hidden="true" />
+              <span>Martin Tile Server tidak merespons; tersimpan {{ martinStatus?.total_local_layers ?? 0 }} layer internal di basis data.</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex items-center justify-between w-full gap-2">
+          <UButton
+            v-if="canSyncGeoportal"
+            label="Lihat Riwayat Sync"
+            icon="i-lucide-history"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            class="cursor-pointer"
+            @click="isServiceStatusModalOpen = false; openSyncHistoryModal('all')"
+          />
+          <UButton
+            label="Tutup"
+            color="neutral"
+            variant="ghost"
+            class="cursor-pointer ml-auto"
+            @click="isServiceStatusModalOpen = false"
           />
         </div>
       </template>

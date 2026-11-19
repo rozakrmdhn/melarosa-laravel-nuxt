@@ -92,6 +92,7 @@ class DatabaseSeeder extends Seeder
             RefOpdSeeder::class,
             RefBkkdBidangSeeder::class,
             BackupScheduleSeeder::class,
+            BasemapSeeder::class,
         ]);
     }
 }

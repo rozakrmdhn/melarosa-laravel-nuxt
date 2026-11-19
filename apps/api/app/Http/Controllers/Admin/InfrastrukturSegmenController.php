@@ -12,11 +12,16 @@ use App\Models\BatasWilayahDesa;
 use App\Models\BatasWilayahKecamatan;
 use App\Models\InfrastrukturSegmen;
 use App\Models\JalanPorosDesa;
+use App\Models\PlottingAnggaran;
+use App\Models\RefSumberDana;
+use App\Models\User;
+use App\Services\JadwalAnggaranService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class InfrastrukturSegmenController extends Controller
@@ -26,9 +31,7 @@ class InfrastrukturSegmenController extends Controller
         Gate::authorize('viewAny', InfrastrukturSegmen::class);
 
         $user = $request->user();
-        $isBappeda = $user && $user->hasRole('verifierBappeda');
-        $isAdmin   = $user && $user->hasRole('admin');
-        $isRestricted = $user && !$isAdmin && !$isBappeda;
+        $isRestricted = $user && !$user->isAdminOrBappeda();
 
         // Validasi dan proteksi otoritas wilayah kerja pengguna
         $effectiveKecamatanId = $request->filled('id_kecamatan') ? (int) $request->input('id_kecamatan') : null;
@@ -104,12 +107,16 @@ class InfrastrukturSegmenController extends Controller
             });
         }
 
-        // Filter sumber dana
+        // Filter sumber dana (dukung kode ref_sumber_dana maupun alias historis BKK / APBD / DD)
         if ($request->filled('sumber_dana')) {
-            $val = $request->input('sumber_dana');
-            $baseQuery->where(function ($q) use ($val) {
-                $q->where('infrastruktur_segmen.sumber_dana', $val)
-                  ->orWhere('infrastruktur_segmen.sumber_dana', 'ilike', '%' . $val . '%');
+            $val = trim((string) $request->input('sumber_dana'));
+            $candidates = $this->resolveSumberDanaFilterValues($val);
+            $lowerCandidates = array_map(fn ($v) => mb_strtolower($v), $candidates);
+
+            $baseQuery->where(function ($q) use ($candidates, $lowerCandidates, $val) {
+                $q->whereIn('infrastruktur_segmen.sumber_dana', $candidates)
+                  ->orWhereRaw('LOWER(infrastruktur_segmen.sumber_dana) IN (' . implode(',', array_fill(0, count($lowerCandidates), '?')) . ')', $lowerCandidates)
+                  ->orWhereRaw('LOWER(infrastruktur_segmen.sumber_dana) LIKE ?', ['%' . mb_strtolower($val) . '%']);
             });
         }
 
@@ -291,6 +298,8 @@ class InfrastrukturSegmenController extends Controller
                         'kecamatan'             => $segmen->kecamatan,
                         'id_desa'               => $segmen->id_desa,
                         'id_kecamatan'          => $segmen->id_kecamatan,
+                        'plotting_id'           => $segmen->plotting_id,
+                        'is_non_pagu'           => (bool) $segmen->is_non_pagu,
                         'centroid'              => !empty($segmen->centroid) ? json_decode($segmen->centroid) : null,
                     ],
                 ];
@@ -303,7 +312,10 @@ class InfrastrukturSegmenController extends Controller
         }
 
         $perPage = (int) $request->input('per_page', 20);
-        $paginated = $query->with('parent:id,kode_ruas,nama_ruas')
+        $paginated = $query->with([
+            'parent:id,kode_ruas,nama_ruas',
+            'plotting:id,tahun_anggaran,nama_kegiatan,sumber_dana,nomor_sk,target_pagu_anggaran,target_panjang_m',
+        ])
             ->orderBy('infrastruktur_segmen.created_at', 'desc')
             ->paginate($perPage);
 
@@ -331,6 +343,7 @@ class InfrastrukturSegmenController extends Controller
                 'verifierKecamatan:uuid,name,email',
                 'verifierBappeda:uuid,name,email',
                 'parent:id,kode_ruas,nama_ruas,desa,kecamatan,id_desa,id_kecamatan,panjang',
+                'fotos.uploader:uuid,name',
             ])
             ->where('infrastruktur_segmen.id', $id)
             ->first();
@@ -360,7 +373,7 @@ class InfrastrukturSegmenController extends Controller
         $parentRuas = !empty($validated['parent_id'])
             ? JalanPorosDesa::find($validated['parent_id'])
             : null;
-        $isRestricted = $user && !$user->hasRole('admin') && !$user->hasRole('verifierBappeda');
+        $isRestricted = $user && !$user->isAdminOrBappeda();
 
         if ($parentRuas) {
             if ($isRestricted) {
@@ -415,6 +428,12 @@ class InfrastrukturSegmenController extends Controller
             ], 422);
         }
 
+        $budgetResult = $this->validateAndSyncBudgetEnvelope($validated, $user);
+        if ($budgetResult['error'] instanceof JsonResponse) {
+            return $budgetResult['error'];
+        }
+        $quotaWarning = $budgetResult['warning'];
+
         // Ambil cache nama wilayah
         $desa = BatasWilayahDesa::find($validated['id_desa']);
         $kecamatan = BatasWilayahKecamatan::find($validated['id_kecamatan']);
@@ -438,14 +457,17 @@ class InfrastrukturSegmenController extends Controller
             ->with([
                 'tipe:id,kode,nama,warna,ikon',
                 'parent:id,kode_ruas,nama_ruas,desa,kecamatan,id_desa,id_kecamatan,panjang',
+                'plotting:id,tahun_anggaran,id_kecamatan,id_desa,jenis_bantuan,nama_kegiatan,sumber_dana,nomor_sk,tanggal_sk,status_penetapan,target_pagu_anggaran,target_panjang_m',
+                'fotos.uploader:uuid,name',
             ])
             ->where('id', $segmen->id)
             ->first();
 
         return response()->json([
-            'ok'      => true,
-            'message' => 'Segmen infrastruktur berhasil disimpan sebagai draft.',
-            'data'    => $fresh,
+            'ok'            => true,
+            'message'       => 'Segmen infrastruktur berhasil disimpan sebagai draft.',
+            'quota_warning' => $quotaWarning,
+            'data'          => $fresh,
         ], 201);
     }
 
@@ -461,14 +483,14 @@ class InfrastrukturSegmenController extends Controller
 
         Gate::authorize('update', $segmen);
 
+        $user = $request->user();
         $validated = $request->validated();
 
         if (array_key_exists('parent_id', $validated)) {
             $parentRuas = !empty($validated['parent_id'])
                 ? JalanPorosDesa::find($validated['parent_id'])
                 : null;
-            $user = $request->user();
-            $isRestricted = $user && !$user->hasRole('admin') && !$user->hasRole('verifierBappeda');
+            $isRestricted = $user && !$user->isAdminOrBappeda();
 
             if ($parentRuas && $isRestricted) {
                 if ($user->id_desa && (int) $parentRuas->id_desa !== (int) $user->id_desa) {
@@ -494,6 +516,12 @@ class InfrastrukturSegmenController extends Controller
                 }
             }
         }
+
+        $budgetResult = $this->validateAndSyncBudgetEnvelope($validated, $user, $segmen);
+        if ($budgetResult['error'] instanceof JsonResponse) {
+            return $budgetResult['error'];
+        }
+        $quotaWarning = $budgetResult['warning'];
 
         $segmen->fill($validated);
 
@@ -530,18 +558,21 @@ class InfrastrukturSegmenController extends Controller
             ->with([
                 'tipe:id,kode,nama,warna,ikon',
                 'parent:id,kode_ruas,nama_ruas,desa,kecamatan,id_desa,id_kecamatan,panjang',
+                'plotting:id,tahun_anggaran,id_kecamatan,id_desa,jenis_bantuan,nama_kegiatan,sumber_dana,nomor_sk,tanggal_sk,status_penetapan,target_pagu_anggaran,target_panjang_m',
+                'fotos.uploader:uuid,name',
             ])
             ->where('id', $segmen->id)
             ->first();
 
         return response()->json([
-            'ok'      => true,
-            'message' => 'Segmen infrastruktur berhasil diperbarui.',
-            'data'    => $fresh,
+            'ok'            => true,
+            'message'       => 'Segmen infrastruktur berhasil diperbarui.',
+            'quota_warning' => $quotaWarning,
+            'data'          => $fresh,
         ]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
         $segmen = InfrastrukturSegmen::where('id', $id)->first();
         if (!$segmen) {
@@ -553,6 +584,11 @@ class InfrastrukturSegmenController extends Controller
 
         Gate::authorize('delete', $segmen);
 
+        $scheduleCheck = $this->checkScheduleForSegmen($request->user(), $segmen);
+        if ($scheduleCheck instanceof JsonResponse) {
+            return $scheduleCheck;
+        }
+
         if (DB::table('monitoring_realisasi_items')->where('id_segmen', $id)->exists()) {
             return response()->json([
                 'ok'      => false,
@@ -560,7 +596,15 @@ class InfrastrukturSegmenController extends Controller
             ], 422);
         }
 
+        $storedFotos = $segmen->fotos()->get(['disk', 'path']);
+
         $segmen->delete();
+
+        foreach ($storedFotos as $foto) {
+            if ($foto->path && !str_contains($foto->path, '..') && str_starts_with($foto->path, "infrastruktur-segmen/{$segmen->id}/")) {
+                Storage::disk($foto->disk ?: 'local')->delete($foto->path);
+            }
+        }
 
         return response()->json([
             'ok'      => true,
@@ -579,6 +623,11 @@ class InfrastrukturSegmenController extends Controller
         }
 
         Gate::authorize('update', $segmen);
+
+        $scheduleCheck = $this->checkScheduleForSegmen($request->user(), $segmen);
+        if ($scheduleCheck instanceof JsonResponse) {
+            return $scheduleCheck;
+        }
 
         $geoJsonInput = $request->input('geometry');
         $geoJsonString = is_string($geoJsonInput) ? $geoJsonInput : json_encode($geoJsonInput);
@@ -654,6 +703,11 @@ class InfrastrukturSegmenController extends Controller
 
         Gate::authorize('split', $segmen);
 
+        $scheduleCheck = $this->checkScheduleForSegmen($request->user(), $segmen);
+        if ($scheduleCheck instanceof JsonResponse) {
+            return $scheduleCheck;
+        }
+
         if (DB::table('monitoring_realisasi_items')->where('id_segmen', $id)->exists()) {
             return response()->json([
                 'ok'      => false,
@@ -708,6 +762,7 @@ class InfrastrukturSegmenController extends Controller
                 $newSegmen->id_desa = $segmen->id_desa;
                 $newSegmen->id_kecamatan = $segmen->id_kecamatan;
                 $newSegmen->plotting_id = $segmen->plotting_id;
+                $newSegmen->is_non_pagu = $segmen->is_non_pagu;
                 $newSegmen->status_verifikasi = 'draft';
                 $newSegmen->user_id = $user->uuid;
                 $newSegmen->created_by = $user->uuid;
@@ -794,6 +849,7 @@ class InfrastrukturSegmenController extends Controller
                 $newSegmen->id_desa = $segmen->id_desa;
                 $newSegmen->id_kecamatan = $segmen->id_kecamatan;
                 $newSegmen->plotting_id = $segmen->plotting_id;
+                $newSegmen->is_non_pagu = $segmen->is_non_pagu;
                 $newSegmen->status_verifikasi = 'draft';
                 $newSegmen->user_id = $user->uuid;
                 $newSegmen->created_by = $user->uuid;
@@ -823,6 +879,276 @@ class InfrastrukturSegmenController extends Controller
             'message' => 'Segmen berhasil dipecah (split) menjadi 2 bagian.',
             'data'    => $createdFeatures,
         ]);
+    }
+
+    /**
+     * Validasi konsistensi pagu resmi (plotting_anggaran) atau mode inventarisasi non-pagu,
+     * menyelaraskan sumber_dana/tahun_pembangunan dan memeriksa batas kuota + toleransi 10%.
+     *
+     * @return array{error: ?JsonResponse, warning: ?string}
+     */
+    private function validateAndSyncBudgetEnvelope(array &$validated, ?User $user, ?InfrastrukturSegmen $existingSegmen = null): array
+    {
+        $hasNonPaguFlag = array_key_exists('is_non_pagu', $validated);
+        $isNonPagu = $hasNonPaguFlag
+            ? (bool) $validated['is_non_pagu']
+            : ($existingSegmen ? (bool) $existingSegmen->is_non_pagu : false);
+
+        $targetPlottingId = array_key_exists('plotting_id', $validated)
+            ? $validated['plotting_id']
+            : $existingSegmen?->plotting_id;
+
+        if ($isNonPagu) {
+            $validated['plotting_id'] = null;
+            $validated['is_non_pagu'] = true;
+
+            $effectiveTahun = (int) ($validated['tahun_pembangunan'] ?? $existingSegmen?->tahun_pembangunan ?? date('Y'));
+            $effectiveKec = $validated['id_kecamatan'] ?? $existingSegmen?->id_kecamatan;
+            $effectiveDesa = $validated['id_desa'] ?? $existingSegmen?->id_desa;
+
+            $scheduleCheck = app(JadwalAnggaranService::class)->checkAccess(
+                $user,
+                $effectiveTahun,
+                $effectiveKec ? (int) $effectiveKec : null,
+                $effectiveDesa ? (int) $effectiveDesa : null,
+                'digitasi',
+                true,
+            );
+            if (!$scheduleCheck['allowed']) {
+                return [
+                    'error'   => response()->json(['ok' => false, 'message' => $scheduleCheck['message']], 403),
+                    'warning' => null,
+                ];
+            }
+
+            return ['error' => null, 'warning' => null];
+        }
+
+        if ($hasNonPaguFlag && empty($targetPlottingId)) {
+            return [
+                'error' => response()->json([
+                    'ok'      => false,
+                    'message' => 'Pilih Plotting Anggaran / Pagu Resmi terlebih dahulu, atau gunakan mode Inventarisasi Non-Pagu.',
+                ], 422),
+                'warning' => null,
+            ];
+        }
+
+        if (empty($targetPlottingId)) {
+            $effectiveTahun = (int) ($validated['tahun_pembangunan'] ?? $existingSegmen?->tahun_pembangunan ?? date('Y'));
+            $effectiveKec = $validated['id_kecamatan'] ?? $existingSegmen?->id_kecamatan;
+            $effectiveDesa = $validated['id_desa'] ?? $existingSegmen?->id_desa;
+
+            $scheduleCheck = app(JadwalAnggaranService::class)->checkAccess(
+                $user,
+                $effectiveTahun,
+                $effectiveKec ? (int) $effectiveKec : null,
+                $effectiveDesa ? (int) $effectiveDesa : null,
+                'digitasi',
+                false,
+            );
+            if (!$scheduleCheck['allowed']) {
+                return [
+                    'error'   => response()->json(['ok' => false, 'message' => $scheduleCheck['message']], 403),
+                    'warning' => null,
+                ];
+            }
+
+            return ['error' => null, 'warning' => null];
+        }
+
+        $plotting = PlottingAnggaran::find($targetPlottingId);
+        if (!$plotting) {
+            return [
+                'error' => response()->json([
+                    'ok'      => false,
+                    'message' => 'Data plotting anggaran yang dipilih tidak ditemukan.',
+                ], 422),
+                'warning' => null,
+            ];
+        }
+
+        $statusPenetapan = strtolower((string) ($plotting->status_penetapan ?: 'ditetapkan'));
+        if ($statusPenetapan !== 'ditetapkan') {
+            return [
+                'error' => response()->json([
+                    'ok'      => false,
+                    'message' => 'Plotting anggaran harus berstatus Ditetapkan sebelum dapat digunakan untuk digitasi segmen.',
+                ], 422),
+                'warning' => null,
+            ];
+        }
+
+        $isRestricted = $user && !$user->isAdminOrBappeda();
+        if ($isRestricted) {
+            if ($user->id_desa && (int) $plotting->id_desa !== (int) $user->id_desa) {
+                return [
+                    'error' => response()->json([
+                        'ok'      => false,
+                        'message' => 'Plotting anggaran yang dipilih berada di luar wilayah desa Anda.',
+                    ], 403),
+                    'warning' => null,
+                ];
+            }
+            if ($user->id_kecamatan && (int) $plotting->id_kecamatan !== (int) $user->id_kecamatan) {
+                return [
+                    'error' => response()->json([
+                        'ok'      => false,
+                        'message' => 'Plotting anggaran yang dipilih berada di luar wilayah kecamatan Anda.',
+                    ], 403),
+                    'warning' => null,
+                ];
+            }
+        }
+
+        $targetKecamatan = $validated['id_kecamatan'] ?? $existingSegmen?->id_kecamatan;
+        $targetDesa = $validated['id_desa'] ?? $existingSegmen?->id_desa;
+
+        if ($targetKecamatan && (int) $targetKecamatan !== (int) $plotting->id_kecamatan) {
+            return [
+                'error' => response()->json([
+                    'ok'      => false,
+                    'message' => 'Kecamatan segmen tidak sesuai dengan wilayah pada Plotting Anggaran terpilih.',
+                ], 422),
+                'warning' => null,
+            ];
+        }
+        if ($targetDesa && (int) $targetDesa !== (int) $plotting->id_desa) {
+            return [
+                'error' => response()->json([
+                    'ok'      => false,
+                    'message' => 'Desa segmen tidak sesuai dengan wilayah pada Plotting Anggaran terpilih.',
+                ], 422),
+                'warning' => null,
+            ];
+        }
+
+        $validated['id_kecamatan'] = (int) $plotting->id_kecamatan;
+        $validated['id_desa'] = (int) $plotting->id_desa;
+        $validated['is_non_pagu'] = false;
+
+        // Kunci konsistensi sumber dana & tahun pembangunan mengikuti pagu resmi terpilih
+        if (!empty($plotting->sumber_dana)) {
+            $validated['sumber_dana'] = $plotting->sumber_dana;
+        }
+        if (!empty($plotting->tahun_anggaran)) {
+            $validated['tahun_pembangunan'] = (int) $plotting->tahun_anggaran;
+        }
+
+        $scheduleCheck = app(JadwalAnggaranService::class)->checkAccess(
+            $user,
+            (int) ($validated['tahun_pembangunan'] ?? $plotting->tahun_anggaran ?? date('Y')),
+            (int) $plotting->id_kecamatan,
+            (int) $plotting->id_desa,
+            'digitasi',
+            false,
+        );
+        if (!$scheduleCheck['allowed']) {
+            return [
+                'error'   => response()->json(['ok' => false, 'message' => $scheduleCheck['message']], 403),
+                'warning' => null,
+            ];
+        }
+
+        $warning = null;
+        $targetMeters = (float) ($plotting->target_panjang_m ?? 0);
+        if ($targetMeters > 0) {
+            $usedOtherMeters = (float) InfrastrukturSegmen::query()
+                ->where('plotting_id', $plotting->id)
+                ->when($existingSegmen, fn ($q) => $q->where('id', '!=', $existingSegmen->id))
+                ->sum('panjang');
+
+            $currentSegmentMeters = (float) ($validated['panjang'] ?? $existingSegmen?->panjang ?? 0);
+            $projectedTotal = $usedOtherMeters + $currentSegmentMeters;
+            $maxWithTolerance = $targetMeters * 1.10;
+
+            if ($projectedTotal > $maxWithTolerance + 0.01) {
+                return [
+                    'error' => response()->json([
+                        'ok'      => false,
+                        'message' => sprintf(
+                            'Akumulasi panjang segmen (%.2f m) melebihi target pagu (%.2f m) beserta batas toleransi pengukuran +10%% (%.2f m).',
+                            $projectedTotal,
+                            $targetMeters,
+                            $maxWithTolerance,
+                        ),
+                    ], 422),
+                    'warning' => null,
+                ];
+            }
+
+            if ($projectedTotal > $targetMeters + 0.01) {
+                $warning = sprintf(
+                    'Total realisasi panjang (%.2f m) sedikit melampaui target pagu (%.2f m), masih dalam batas toleransi pengukuran +10%%.',
+                    $projectedTotal,
+                    $targetMeters,
+                );
+            }
+        }
+
+        return ['error' => null, 'warning' => $warning];
+    }
+
+    /**
+     * Kembangkan nilai filter sumber_dana agar kode ref_sumber_dana maupun nilai historis (BKK, APBD, DD)
+     * saling mengenali saat filter diterapkan.
+     */
+    private function resolveSumberDanaFilterValues(string $val): array
+    {
+        $trimmed = trim($val);
+        $upper = strtoupper($trimmed);
+        $candidates = [$trimmed];
+
+        $aliasGroups = [
+            ['BKK', 'BKKD', 'BKK_DESA'],
+            ['APBD', 'APBD_KAB'],
+            ['DD', 'DDS', 'DANA_DESA'],
+            ['DAK', 'DAK_FISIK'],
+            ['BANPROV', 'BANTUAN_PROVINSI'],
+        ];
+
+        foreach ($aliasGroups as $group) {
+            if (in_array($upper, $group, true)) {
+                foreach ($group as $alias) {
+                    $candidates[] = $alias;
+                }
+            }
+        }
+
+        $refMatch = RefSumberDana::query()
+            ->whereRaw('UPPER(kode) = ?', [$upper])
+            ->first();
+
+        if ($refMatch) {
+            $candidates[] = $refMatch->kode;
+            if (!empty($refMatch->nama)) {
+                $candidates[] = $refMatch->nama;
+            }
+        }
+
+        return array_values(array_unique(array_filter($candidates)));
+    }
+
+    private function checkScheduleForSegmen(?User $user, InfrastrukturSegmen $segmen): ?JsonResponse
+    {
+        $tahun = (int) ($segmen->tahun_pembangunan ?: ($segmen->plotting?->tahun_anggaran ?: date('Y')));
+        $check = app(JadwalAnggaranService::class)->checkAccess(
+            $user,
+            $tahun,
+            $segmen->id_kecamatan ? (int) $segmen->id_kecamatan : null,
+            $segmen->id_desa ? (int) $segmen->id_desa : null,
+            'digitasi',
+            (bool) $segmen->is_non_pagu,
+        );
+
+        if (!$check['allowed']) {
+            return response()->json([
+                'ok'      => false,
+                'message' => $check['message'],
+            ], 403);
+        }
+
+        return null;
     }
 }
 

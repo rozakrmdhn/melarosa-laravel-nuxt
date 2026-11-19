@@ -20,14 +20,18 @@ const SCALE_OPTIONS: ScaleOption[] = [
 const props = withDefaults(
   defineProps<{
     activeCoords?: { lng: number; lat: number } | null;
+    isLiveCursor?: boolean;
     scaleRatio?: string | null;
+    leftPanelOpen?: boolean;
     mobileDrawerOpen?: boolean;
     mobileSheetSnap?: "min" | "peek" | "full" | string;
     clickedCoordinate?: [number, number] | null;
   }>(),
   {
     activeCoords: null,
+    isLiveCursor: false,
     scaleRatio: "1 : 25.000",
+    leftPanelOpen: false,
     mobileDrawerOpen: false,
     mobileSheetSnap: "min",
     clickedCoordinate: null,
@@ -118,37 +122,38 @@ defineExpose({
 
 <template>
   <div
-    class="absolute z-20 pointer-events-auto select-none left-1/2 -translate-x-1/2 max-w-[calc(100vw-120px)] sm:max-w-none transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"
+    class="absolute z-20 pointer-events-none select-none flex justify-center transition-all duration-[580ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] left-[68px] right-[68px] md:right-[76px]"
     :class="[
+      leftPanelOpen ? 'md:left-[444px] lg:left-[496px]' : 'md:left-[76px]',
       mobileDrawerOpen && mobileSheetSnap === 'full'
-        ? 'opacity-0 pointer-events-none translate-y-4 md:opacity-100 md:pointer-events-auto md:translate-y-0 md:bottom-4'
+        ? 'opacity-0 translate-y-4 md:opacity-100 md:translate-y-0 md:bottom-4'
         : mobileDrawerOpen && mobileSheetSnap === 'peek'
-          ? 'bottom-[calc(50dvh+16px)] opacity-100 pointer-events-auto md:bottom-4 md:opacity-100'
+          ? 'bottom-[calc(50dvh+16px)] opacity-100 md:bottom-4'
           : mobileDrawerOpen && mobileSheetSnap === 'min'
-            ? 'bottom-[calc(150px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 pointer-events-auto md:bottom-4'
-            : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100 pointer-events-auto'
+            ? 'bottom-[calc(156px+env(safe-area-inset-bottom,0px)+16px)] opacity-100 md:bottom-4'
+            : 'bottom-[calc(14px+env(safe-area-inset-bottom,0px))] sm:bottom-4 md:bottom-4 opacity-100'
     ]"
   >
     <div
-      class="group relative flex items-center gap-1 sm:gap-2 px-2 py-0.5 sm:px-2.5 sm:py-0.5 rounded-full bg-white/92 dark:bg-[#0b1322]/92 backdrop-blur-md border border-slate-200/80 dark:border-white/10 shadow-md shadow-slate-900/5 dark:shadow-black/40 text-xs transition-colors hover:border-slate-300 dark:hover:border-white/20 h-6 sm:h-6.5 leading-none"
+      class="group relative pointer-events-auto flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 rounded-xl bg-white/95 dark:bg-[#0c1522]/95 border border-slate-200/90 dark:border-white/10 shadow-md shadow-slate-900/10 dark:shadow-black/45 text-xs transition-colors hover:border-slate-300 dark:hover:border-white/20 h-8 sm:h-9 max-w-full"
     >
       <!-- 1. Scale Bar Graphic Section (Selalu tampil di mobile & desktop) -->
       <div class="flex items-center shrink-0" title="Skala Grafis Peta">
         <div
           ref="scaleTargetEl"
-          class="flex items-center justify-center min-w-[44px] sm:min-w-[55px] h-3.5 scale-line-container"
+          class="flex items-end justify-center min-w-[48px] sm:min-w-[60px] h-4 scale-line-container"
         />
       </div>
 
       <!-- Vertical Divider -->
-      <div class="h-2.5 w-px bg-slate-200 dark:bg-white/15 shrink-0" />
+      <div class="h-4 w-px bg-slate-200 dark:bg-white/15 shrink-0" aria-hidden="true" />
 
-      <!-- 2. Scale Ratio Dropdown Select (Gaya QGIS / ArcGIS - Minimalis) -->
+      <!-- 2. Scale Ratio Dropdown Select -->
       <div ref="scaleDropdownRef" class="relative flex items-center shrink-0">
         <button
           type="button"
-          class="relative flex items-center gap-0.5 text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums shrink-0 px-1 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-hidden leading-none"
-          :class="{ 'bg-slate-100 dark:bg-white/10 text-blue-600 dark:text-blue-400': isScaleDropdownOpen }"
+          class="relative flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums shrink-0 px-1.5 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer after:absolute after:-inset-y-2 after:-inset-x-1 after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5B9E] dark:focus-visible:outline-sky-400 leading-none"
+          :class="{ 'bg-[#2B5B9E]/10 dark:bg-sky-500/15 text-[#2B5B9E] dark:text-sky-300': isScaleDropdownOpen }"
           title="Pilih Skala Kartografis Standar"
           :aria-expanded="isScaleDropdownOpen"
           aria-haspopup="listbox"
@@ -157,8 +162,9 @@ defineExpose({
           <span>{{ scaleRatio || '1 : 25.000' }}</span>
           <UIcon
             name="i-lucide-chevron-up"
-            class="size-2.5 text-slate-500 dark:text-slate-400 transition-transform duration-200"
-            :class="{ 'rotate-180 text-blue-600 dark:text-blue-400': isScaleDropdownOpen }"
+            class="size-3 text-slate-500 dark:text-slate-400 transition-transform duration-200"
+            :class="{ 'rotate-180 text-[#2B5B9E] dark:text-sky-300': isScaleDropdownOpen }"
+            aria-hidden="true"
           />
         </button>
 
@@ -173,7 +179,7 @@ defineExpose({
         >
           <div
             v-if="isScaleDropdownOpen"
-            class="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-50 min-w-[120px] py-1 bg-white/98 dark:bg-[#0b1322]/98 backdrop-blur-md rounded-xl border border-slate-200/90 dark:border-white/10 shadow-xl shadow-slate-900/15 dark:shadow-black/60 max-h-[210px] overflow-y-auto"
+            class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 min-w-[136px] p-1 bg-white dark:bg-[#0c1522] rounded-xl border border-slate-200/90 dark:border-white/10 shadow-xl shadow-slate-900/15 dark:shadow-black/60 max-h-[240px] overflow-y-auto"
             role="listbox"
             aria-label="Daftar Skala Kartografis Standar"
           >
@@ -183,9 +189,9 @@ defineExpose({
               type="button"
               role="option"
               :aria-selected="scaleRatio === scale.label"
-              class="w-full min-h-[44px] flex items-center justify-between gap-1.5 px-3 text-left text-xs transition-colors cursor-pointer rounded-md leading-tight"
+              class="w-full min-h-[40px] flex items-center justify-between gap-2 px-2.5 text-left text-xs transition-colors cursor-pointer rounded-lg leading-tight focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-[#2B5B9E]"
               :class="scaleRatio === scale.label
-                ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-bold'
+                ? 'bg-[#2B5B9E]/10 dark:bg-sky-500/15 text-[#2B5B9E] dark:text-sky-300 font-bold'
                 : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'"
               @click.stop="selectScale(scale)"
             >
@@ -193,42 +199,55 @@ defineExpose({
               <UIcon
                 v-if="scaleRatio === scale.label"
                 name="i-lucide-check"
-                class="size-2.5 text-blue-600 dark:text-blue-400 shrink-0"
+                class="size-3.5 text-[#2B5B9E] dark:text-sky-300 shrink-0"
+                aria-hidden="true"
               />
             </button>
           </div>
         </Transition>
       </div>
 
-      <!-- 3. Desktop Coordinates Section (Disembunyikan di mobile, tampil di desktop md:) -->
-      <div class="hidden md:flex items-center gap-1.5 shrink-0 min-w-0">
+      <!-- 3. Desktop Coordinates Section (Responsif terhadap panel kiri agar tidak berhimpitan) -->
+      <div
+        class="items-center gap-2 shrink-0 min-w-0"
+        :class="leftPanelOpen ? 'hidden lg:flex' : 'hidden md:flex'"
+      >
         <!-- Divider -->
-        <div class="h-2.5 w-px bg-slate-200 dark:bg-white/15 shrink-0" />
+        <div class="h-4 w-px bg-slate-200 dark:bg-white/15 shrink-0" aria-hidden="true" />
 
-        <div class="flex items-center gap-1 shrink-0 min-w-0">
-          <!-- Coordinate Values (Tampilan Bersih Read-Only Tanpa Tombol Salin) -->
+        <div class="flex items-center gap-1.5 shrink-0 min-w-0">
+          <!-- Coordinate Values (Read-Only, Non-Jitter, Non-Truncated) -->
           <div
-            class="flex items-center text-xs text-slate-700 dark:text-slate-200 font-medium px-0.5 select-text leading-none"
-            title="Koordinat Kursor Peta"
+            class="flex items-center gap-1.5 font-mono text-[11px] font-medium tabular-nums tracking-tight text-slate-700 dark:text-slate-200 select-text leading-none whitespace-nowrap"
+            :title="isLiveCursor ? 'Koordinat Kursor Peta (WGS 84)' : 'Koordinat Titik Tengah Peta (WGS 84)'"
           >
-            <span v-if="coordDisplayFormat === 'dd'" class="tabular-nums flex items-center">
+            <UIcon
+              name="i-lucide-crosshair"
+              class="size-3.5 shrink-0 transition-colors"
+              :class="isLiveCursor ? 'text-[#2B5B9E] dark:text-sky-400' : 'text-slate-400 dark:text-slate-500'"
+              aria-hidden="true"
+            />
+            <span
+              v-if="coordDisplayFormat === 'dd'"
+              class="inline-flex items-center min-w-[172px] justify-center"
+            >
               <span>{{ formattedLatDisplay }}</span>
-              <span class="mx-0.5 text-slate-300 dark:text-slate-600 font-normal">•</span>
+              <span class="mx-1 text-slate-400 dark:text-slate-500 font-normal">·</span>
               <span>{{ formattedLngDisplay }}</span>
             </span>
 
-            <span v-else class="tabular-nums text-xs truncate max-w-[140px]">
+            <span v-else class="inline-flex items-center min-w-[192px] justify-center">
               {{ formattedDmsDisplay }}
             </span>
           </div>
 
-          <!-- Format Toggle Button (DD / DMS - Minimalis) -->
+          <!-- Format Toggle Button (DD / DMS) -->
           <button
             type="button"
-            class="relative min-h-[19px] min-w-[22px] px-1 py-0 rounded-md text-xs font-bold transition-all cursor-pointer active:scale-95 flex items-center justify-center shrink-0 after:absolute after:-inset-y-3.5 after:-inset-x-1 after:content-[''] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-hidden leading-none"
+            class="relative h-6 min-w-[30px] px-1.5 rounded-md text-[10px] font-bold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center justify-center shrink-0 after:absolute after:-inset-y-2.5 after:-inset-x-1 after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2B5B9E] dark:focus-visible:outline-sky-400 leading-none"
             :class="coordDisplayFormat === 'dd'
-              ? 'bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/15'
-              : 'bg-blue-600 text-white shadow-xs'"
+              ? 'bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200/80 dark:hover:bg-white/15'
+              : 'bg-[#2B5B9E] text-white shadow-xs'"
             :title="`Beralih ke format ${coordDisplayFormat === 'dd' ? 'DMS (Derajat Menit Detik)' : 'DD (Derajat Desimal)'}`"
             @click="coordDisplayFormat = coordDisplayFormat === 'dd' ? 'dms' : 'dd'"
           >
@@ -259,18 +278,19 @@ defineExpose({
 }
 
 :deep(.ol-scale-line-inner) {
-  color: #334155;
+  color: #1e293b;
   border: 1.5px solid #475569;
   border-top: none;
-  font-size: 12px;
+  font-size: 10.5px;
   font-weight: 700;
-  font-family: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   text-align: center;
   margin: 0 auto;
-  padding: 0 3px 0.5px;
+  padding: 0 5px 1.5px;
   background: transparent !important;
-  line-height: 1.1;
+  line-height: 1.15;
   transition: color 0.2s ease, border-color 0.2s ease;
 }
 

@@ -31,6 +31,7 @@ class StoreInfrastrukturSegmenRequest extends FormRequest
             'id_desa'            => ['required', 'integer', 'exists:bataswilayah_desa,id'],
             'id_kecamatan'       => ['required', 'integer', 'exists:bataswilayah_kecamatan,id'],
             'plotting_id'        => ['nullable', 'uuid', 'exists:plotting_anggaran,id'],
+            'is_non_pagu'        => ['nullable', 'boolean'],
             'parent_id'          => ['nullable', 'uuid', 'exists:jalan_porosdesa,id'],
             'status_aset'        => ['nullable', 'string', 'max:100'],
             'sumber_data'        => ['nullable', 'string', 'max:255'],

@@ -3,14 +3,17 @@
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BackupController;
+use App\Http\Controllers\Admin\BasemapController;
 use App\Http\Controllers\Admin\BatasWilayahDesaController;
 use App\Http\Controllers\Admin\BatasWilayahKecamatanController;
 use App\Http\Controllers\Admin\BkkdAgregasiDesaController;
 use App\Http\Controllers\Admin\BkkdProposalController;
 use App\Http\Controllers\Admin\BkkdProposalLokasiController;
 use App\Http\Controllers\Admin\InfrastrukturSegmenController;
+use App\Http\Controllers\Admin\InfrastrukturSegmenFotoController;
 use App\Http\Controllers\Admin\InfrastrukturTipeController;
 use App\Http\Controllers\Admin\InfrastrukturVerifikasiController;
+use App\Http\Controllers\Admin\JadwalTahunAnggaranController;
 use App\Http\Controllers\Admin\JalanPorosDesaController;
 use App\Http\Controllers\Admin\JaringanJalanRuasController;
 use App\Http\Controllers\Admin\GeoportalLayerController;
@@ -20,6 +23,7 @@ use App\Http\Controllers\Gis\GeoportalPublicLayerController;
 use App\Http\Controllers\Admin\MonitoringRealisasiController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\PlottingAnggaranController;
+use App\Http\Controllers\Admin\PublikasiPetaDigitalController;
 use App\Http\Controllers\Admin\RefBkkdController;
 use App\Http\Controllers\Admin\RefSumberDanaController;
 use App\Http\Controllers\Admin\RoleController;
@@ -42,6 +46,16 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
     Route::post('reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:5,1')->name('password.store');
     Route::post('verification-notification', [AuthController::class, 'verificationNotification'])->middleware('throttle:verification-notification')->name('verification.send');
     Route::get('verify-email/{uuid}/{hash}', [AuthController::class, 'verifyEmail'])->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
+
+    // Basemap publik dinamis untuk seluruh peta OpenLayers & MapLibreGLJS
+    Route::get('basemaps', [BasemapController::class, 'publicIndex'])->name('public.basemaps.index');
+
+    // Publikasi Peta Digital (Portal Publik & Desa)
+    Route::get('publikasi-peta', [PublikasiPetaDigitalController::class, 'publicIndex'])->name('public.publikasi-peta.index');
+    Route::get('publikasi-peta/wilayah-options', [PublikasiPetaDigitalController::class, 'publicWilayahOptions'])->name('public.publikasi-peta.wilayah');
+    Route::get('publikasi-peta/{idOrSlug}', [PublikasiPetaDigitalController::class, 'publicShow'])->name('public.publikasi-peta.show');
+    Route::get('publikasi-peta/{idOrSlug}/download', [PublikasiPetaDigitalController::class, 'publicDownload'])->name('public.publikasi-peta.download');
+    Route::get('publikasi-peta/{idOrSlug}/georef-image', [PublikasiPetaDigitalController::class, 'publicGeorefImage'])->name('public.publikasi-peta.georef-image');
 
     Route::middleware(["auth"])->group(function () {
         Route::post('logout', [AuthController::class, 'logout'])->name('logout');
@@ -66,6 +80,25 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             })->name('admin.navigation');
 
             Route::get('roles', [RoleController::class, 'index'])->middleware('permission:roles-view')->name('admin.roles.index');
+
+            // Pengaturan Basemap Dinamis
+            Route::get('basemaps', [BasemapController::class, 'index'])->middleware('permission:layers-view|layers-manage|settings-view|settings-manage')->name('admin.basemaps.index');
+            Route::post('basemaps', [BasemapController::class, 'store'])->middleware('permission:layers-manage|settings-manage')->name('admin.basemaps.store');
+            Route::put('basemaps/{id}', [BasemapController::class, 'update'])->middleware('permission:layers-manage|settings-manage')->name('admin.basemaps.update');
+            Route::patch('basemaps/{id}/set-default', [BasemapController::class, 'setDefault'])->middleware('permission:layers-manage|settings-manage')->name('admin.basemaps.set-default');
+            Route::delete('basemaps/{id}', [BasemapController::class, 'destroy'])->middleware('permission:layers-manage|settings-manage')->name('admin.basemaps.destroy');
+
+            // Publikasi Peta Digital (Admin CRUD + Upload PDF Aman + Georeferencing MapLibre)
+            Route::get('publikasi-peta', [PublikasiPetaDigitalController::class, 'index'])->middleware('permission:layers-view|layers-manage|batas-desa-view|batas-desa-manage|settings-view|settings-manage')->name('admin.publikasi-peta.index');
+            Route::post('publikasi-peta', [PublikasiPetaDigitalController::class, 'store'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.store');
+            Route::get('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'show'])->middleware('permission:layers-view|layers-manage|batas-desa-view|batas-desa-manage|settings-view|settings-manage')->name('admin.publikasi-peta.show');
+            Route::put('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'update'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.update');
+            Route::post('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'update'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.update-post');
+            Route::get('publikasi-peta/{id}/wilayah-boundary', [PublikasiPetaDigitalController::class, 'wilayahBoundary'])->middleware('permission:layers-view|layers-manage|batas-desa-view|batas-desa-manage|settings-view|settings-manage')->name('admin.publikasi-peta.wilayah-boundary');
+            Route::post('publikasi-peta/{id}/georeference', [PublikasiPetaDigitalController::class, 'saveGeoreference'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.georeference.save');
+            Route::delete('publikasi-peta/{id}/georeference', [PublikasiPetaDigitalController::class, 'clearGeoreference'])->middleware('permission:layers-manage|batas-desa-manage|settings-manage')->name('admin.publikasi-peta.georeference.clear');
+            Route::patch('publikasi-peta/{id}/toggle-publish', [PublikasiPetaDigitalController::class, 'togglePublish'])->middleware('permission:layers-manage|batas-desa-manage|settings-manage')->name('admin.publikasi-peta.toggle-publish');
+            Route::delete('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'destroy'])->middleware('permission:layers-manage|batas-desa-manage|settings-manage')->name('admin.publikasi-peta.destroy');
             Route::get('roles/{role}', [RoleController::class, 'show'])->middleware('permission:roles-view')->name('admin.roles.show');
             Route::post('roles', [RoleController::class, 'store'])->middleware('permission:roles-manage|roles-create')->name('admin.roles.store');
             Route::put('roles/{role}', [RoleController::class, 'update'])->middleware('permission:roles-manage|roles-update')->name('admin.roles.update');
@@ -100,7 +133,7 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::delete('batas-wilayah-kecamatan/{id}', [BatasWilayahKecamatanController::class, 'destroy'])->middleware('permission:batas-kecamatan-delete|batas-kecamatan-manage')->name('admin.batas-kecamatan.destroy');
 
             // Spatial Editor Routes: Jalan Poros Desa
-            Route::get('jalan-poros-desa', [JalanPorosDesaController::class, 'index'])->middleware('permission:jalan-poros-desa-view|jalan-poros-desa.view|jalan-view|jalan-poros-desa-manage|jalan-poros-desa.manage')->name('admin.jalan-poros-desa.index');
+            Route::get('jalan-poros-desa', [JalanPorosDesaController::class, 'index'])->middleware('permission:jalan-poros-desa-view|jalan-poros-desa.view|jalan-view|jalan-poros-desa-manage|jalan-poros-desa.manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.jalan-poros-desa.index');
             Route::post('jalan-poros-desa', [JalanPorosDesaController::class, 'store'])->middleware('permission:jalan-poros-desa-create|jalan-poros-desa-manage')->name('admin.jalan-poros-desa.store');
             Route::get('jalan-poros-desa/{id}', [JalanPorosDesaController::class, 'show'])->name('admin.jalan-poros-desa.show');
             Route::put('jalan-poros-desa/{id}', [JalanPorosDesaController::class, 'update'])->middleware('permission:jalan-poros-desa-update|jalan-poros-desa-manage')->name('admin.jalan-poros-desa.update');
@@ -123,24 +156,33 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::get('layers/{layer}/attributes', [LayerController::class, 'attributes'])->middleware('permission:layers-view|layers-manage')->name('admin.layers.attributes');
 
             // Infrastruktur Master Tipe
-            Route::get('infrastruktur-tipe', [InfrastrukturTipeController::class, 'index'])->middleware('permission:infrastruktur-tipe-view|infrastruktur-tipe-manage')->name('admin.infrastruktur-tipe.index');
-            Route::get('infrastruktur-tipe/{id}', [InfrastrukturTipeController::class, 'show'])->middleware('permission:infrastruktur-tipe-view|infrastruktur-tipe-manage')->name('admin.infrastruktur-tipe.show');
+            Route::get('infrastruktur-tipe', [InfrastrukturTipeController::class, 'index'])->middleware('permission:infrastruktur-tipe-view|infrastruktur-tipe-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.infrastruktur-tipe.index');
+            Route::get('infrastruktur-tipe/{id}', [InfrastrukturTipeController::class, 'show'])->middleware('permission:infrastruktur-tipe-view|infrastruktur-tipe-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.infrastruktur-tipe.show');
             Route::post('infrastruktur-tipe', [InfrastrukturTipeController::class, 'store'])->middleware('permission:infrastruktur-tipe-manage')->name('admin.infrastruktur-tipe.store');
             Route::put('infrastruktur-tipe/{id}', [InfrastrukturTipeController::class, 'update'])->middleware('permission:infrastruktur-tipe-manage')->name('admin.infrastruktur-tipe.update');
             Route::delete('infrastruktur-tipe/{id}', [InfrastrukturTipeController::class, 'destroy'])->middleware('permission:infrastruktur-tipe-manage')->name('admin.infrastruktur-tipe.destroy');
 
             // Referensi Sumber Dana
-            Route::get('ref-sumber-dana', [RefSumberDanaController::class, 'index'])->middleware('permission:ref-sumber-dana-view|ref-sumber-dana-manage')->name('admin.ref-sumber-dana.index');
-            Route::get('ref-sumber-dana/{id}', [RefSumberDanaController::class, 'show'])->middleware('permission:ref-sumber-dana-view|ref-sumber-dana-manage')->name('admin.ref-sumber-dana.show');
+            Route::get('ref-sumber-dana', [RefSumberDanaController::class, 'index'])->middleware('permission:ref-sumber-dana-view|ref-sumber-dana-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update|plotting-anggaran-view|plotting-anggaran-manage')->name('admin.ref-sumber-dana.index');
+            Route::get('ref-sumber-dana/{id}', [RefSumberDanaController::class, 'show'])->middleware('permission:ref-sumber-dana-view|ref-sumber-dana-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update|plotting-anggaran-view|plotting-anggaran-manage')->name('admin.ref-sumber-dana.show');
             Route::post('ref-sumber-dana', [RefSumberDanaController::class, 'store'])->middleware('permission:ref-sumber-dana-manage')->name('admin.ref-sumber-dana.store');
             Route::put('ref-sumber-dana/{id}', [RefSumberDanaController::class, 'update'])->middleware('permission:ref-sumber-dana-manage')->name('admin.ref-sumber-dana.update');
             Route::delete('ref-sumber-dana/{id}', [RefSumberDanaController::class, 'destroy'])->middleware('permission:ref-sumber-dana-manage')->name('admin.ref-sumber-dana.destroy');
 
+            // Jadwal Tahun Anggaran & Pengaturan Wilayah Desa
+            Route::get('jadwal-anggaran/active', [JadwalTahunAnggaranController::class, 'active'])->middleware('permission:jadwal-anggaran-view|jadwal-anggaran-manage|plotting-anggaran-view|plotting-anggaran-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.jadwal-anggaran.active');
+            Route::get('jadwal-anggaran', [JadwalTahunAnggaranController::class, 'index'])->middleware('permission:jadwal-anggaran-view|jadwal-anggaran-manage|plotting-anggaran-manage')->name('admin.jadwal-anggaran.index');
+            Route::post('jadwal-anggaran', [JadwalTahunAnggaranController::class, 'store'])->middleware('permission:jadwal-anggaran-manage|plotting-anggaran-manage')->name('admin.jadwal-anggaran.store');
+            Route::put('jadwal-anggaran/{id}', [JadwalTahunAnggaranController::class, 'update'])->middleware('permission:jadwal-anggaran-manage|plotting-anggaran-manage')->name('admin.jadwal-anggaran.update');
+            Route::delete('jadwal-anggaran/{id}', [JadwalTahunAnggaranController::class, 'destroy'])->middleware('permission:jadwal-anggaran-manage|plotting-anggaran-manage')->name('admin.jadwal-anggaran.destroy');
+            Route::post('jadwal-anggaran/{id}/overrides', [JadwalTahunAnggaranController::class, 'storeOverride'])->middleware('permission:jadwal-anggaran-manage|plotting-anggaran-manage')->name('admin.jadwal-anggaran.overrides.store');
+            Route::delete('jadwal-anggaran/{id}/overrides/{overrideId}', [JadwalTahunAnggaranController::class, 'destroyOverride'])->middleware('permission:jadwal-anggaran-manage|plotting-anggaran-manage')->name('admin.jadwal-anggaran.overrides.destroy');
+
             // Plotting Anggaran
-            Route::get('plotting-anggaran', [PlottingAnggaranController::class, 'index'])->middleware('permission:plotting-anggaran-view|plotting-anggaran-manage')->name('admin.plotting-anggaran.index');
-            Route::post('plotting-anggaran', [PlottingAnggaranController::class, 'store'])->middleware('permission:plotting-anggaran-manage')->name('admin.plotting-anggaran.store');
-            Route::get('plotting-anggaran/{id}', [PlottingAnggaranController::class, 'show'])->middleware('permission:plotting-anggaran-view|plotting-anggaran-manage')->name('admin.plotting-anggaran.show');
-            Route::put('plotting-anggaran/{id}', [PlottingAnggaranController::class, 'update'])->middleware('permission:plotting-anggaran-manage')->name('admin.plotting-anggaran.update');
+            Route::get('plotting-anggaran', [PlottingAnggaranController::class, 'index'])->middleware('permission:plotting-anggaran-view|plotting-anggaran-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.plotting-anggaran.index');
+            Route::post('plotting-anggaran', [PlottingAnggaranController::class, 'store'])->middleware('permission:plotting-anggaran-manage|infrastruktur-segmen-create')->name('admin.plotting-anggaran.store');
+            Route::get('plotting-anggaran/{id}', [PlottingAnggaranController::class, 'show'])->middleware('permission:plotting-anggaran-view|plotting-anggaran-manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.plotting-anggaran.show');
+            Route::put('plotting-anggaran/{id}', [PlottingAnggaranController::class, 'update'])->middleware('permission:plotting-anggaran-manage|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.plotting-anggaran.update');
             Route::delete('plotting-anggaran/{id}', [PlottingAnggaranController::class, 'destroy'])->middleware('permission:plotting-anggaran-manage')->name('admin.plotting-anggaran.destroy');
 
             // Infrastruktur Segmen (Spasial)
@@ -151,6 +193,12 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::patch('infrastruktur-segmen/{id}/geometry', [InfrastrukturSegmenController::class, 'updateGeometry'])->middleware('permission:infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.update-geometry');
             Route::post('infrastruktur-segmen/{id}/split', [InfrastrukturSegmenController::class, 'split'])->middleware('permission:infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.split');
             Route::delete('infrastruktur-segmen/{id}', [InfrastrukturSegmenController::class, 'destroy'])->middleware('permission:infrastruktur-segmen-delete')->name('admin.infrastruktur-segmen.destroy');
+
+            // Dokumentasi Foto Lapangan Segmen (Privat + Sanitasi Ketat)
+            Route::get('infrastruktur-segmen/{id}/fotos', [InfrastrukturSegmenFotoController::class, 'index'])->middleware('permission:infrastruktur-segmen-view')->name('admin.infrastruktur-segmen.fotos.index');
+            Route::post('infrastruktur-segmen/{id}/fotos', [InfrastrukturSegmenFotoController::class, 'store'])->middleware(['permission:infrastruktur-segmen-update', 'throttle:uploads'])->name('admin.infrastruktur-segmen.fotos.store');
+            Route::delete('infrastruktur-segmen/{id}/fotos/{fotoId}', [InfrastrukturSegmenFotoController::class, 'destroy'])->middleware('permission:infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.fotos.destroy');
+            Route::get('infrastruktur-segmen/{id}/fotos/{fotoId}/file', [InfrastrukturSegmenFotoController::class, 'file'])->middleware('permission:infrastruktur-segmen-view')->name('admin.infrastruktur-segmen.fotos.file');
 
             // State Machine Verifikasi Segmen
             Route::post('infrastruktur-segmen/{id}/submit', [InfrastrukturVerifikasiController::class, 'submit'])->name('admin.infrastruktur-segmen.submit');

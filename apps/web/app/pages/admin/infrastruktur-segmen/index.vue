@@ -13,18 +13,22 @@ import NumericTextInput from '~/components/dataset/infrastruktur-segmen/NumericT
 import FilterContent from '~/components/dataset/infrastruktur-segmen/FilterContent.vue';
 import SimbologyContent from '~/components/dataset/infrastruktur-segmen/SimbologyContent.vue';
 import WilayahSelector from '~/components/common/WilayahSelector.vue';
+import PlottingFormModal from '~/components/plotting-anggaran/PlottingFormModal.vue';
 import { useInfrastrukturApi } from '~/composables/useInfrastrukturApi';
 import { usePermission } from '~/composables/usePermission';
 import { useAuthStore } from '~/stores/auth';
 import { useWilayahStore } from '~/stores/wilayah';
 import type {
+  ActiveJadwalPeriod,
   GeoJsonFeatureCollection,
   InfrastrukturSegmen,
   InfrastrukturTipe,
   JalanPorosRef,
   PlottingAnggaran,
+  RefSumberDana,
 } from '~/types/infrastruktur';
 import {
+  buildSumberDanaSelectItems,
   KONDISI_OPTIONS,
   PERKERASAN_OPTIONS,
   STATUS_ASET_OPTIONS,
@@ -40,6 +44,14 @@ import type {
 } from '~/types/dataset-editor';
 import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from '~/types/dataset-editor';
 import { formatWilayah } from '~/utils/helpers';
+import {
+  computeCumulativeDistances,
+  extractMergedRoadCoordinates,
+  projectPointOntoRoad,
+  sliceRoadByDistances,
+  type LngLat,
+  type SlicedRoadResult,
+} from '~/utils/road-geometry';
 
 definePageMeta({
   middleware: ['auth', 'permission'],
@@ -71,6 +83,8 @@ const canCreate = computed(() => can('infrastruktur-segmen-create'));
 const canEdit = computed(() => can('infrastruktur-segmen-update'));
 const canDelete = computed(() => can('infrastruktur-segmen-delete'));
 const canSubmit = computed(() => can('infrastruktur-segmen-create') || can('infrastruktur-segmen-update'));
+const canVerifyKecamatanPerm = computed(() => isAdmin() || can('infrastruktur-segmen-verify-kecamatan'));
+const canVerifyBappedaPerm = computed(() => isAdmin() || can('infrastruktur-segmen-verify-bappeda'));
 
 // Territory Context & Role-Permission Scoping
 const userKecamatanId = computed(() =>
@@ -79,8 +93,15 @@ const userKecamatanId = computed(() =>
 const userDesaId = computed(() =>
   auth.user?.id_desa != null ? Number(auth.user.id_desa) : null
 );
-const isBappeda = computed(() => auth.hasRole('verifierBappeda'));
-const isKecamatanRole = computed(() => auth.hasRole('verifierKecamatan'));
+const isBappeda = computed(() =>
+  auth.hasRole('verifierBappeda') || auth.hasRole('verifikator-bappeda') || auth.hasRole('bappeda')
+);
+const isKecamatanRole = computed(() =>
+  auth.hasRole('verifierKecamatan') || auth.hasRole('verifikator-kecamatan') || auth.hasRole('kecamatan')
+);
+const isDesaRole = computed(() =>
+  auth.hasRole('operatorDesa') || auth.hasRole('operator-desa') || auth.hasRole('desa')
+);
 const isKecamatanRestricted = computed(() => !isAdmin() && !isBappeda.value && !!userKecamatanId.value);
 const isDesaRestricted = computed(() => !isAdmin() && !isBappeda.value && !!userDesaId.value);
 
@@ -88,7 +109,7 @@ const userRoleLabel = computed(() => {
   if (isAdmin()) return 'Admin';
   if (isBappeda.value) return 'Bappeda';
   if (isKecamatanRole.value) return 'Kecamatan';
-  if (isDesaRestricted.value) return 'Desa';
+  if (isDesaRestricted.value || isDesaRole.value) return 'Desa';
   return 'Pengguna';
 });
 
@@ -751,6 +772,7 @@ function refreshAllVectorTiles() {
 
 const tipeList = ref<InfrastrukturTipe[]>([]);
 const plottingList = ref<PlottingAnggaran[]>([]);
+const sumberDanaList = ref<RefSumberDana[]>([]);
 const kecamatanList = computed(() => wilayahStore.kecamatanList);
 const desaList = computed(() => (filterKecamatan.value ? wilayahStore.desaByKecamatan[filterKecamatan.value] || [] : []));
 const tableRows = ref<InfrastrukturSegmen[]>([]);
@@ -817,21 +839,54 @@ const clickedCoordText = computed(() => {
 // ─── API Loaders ──────────────────────────────────────────────────────────────
 async function loadMasterData() {
   try {
-    const promises: Promise<any>[] = [
-      can('infrastruktur-tipe-view') || can('infrastruktur-tipe-manage')
+    const canFetchSumberDana =
+      can('ref-sumber-dana-view') ||
+      can('ref-sumber-dana-manage') ||
+      can('infrastruktur-segmen-view') ||
+      can('infrastruktur-segmen-create') ||
+      can('infrastruktur-segmen-update');
+
+    const [tipeRes, plottingRes, sumberDanaRes, jadwalRes] = await Promise.all([
+      can('infrastruktur-tipe-view') ||
+      can('infrastruktur-tipe-manage') ||
+      can('infrastruktur-segmen-view') ||
+      can('infrastruktur-segmen-create')
         ? api.fetchTipeList({ active_only: true })
         : Promise.resolve(null),
-      can('plotting-anggaran-view') || can('plotting-anggaran-manage')
-        ? api.fetchPlottingList({ per_page: 100 })
+      can('plotting-anggaran-view') ||
+      can('plotting-anggaran-manage') ||
+      can('infrastruktur-segmen-view') ||
+      can('infrastruktur-segmen-create')
+        ? api.fetchPlottingList({ per_page: 500 })
         : Promise.resolve(null),
+      canFetchSumberDana
+        ? api.fetchSumberDanaList({ active_only: true })
+        : Promise.resolve(null),
+      api.fetchActiveJadwal({
+        id_kecamatan: isKecamatanRestricted.value ? userKecamatanId.value : (filterKecamatan.value ?? null),
+        id_desa: isDesaRestricted.value ? userDesaId.value : (filterDesa.value ?? null),
+      }).catch(() => null),
       wilayahStore.getKecamatanList(),
-    ];
-    if (filterKecamatan.value) {
-      promises.push(wilayahStore.getDesaList(Number(filterKecamatan.value)));
-    }
-    const [tipeRes, plottingRes] = await Promise.all(promises);
+      ...(filterKecamatan.value ? [wilayahStore.getDesaList(Number(filterKecamatan.value))] : []),
+    ]);
     if (tipeRes?.data) tipeList.value = tipeRes.data;
     if (plottingRes?.data) plottingList.value = plottingRes.data;
+    if (jadwalRes) {
+      jadwalConfigured.value = Boolean(jadwalRes.configured);
+      jadwalBypass.value = Boolean(jadwalRes.is_bypass);
+      jadwalPeriods.value = jadwalRes.data || [];
+    }
+    if (sumberDanaRes?.data) {
+      sumberDanaList.value = sumberDanaRes.data;
+      if (!isCreateModalOpen.value && (!createForm.sumber_dana || createForm.sumber_dana === 'APBD')) {
+        const defaultSd =
+          sumberDanaList.value.find((sd) => sd.kode === 'APBD_KAB') ??
+          sumberDanaList.value[0];
+        if (defaultSd?.kode) {
+          createForm.sumber_dana = defaultSd.kode;
+        }
+      }
+    }
   } catch (err: any) {
     addLog('ERROR', `Gagal memuat master data: ${err?.message}`);
   }
@@ -1113,9 +1168,40 @@ watch(
 // ─── Selection Logic ──────────────────────────────────────────────────────────
 const isDetailLoading = ref(false);
 
+function isSegmenOpenBySchedule(seg: InfrastrukturSegmen | null): boolean {
+  if (!seg || !jadwalConfigured.value || jadwalBypass.value) return true;
+  const linkedPlotYear = seg.plotting_id
+    ? plottingList.value.find((p) => p.id === seg.plotting_id)?.tahun_anggaran
+    : null;
+  const tahun = Number(
+    seg.plotting?.tahun_anggaran
+    ?? linkedPlotYear
+    ?? seg.tahun_pembangunan
+    ?? new Date().getFullYear(),
+  );
+  const period = jadwalPeriods.value.find((j) => Number(j.tahun_anggaran) === tahun);
+  if (!period) return false;
+  const desaId = Number(seg.id_desa || 0);
+  if (desaId > 0 && period.closed_desa_override_ids?.includes(desaId)) {
+    return false;
+  }
+  if (desaId > 0 && period.open_desa_override_ids?.includes(desaId)) {
+    return true;
+  }
+  if (!period.effective_open || !period.allow_digitasi) {
+    return false;
+  }
+  const isNonPaguSeg = Boolean(seg.is_non_pagu || !seg.plotting_id);
+  if (isNonPaguSeg && !period.allow_non_pagu) {
+    return false;
+  }
+  return true;
+}
+
 function canEditSegmen(seg: InfrastrukturSegmen | null): boolean {
   if (!seg || !canEdit.value) return false;
   if (isAdmin() || isBappeda.value) return true;
+  if (!isSegmenOpenBySchedule(seg)) return false;
   const status = String(seg.status_verifikasi || '').toLowerCase();
   if (isDesaRestricted.value) {
     return (
@@ -1132,6 +1218,7 @@ function canEditSegmen(seg: InfrastrukturSegmen | null): boolean {
 function canDeleteSegmen(seg: InfrastrukturSegmen | null): boolean {
   if (!seg || !canDelete.value) return false;
   if (isAdmin() || isBappeda.value) return true;
+  if (!isSegmenOpenBySchedule(seg)) return false;
   if (isDesaRestricted.value) return false;
   if (isKecamatanRestricted.value) {
     const status = String(seg.status_verifikasi || '').toLowerCase();
@@ -1146,12 +1233,40 @@ function canDeleteSegmen(seg: InfrastrukturSegmen | null): boolean {
 function canSubmitSegmen(seg: InfrastrukturSegmen | null): boolean {
   if (!seg || !canSubmit.value) return false;
   const status = String(seg.status_verifikasi || '').toLowerCase();
-  if (status !== 'draft' && status !== 'rejected_kecamatan') return false;
+  if (status !== 'draft' && status !== 'rejected_kecamatan' && status !== 'rejected_bappeda') return false;
   if (isAdmin()) return true;
   if (isDesaRestricted.value) {
     return Number(seg.id_desa) === Number(userDesaId.value);
   }
+  if (isKecamatanRestricted.value) {
+    const inKec = Number(seg.id_kecamatan) === Number(userKecamatanId.value);
+    if (!inKec) return false;
+    const isOwnCreation =
+      (auth.user?.uuid && seg.created_by === auth.user.uuid) ||
+      !String(seg.created_by_role || '').toLowerCase().includes('desa');
+    return isOwnCreation;
+  }
   return false;
+}
+
+function canVerifyKecamatanSegmen(seg: InfrastrukturSegmen | null): boolean {
+  if (!seg || !canVerifyKecamatanPerm.value) return false;
+  const status = String(seg.status_verifikasi || '').toLowerCase();
+  if (status !== 'submitted_desa' && status !== 'rejected_bappeda') return false;
+  if (isAdmin()) return true;
+  if (isBappeda.value || isDesaRestricted.value) return false;
+  return Number(seg.id_kecamatan) === Number(userKecamatanId.value);
+}
+
+function canVerifyBappedaSegmen(seg: InfrastrukturSegmen | null): boolean {
+  if (!seg || !canVerifyBappedaPerm.value) return false;
+  const status = String(seg.status_verifikasi || '').toLowerCase();
+  if (status !== 'verified_kecamatan') return false;
+  return isAdmin() || isBappeda.value;
+}
+
+function canVerifyAnyRow(row: InfrastrukturSegmen): boolean {
+  return canVerifyKecamatanSegmen(row) || canVerifyBappedaSegmen(row);
 }
 
 function handleEditRowFromTable(row: InfrastrukturSegmen) {
@@ -1192,25 +1307,31 @@ async function handleFeatureSelect(feat: any | null, shouldZoom = false) {
 
   const id = String(feat.id || feat.properties?.id);
   const isReselectSameFeature = selectedSegmenId.value === id;
+  if (!isReselectSameFeature) {
+    segmenPanelFeedback.value = null;
+  }
   selectedSegmenId.value = id;
   syncQueryToUrl();
 
-  const p = feat.properties || {};
+  const p = feat.properties || feat || {};
 
-  // 1. Immediately populate from MVT properties + matching table row
+  // 1. Immediately populate from MVT properties / table row + matching table row
   const rowMatch = tableRows.value.find((r) => String(r.id) === id);
-  const matchedTipe = rowMatch?.tipe || tipeList.value.find((t) => t.kode === (p.tipe_kode || rowMatch?.tipe_kode));
+  const matchedTipe = rowMatch?.tipe || feat?.tipe || tipeList.value.find((t) => t.kode === (p.tipe_kode || rowMatch?.tipe_kode));
 
   let rawGeom = feat.geometry || null;
-  if (!rawGeom && rowMatch?.geojson) {
+  if (!rawGeom && (feat.geojson || rowMatch?.geojson)) {
+    const rawJson = feat.geojson || rowMatch?.geojson;
     try {
-      rawGeom = typeof rowMatch.geojson === 'string' ? JSON.parse(rowMatch.geojson) : rowMatch.geojson;
+      rawGeom = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
     } catch {
       // keep null
     }
   }
 
   selectedSegmen.value = {
+    ...(rowMatch || {}),
+    ...(feat.properties ? {} : feat),
     id,
     namobj: p.namobj || rowMatch?.namobj || 'Segmen Tanpa Nama',
     tipe_kode: p.tipe_kode || rowMatch?.tipe_kode || '',
@@ -1218,20 +1339,27 @@ async function handleFeatureSelect(feat: any | null, shouldZoom = false) {
     panjang: p.panjang ?? rowMatch?.panjang ?? null,
     panjang_meter_gis: p.panjang_meter_gis ?? rowMatch?.panjang_meter_gis ?? null,
     lebar: p.lebar ?? rowMatch?.lebar ?? null,
+    jenis_perkerasan: p.jenis_perkerasan ?? rowMatch?.jenis_perkerasan ?? null,
+    status_jalan: p.status_jalan ?? rowMatch?.status_jalan ?? null,
     kondisi: p.kondisi || rowMatch?.kondisi || 'Baik',
     status_kondisi: p.status_kondisi || rowMatch?.status_kondisi || 'Eksisting',
     tahun_pembangunan: p.tahun_pembangunan ?? rowMatch?.tahun_pembangunan ?? null,
     sumber_dana: p.sumber_dana || rowMatch?.sumber_dana || null,
     status_verifikasi: p.status_verifikasi || rowMatch?.status_verifikasi || 'draft',
     status_aset: p.status_aset || rowMatch?.status_aset || null,
+    sumber_data: p.sumber_data ?? rowMatch?.sumber_data ?? null,
+    keterangan: p.keterangan ?? rowMatch?.keterangan ?? null,
     desa: p.desa || rowMatch?.desa || null,
     kecamatan: p.kecamatan || rowMatch?.kecamatan || null,
     id_desa: p.id_desa ?? rowMatch?.id_desa ?? null,
     id_kecamatan: p.id_kecamatan ?? rowMatch?.id_kecamatan ?? null,
-    plotting_id: p.plotting_id || rowMatch?.plotting_id || null,
-    plotting: rowMatch?.plotting,
+    plotting_id: p.plotting_id ?? rowMatch?.plotting_id ?? null,
+    is_non_pagu: p.is_non_pagu ?? rowMatch?.is_non_pagu ?? false,
+    parent_id: p.parent_id ?? rowMatch?.parent_id ?? null,
+    parent: feat?.parent ?? rowMatch?.parent ?? null,
+    plotting: feat?.plotting ?? rowMatch?.plotting,
     geometry: rawGeom,
-    geojson: rowMatch?.geojson,
+    geojson: feat?.geojson ?? rowMatch?.geojson,
     centroid: p.centroid || rowMatch?.centroid || null,
   } as any;
 
@@ -1275,6 +1403,8 @@ function handleZoomToFeature(feat: any) {
 // ─── Digitasi & Create Modal ──────────────────────────────────────────────────
 const isCreateModalOpen = ref(false);
 const isCreating = ref(false);
+const createModalFeedback = ref<{ type: 'error'; message: string } | null>(null);
+const segmenPanelFeedback = ref<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
 
 const maxBuildYear = new Date().getFullYear() + 5;
 const createPanjangRef = ref<InstanceType<typeof NumericTextInput> | null>(null);
@@ -1309,6 +1439,7 @@ const createForm = reactive({
   id_kecamatan: null as number | null,
   id_desa: null as number | null,
   plotting_id: null as string | null,
+  is_non_pagu: false,
   parent_id: null as string | null,
   panjang: 0 as number | null,
   lebar: 3.5 as number | null,
@@ -1317,21 +1448,261 @@ const createForm = reactive({
   kondisi: 'Baik' as any,
   status_kondisi: 'Eksisting' as any,
   tahun_pembangunan: new Date().getFullYear() as number | null,
-  sumber_dana: 'APBD',
+  sumber_dana: 'APBD_KAB',
   status_aset: 'Aset Desa',
   sumber_data: 'Digitasi Canvas GIS',
   keterangan: '',
   geometry: null as any,
 });
 
+const createSumberDanaItems = computed(() =>
+  buildSumberDanaSelectItems(sumberDanaList.value, createForm.sumber_dana, SUMBER_DANA_OPTIONS),
+);
+
+watch(
+  () => createForm.plotting_id,
+  (plottingId) => {
+    if (!plottingId) return;
+    const match = plottingList.value.find((p) => p.id === plottingId);
+    if (match?.sumber_dana) {
+      createForm.sumber_dana = match.sumber_dana;
+    }
+    if (match?.tahun_anggaran) {
+      createForm.tahun_pembangunan = match.tahun_anggaran;
+    }
+  },
+);
+
 // ─── Pre-Digitization Setup & Map Interaction Modes ──────────────────────────
 const isIdentifyMode = ref(true);
 const identifyModeBeforeDraw = ref(true);
-const digitasiMethod = ref<'manual' | 'auto'>('manual'); // TODO: Implementasi digitasi otomatis mengikuti geometri Jalan Poros Desa
+const digitasiBudgetMode = ref<'pagu' | 'non_pagu'>('pagu');
+const selectedSetupPlottingId = ref<string | null>(null);
+const setupPlottingLoading = ref(false);
+const isQuickPlottingModalOpen = ref(false);
+const digitasiMethod = ref<'manual' | 'auto'>('manual');
 const digitasiRefMode = ref<'with_ref' | 'without_ref'>('with_ref');
+const jadwalConfigured = ref(false);
+const jadwalBypass = ref(false);
+const jadwalPeriods = ref<ActiveJadwalPeriod[]>([]);
+const setupJadwalLoading = ref(false);
+const showClosedSchedulePlottings = ref(false);
 
-const mapInteractionMode = computed<'pan' | 'identify' | 'pick-reference'>(() => {
+const canCreatePlotting = computed(() =>
+  isAdmin()
+  || can('plotting-anggaran-manage')
+  || can('infrastruktur-segmen-create'),
+);
+
+function isPlottingOpenBySchedule(p: PlottingAnggaran): boolean {
+  if (!jadwalConfigured.value) return true;
+  const period = jadwalPeriods.value.find(
+    (j) => Number(j.tahun_anggaran) === Number(p.tahun_anggaran),
+  );
+  if (!period) return false;
+  const desaId = Number(p.id_desa || 0);
+  if (desaId > 0 && period.closed_desa_override_ids?.includes(desaId)) {
+    return false;
+  }
+  if (desaId > 0 && period.open_desa_override_ids?.includes(desaId)) {
+    return true;
+  }
+  if (jadwalBypass.value) {
+    return Boolean(period.is_open);
+  }
+  return Boolean(period.effective_open && period.allow_digitasi);
+}
+
+const setupPlottingBaseByWilayah = computed(() => {
+  const activeKecId = isKecamatanRestricted.value
+    ? userKecamatanId.value
+    : (filterKecamatan.value ?? null);
+  const activeDesaId = isDesaRestricted.value
+    ? userDesaId.value
+    : (filterDesa.value ?? null);
+
+  return plottingList.value.filter((p) => {
+    const status = String(p.status_penetapan || 'ditetapkan').toLowerCase();
+    if (status !== 'ditetapkan') return false;
+    if (activeKecId && Number(p.id_kecamatan) !== Number(activeKecId)) return false;
+    if (activeDesaId && Number(p.id_desa) !== Number(activeDesaId)) return false;
+    return true;
+  });
+});
+
+const hiddenClosedPlottingCount = computed(() => {
+  if (!jadwalConfigured.value) return 0;
+  return setupPlottingBaseByWilayah.value.filter((p) => !isPlottingOpenBySchedule(p)).length;
+});
+
+const setupPlottingOptions = computed(() => {
+  if (!jadwalConfigured.value) {
+    return setupPlottingBaseByWilayah.value;
+  }
+  if (jadwalBypass.value && showClosedSchedulePlottings.value) {
+    return setupPlottingBaseByWilayah.value;
+  }
+  return setupPlottingBaseByWilayah.value.filter((p) => isPlottingOpenBySchedule(p));
+});
+
+watch(setupPlottingOptions, (opts) => {
+  if (selectedSetupPlottingId.value && !opts.some((p) => p.id === selectedSetupPlottingId.value)) {
+    selectedSetupPlottingId.value = null;
+  }
+});
+
+const setupPlottingItems = computed(() =>
+  setupPlottingOptions.value.map((p) => {
+    const target = Number(p.target_panjang_m || 0);
+    const used = Number(p.used_panjang_m || 0);
+    const remainText = target > 0
+      ? `Sisa ${Math.max(0, Math.round(target - used)).toLocaleString('id-ID')} m`
+      : `Pagu ${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(p.target_pagu_anggaran || 0))}`;
+    const skPart = p.nomor_sk ? `${p.nomor_sk} · ` : '';
+    return {
+      label: `[${p.tahun_anggaran}] ${skPart}${p.nama_kegiatan} (${remainText})`,
+      value: p.id,
+    };
+  }),
+);
+
+const selectedSetupPlottingDetail = computed<PlottingAnggaran | null>(() => {
+  if (digitasiBudgetMode.value !== 'pagu' || !selectedSetupPlottingId.value) return null;
+  return setupPlottingOptions.value.find((p) => p.id === selectedSetupPlottingId.value)
+    ?? plottingList.value.find((p) => p.id === selectedSetupPlottingId.value)
+    ?? null;
+});
+
+async function loadActiveJadwalForSetup() {
+  setupJadwalLoading.value = true;
+  try {
+    const plot = selectedSetupPlottingDetail.value;
+    const road = selectedSetupRoadDetail.value?.data;
+    const kecId = isKecamatanRestricted.value
+      ? userKecamatanId.value
+      : (plot?.id_kecamatan ?? road?.id_kecamatan ?? filterKecamatan.value ?? null);
+    const desaId = isDesaRestricted.value
+      ? userDesaId.value
+      : (plot?.id_desa ?? road?.id_desa ?? filterDesa.value ?? null);
+    const res = await api.fetchActiveJadwal({
+      id_kecamatan: kecId,
+      id_desa: desaId,
+    });
+    jadwalConfigured.value = Boolean(res?.configured);
+    jadwalBypass.value = Boolean(res?.is_bypass);
+    jadwalPeriods.value = res?.data || [];
+  } catch {
+    // Pertahankan status jadwal terakhir bila request gagal sesaat
+  } finally {
+    setupJadwalLoading.value = false;
+  }
+}
+
+async function refreshSetupPlottingOptions() {
+  setupPlottingLoading.value = true;
+  try {
+    const [res] = await Promise.all([
+      api.fetchPlottingList({ per_page: 500 }),
+      loadActiveJadwalForSetup(),
+    ]);
+    if (res?.data) {
+      plottingList.value = res.data;
+    }
+  } catch {
+    // Keep existing list on transient error
+  } finally {
+    setupPlottingLoading.value = false;
+  }
+}
+
+const setupScheduleInfo = computed(() => {
+  const openPeriods = jadwalPeriods.value.filter((p) => p.effective_open && p.allow_digitasi);
+  const base = {
+    configured: jadwalConfigured.value,
+    isBypass: jadwalBypass.value,
+    loading: setupJadwalLoading.value,
+    openPeriods,
+  };
+
+  if (!jadwalConfigured.value || jadwalBypass.value) {
+    return {
+      ...base,
+      selectedPeriod: null,
+      isBlocked: false,
+      blockReason: null,
+    };
+  }
+
+  if (digitasiBudgetMode.value === 'non_pagu') {
+    const nonPaguOpen = openPeriods.filter((p) => p.allow_non_pagu);
+    const currentYear = new Date().getFullYear();
+    const preferred =
+      nonPaguOpen.find((p) => Number(p.tahun_anggaran) === currentYear) ??
+      nonPaguOpen[0] ??
+      null;
+    const isBlocked = nonPaguOpen.length === 0;
+    return {
+      ...base,
+      selectedPeriod: preferred,
+      isBlocked,
+      blockReason: isBlocked
+        ? 'Input segmen Non-Pagu tidak diizinkan atau tidak ada jadwal tahun anggaran yang dibuka untuk wilayah ini.'
+        : null,
+    };
+  }
+
+  const plot = selectedSetupPlottingDetail.value;
+  if (plot) {
+    const match =
+      jadwalPeriods.value.find((p) => Number(p.tahun_anggaran) === Number(plot.tahun_anggaran)) ??
+      null;
+    const allowed = Boolean(match && match.effective_open && match.allow_digitasi);
+    return {
+      ...base,
+      selectedPeriod: match,
+      isBlocked: !allowed,
+      blockReason: allowed
+        ? null
+        : (match?.reason || `Digitasi Tahun Anggaran ${plot.tahun_anggaran} sedang ditutup untuk wilayah ini.`),
+    };
+  }
+
+  return {
+    ...base,
+    selectedPeriod: openPeriods[0] ?? null,
+    isBlocked: openPeriods.length === 0,
+    blockReason:
+      openPeriods.length === 0
+        ? 'Saat ini tidak ada jadwal tahun anggaran yang dibuka untuk digitasi pada wilayah ini (kecuali desa mendapat dispensasi khusus).'
+        : null,
+  };
+});
+
+function handleQuickPlottingCreated(created: PlottingAnggaran) {
+  if (created?.id) {
+    if (!plottingList.value.some((p) => p.id === created.id)) {
+      plottingList.value = [created, ...plottingList.value];
+    }
+    if (jadwalConfigured.value && jadwalBypass.value && !isPlottingOpenBySchedule(created)) {
+      showClosedSchedulePlottings.value = true;
+    }
+    digitasiBudgetMode.value = 'pagu';
+    selectedSetupPlottingId.value = created.id;
+  }
+  refreshSetupPlottingOptions();
+}
+
+const autoScope = ref<'partial' | 'full'>('partial');
+const autoStartMeter = ref(0);
+const autoEndMeter = ref(0);
+const isPickingAutoPoints = ref(false);
+const autoPickStep = ref<'start' | 'end'>('start');
+
+const mapInteractionMode = computed<'pan' | 'identify' | 'pick-reference' | 'pick-auto-points'>(() => {
   if (isDigitasiSetupOpen.value) {
+    if (digitasiMethod.value === 'auto' && isPickingAutoPoints.value && selectedSetupRoadDetail.value) {
+      return 'pick-auto-points';
+    }
     return digitasiRefMode.value === 'with_ref' ? 'pick-reference' : 'pan';
   }
   return isIdentifyMode.value ? 'identify' : 'pan';
@@ -1358,6 +1729,19 @@ const setupRoadError = ref<string | null>(null);
 const selectedSetupRoadId = ref<string | null>(null);
 const selectedSetupRoadDetail = ref<{ data: JalanPorosRef; feature: any } | null>(null);
 const setupZoomLoading = ref(false);
+
+watch(
+  [
+    () => selectedSetupPlottingDetail.value?.id,
+    () => selectedSetupRoadDetail.value?.data?.id,
+    digitasiBudgetMode,
+  ],
+  () => {
+    if (isDigitasiSetupOpen.value) {
+      loadActiveJadwalForSetup();
+    }
+  },
+);
 
 const activeDigitasiRef = ref<{ data: JalanPorosRef; feature: any } | null>(null);
 const savedJalanLayerVisibleBeforeDraw = ref<boolean | null>(null);
@@ -1392,15 +1776,79 @@ const activeReferenceLabel = computed(() => {
   return null;
 });
 
+const autoRoadCoords = computed<LngLat[]>(() =>
+  extractMergedRoadCoordinates(selectedSetupRoadDetail.value?.feature),
+);
+const autoRoadStats = computed(() => computeCumulativeDistances(autoRoadCoords.value));
+const autoRoadTotalMeters = computed(
+  () => Math.round(autoRoadStats.value.totalMeters * 100) / 100,
+);
+
+const autoSlicedResult = computed<SlicedRoadResult | null>(() => {
+  if (digitasiMethod.value !== 'auto' || !selectedSetupRoadDetail.value) return null;
+  if (autoRoadCoords.value.length < 2) return null;
+  if (autoScope.value === 'full') {
+    return sliceRoadByDistances(autoRoadCoords.value, 0, autoRoadStats.value.totalMeters);
+  }
+  return sliceRoadByDistances(autoRoadCoords.value, autoStartMeter.value, autoEndMeter.value);
+});
+
+const autoGeometryError = computed<string | null>(() => {
+  if (digitasiMethod.value !== 'auto' || !selectedSetupRoadDetail.value) return null;
+  if (autoRoadCoords.value.length < 2) {
+    return 'Geometri ruas jalan poros tidak valid (kurang dari 2 titik koordinat).';
+  }
+  if (autoScope.value === 'partial' && !autoSlicedResult.value) {
+    return 'Jarak antara Titik Awal (A) dan Titik Akhir (B) minimal 1 meter.';
+  }
+  return null;
+});
+
+const autoPickHint = computed<string | null>(() => {
+  if (!isDigitasiSetupOpen.value || digitasiMethod.value !== 'auto' || !isPickingAutoPoints.value) {
+    return null;
+  }
+  return autoPickStep.value === 'start'
+    ? 'Klik ruas Jalan Poros untuk menentukan Titik Awal (A)'
+    : `Titik A: STA ${autoStartMeter.value.toLocaleString('id-ID')} m · Klik ruas untuk Titik Akhir (B)`;
+});
+
 const canConfirmDigitasiSetup = computed(() => {
-  if (digitasiMethod.value !== 'manual') return false;
+  if (setupScheduleInfo.value.isBlocked) {
+    return false;
+  }
+
+  if (digitasiBudgetMode.value === 'pagu') {
+    const plot = selectedSetupPlottingDetail.value;
+    if (!plot) return false;
+    if (digitasiMethod.value === 'auto' && autoSlicedResult.value) {
+      const target = Number(plot.target_panjang_m || 0);
+      const used = Number(plot.used_panjang_m || 0);
+      if (target > 0 && used + autoSlicedResult.value.lengthMeters > target * 1.1 + 0.01) {
+        return false;
+      }
+    }
+  }
+
+  if (digitasiMethod.value === 'auto') {
+    return Boolean(
+      selectedSetupRoadId.value &&
+      selectedSetupRoadDetail.value &&
+      !setupZoomLoading.value &&
+      autoSlicedResult.value &&
+      autoSlicedResult.value.coordinates.length >= 2,
+    );
+  }
   if (digitasiRefMode.value === 'with_ref') {
     return Boolean(selectedSetupRoadId.value && selectedSetupRoadDetail.value && !setupZoomLoading.value);
   }
   return true;
 });
 
+const isCreateLockedByPlotting = computed(() => Boolean(createForm.plotting_id && !createForm.is_non_pagu));
+
 const isCreateRegionLockedByParent = computed(() => {
+  if (isCreateLockedByPlotting.value) return true;
   if (!createForm.parent_id || !activeDigitasiRef.value) return false;
   const refData = activeDigitasiRef.value.data;
   return Boolean(refData.id_kecamatan && refData.id_desa);
@@ -1420,7 +1868,7 @@ async function loadSetupRoadOptions() {
     const res = await api.fetchJalanPorosLookup({
       id_kecamatan: activeKecId,
       id_desa: activeDesaId,
-      limit: 500,
+      limit: 2000,
     });
     if (seq !== roadLookupSeq) return;
     if (res?.ok && Array.isArray(res.data)) {
@@ -1447,9 +1895,15 @@ watch([filterKecamatan, filterDesa], () => {
   loadSetupRoadOptions();
 });
 
+function clearAutoDigitasiPreview() {
+  mapCanvasRef.value?.setAutoDigitasiPreview(null);
+  mobileMapCanvasRef.value?.setAutoDigitasiPreview(null);
+}
+
 function clearCanvasReferenceHighlight(restoreLayerVisibility = true) {
   mapCanvasRef.value?.setReferenceJalanPoros(null, false);
   mobileMapCanvasRef.value?.setReferenceJalanPoros(null, false);
+  clearAutoDigitasiPreview();
   if (restoreLayerVisibility && savedJalanLayerVisibleBeforeDraw.value !== null) {
     jalanPorosDesaVisible.value = savedJalanLayerVisibleBeforeDraw.value;
     savedJalanLayerVisibleBeforeDraw.value = null;
@@ -1458,6 +1912,8 @@ function clearCanvasReferenceHighlight(restoreLayerVisibility = true) {
 
 function cleanupDigitasiReferenceState() {
   activeDigitasiRef.value = null;
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
   clearCanvasReferenceHighlight(true);
   isIdentifyMode.value = identifyModeBeforeDraw.value;
 }
@@ -1493,10 +1949,42 @@ async function handleSetupRoadChange(roadId: string | null, shouldZoom = true) {
     const res = await api.getJalanPoros(roadId);
     if (seq !== roadFeatureSeq) return;
     if (res?.ok && res.data && res.feature) {
+      if (isDesaRestricted.value && res.data.id_desa && Number(res.data.id_desa) !== Number(userDesaId.value)) {
+        selectedSetupRoadId.value = null;
+        selectedSetupRoadDetail.value = null;
+        toast.add({
+          title: 'Ruas di Luar Wilayah Desa',
+          description: 'Ruas jalan poros yang dipilih berada di luar wilayah desa Anda.',
+          color: 'warning',
+        });
+        return;
+      }
+      if (
+        isKecamatanRestricted.value &&
+        !isDesaRestricted.value &&
+        res.data.id_kecamatan &&
+        Number(res.data.id_kecamatan) !== Number(userKecamatanId.value)
+      ) {
+        selectedSetupRoadId.value = null;
+        selectedSetupRoadDetail.value = null;
+        toast.add({
+          title: 'Ruas di Luar Wilayah Kecamatan',
+          description: 'Ruas jalan poros yang dipilih berada di luar wilayah kecamatan Anda.',
+          color: 'warning',
+        });
+        return;
+      }
+
       if (!setupRoadList.value.some((r) => String(r.id) === String(res.data.id))) {
         setupRoadList.value = [res.data, ...setupRoadList.value];
       }
       selectedSetupRoadDetail.value = { data: res.data, feature: res.feature };
+      const roadCoords = extractMergedRoadCoordinates(res.feature);
+      const roadTotal = Math.round(computeCumulativeDistances(roadCoords).totalMeters * 100) / 100;
+      autoStartMeter.value = 0;
+      autoEndMeter.value = roadTotal;
+      isPickingAutoPoints.value = false;
+      autoPickStep.value = 'start';
       await focusMapToReferenceRoad(res.feature, shouldZoom);
       addLog(
         'INFO',
@@ -1527,9 +2015,28 @@ function handleMapPickReferenceRoad(payload: { id: string; namobj?: string; kode
   handleSetupRoadChange(payload.id, false);
 }
 
+function handleSwitchDigitasiMethod(method: 'manual' | 'auto') {
+  digitasiMethod.value = method;
+  if (method === 'auto') {
+    if (digitasiRefMode.value !== 'with_ref') {
+      digitasiRefMode.value = 'with_ref';
+    }
+    ensureJalanPorosVisibleForSetup();
+    if (selectedSetupRoadDetail.value?.feature) {
+      focusMapToReferenceRoad(selectedSetupRoadDetail.value.feature, false);
+    }
+  } else {
+    isPickingAutoPoints.value = false;
+    autoPickStep.value = 'start';
+    clearAutoDigitasiPreview();
+  }
+}
+
 function handleSwitchSetupRefMode(mode: 'with_ref' | 'without_ref') {
+  if (digitasiMethod.value === 'auto' && mode === 'without_ref') return;
   digitasiRefMode.value = mode;
   if (mode === 'without_ref') {
+    isPickingAutoPoints.value = false;
     clearCanvasReferenceHighlight(true);
   } else {
     ensureJalanPorosVisibleForSetup();
@@ -1538,6 +2045,155 @@ function handleSwitchSetupRefMode(mode: 'with_ref' | 'without_ref') {
     }
   }
 }
+
+function handleUpdateAutoScope(scope: 'partial' | 'full') {
+  autoScope.value = scope;
+  if (scope === 'full') {
+    isPickingAutoPoints.value = false;
+    autoPickStep.value = 'start';
+  }
+}
+
+function handleUpdateAutoStartMeter(val: number) {
+  const clamped = Math.max(0, Math.min(autoRoadTotalMeters.value, val));
+  autoStartMeter.value = Math.round(clamped * 100) / 100;
+}
+
+function handleUpdateAutoEndMeter(val: number) {
+  const clamped = Math.max(0, Math.min(autoRoadTotalMeters.value, val));
+  autoEndMeter.value = Math.round(clamped * 100) / 100;
+}
+
+function handleSwapAutoDirection() {
+  const tmp = autoStartMeter.value;
+  autoStartMeter.value = autoEndMeter.value;
+  autoEndMeter.value = tmp;
+}
+
+function handleResetAutoRange() {
+  autoStartMeter.value = 0;
+  autoEndMeter.value = autoRoadTotalMeters.value;
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
+}
+
+function handleTogglePickAutoPoints() {
+  if (!selectedSetupRoadDetail.value) return;
+  if (isPickingAutoPoints.value) {
+    isPickingAutoPoints.value = false;
+    autoPickStep.value = 'start';
+    if (!isDesktop.value && isDigitasiSetupOpen.value) {
+      mobileDrawerTab.value = 'digitasi-setup';
+      mobileDrawerSnap.value = 'peek';
+      mobileDrawerOpen.value = true;
+    }
+    return;
+  }
+  autoScope.value = 'partial';
+  isPickingAutoPoints.value = true;
+  autoPickStep.value = 'start';
+  if (!isDesktop.value) {
+    mobileDrawerOpen.value = false;
+  }
+  addLog('INFO', 'Klik ruas Jalan Poros Desa pada peta untuk menentukan Titik Awal (A) dan Titik Akhir (B).');
+}
+
+function handleCancelAutoPick() {
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
+  if (!isDesktop.value && isDigitasiSetupOpen.value) {
+    mobileDrawerTab.value = 'digitasi-setup';
+    mobileDrawerSnap.value = 'peek';
+    mobileDrawerOpen.value = true;
+  }
+}
+
+function handlePickAutoPoint(coords: [number, number]) {
+  if (!isDigitasiSetupOpen.value || digitasiMethod.value !== 'auto' || !isPickingAutoPoints.value) {
+    return;
+  }
+  const roadCoords = autoRoadCoords.value;
+  if (roadCoords.length < 2) return;
+
+  const proj = projectPointOntoRoad(coords, roadCoords, autoRoadStats.value);
+  if (!proj) return;
+
+  if (proj.distanceFromPointMeters > 300) {
+    toast.add({
+      title: 'Klik Lebih Dekat ke Ruas',
+      description: 'Titik yang diklik terlalu jauh dari ruas Jalan Poros Desa referensi.',
+      color: 'warning',
+    });
+    return;
+  }
+
+  const along = Math.round(proj.alongMeters * 100) / 100;
+  if (autoPickStep.value === 'start') {
+    autoStartMeter.value = along;
+    autoPickStep.value = 'end';
+    addLog('INFO', `Titik Awal (A) dipilih pada jarak ${along.toLocaleString('id-ID')} m.`);
+    return;
+  }
+
+  if (Math.abs(along - autoStartMeter.value) < 1) {
+    toast.add({
+      title: 'Titik Terlalu Dekat',
+      description: 'Titik Akhir (B) harus berjarak minimal 1 meter dari Titik Awal (A).',
+      color: 'warning',
+    });
+    return;
+  }
+
+  autoEndMeter.value = along;
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
+  addLog('INFO', `Titik Akhir (B) dipilih pada jarak ${along.toLocaleString('id-ID')} m.`);
+
+  if (!isDesktop.value && isDigitasiSetupOpen.value) {
+    mobileDrawerTab.value = 'digitasi-setup';
+    mobileDrawerSnap.value = 'peek';
+    mobileDrawerOpen.value = true;
+  }
+}
+
+watch(
+  [isDigitasiSetupOpen, digitasiMethod, autoSlicedResult, isPickingAutoPoints, autoPickStep, autoStartMeter],
+  () => {
+    if (!isDigitasiSetupOpen.value || digitasiMethod.value !== 'auto' || !selectedSetupRoadDetail.value) {
+      if (!isCreateModalOpen.value) {
+        clearAutoDigitasiPreview();
+      }
+      return;
+    }
+
+    if (isPickingAutoPoints.value && autoPickStep.value === 'end') {
+      const startCoords = autoRoadCoords.value;
+      const projPt = startCoords.length >= 2
+        ? sliceRoadByDistances(startCoords, autoStartMeter.value, Math.min(autoRoadTotalMeters.value, autoStartMeter.value + 2))
+        : null;
+      const pinA = projPt?.startPoint ?? null;
+      const preview = pinA
+        ? { coordinates: [], startPoint: pinA, endPoint: null }
+        : null;
+      mapCanvasRef.value?.setAutoDigitasiPreview(preview);
+      mobileMapCanvasRef.value?.setAutoDigitasiPreview(preview);
+      return;
+    }
+
+    if (autoSlicedResult.value) {
+      const preview = {
+        coordinates: autoSlicedResult.value.coordinates,
+        startPoint: autoSlicedResult.value.startPoint,
+        endPoint: autoSlicedResult.value.endPoint,
+      };
+      mapCanvasRef.value?.setAutoDigitasiPreview(preview);
+      mobileMapCanvasRef.value?.setAutoDigitasiPreview(preview);
+    } else {
+      clearAutoDigitasiPreview();
+    }
+  },
+  { flush: 'post' },
+);
 
 function handleStartDrawing() {
   if (isDrawingMode.value) return;
@@ -1553,7 +2209,16 @@ function handleStartDrawing() {
   isIdentifyMode.value = false;
   mapCanvasRef.value?.closePopup();
   mobileMapCanvasRef.value?.closePopup();
+  digitasiBudgetMode.value = 'pagu';
+  if (selectedSetupPlottingId.value && !setupPlottingOptions.value.some((p) => p.id === selectedSetupPlottingId.value)) {
+    selectedSetupPlottingId.value = null;
+  }
   digitasiMethod.value = 'manual';
+  autoScope.value = 'partial';
+  autoStartMeter.value = 0;
+  autoEndMeter.value = 0;
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
   selectedSetupRoadId.value = null;
   selectedSetupRoadDetail.value = null;
   setupRoadError.value = null;
@@ -1566,11 +2231,14 @@ function handleStartDrawing() {
   } else {
     nextTick(() => expandRightPanel());
   }
+  refreshSetupPlottingOptions();
   loadSetupRoadOptions();
 }
 
 function handleCloseDigitasiSetup(closeMobileDrawer = true) {
   isDigitasiSetupOpen.value = false;
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
   if (closeMobileDrawer && mobileDrawerTab.value === 'digitasi-setup') {
     mobileDrawerOpen.value = false;
   }
@@ -1583,15 +2251,114 @@ function handleCloseDigitasiSetup(closeMobileDrawer = true) {
   }
 }
 
+function openCreateModalFromGeometry(
+  geojson: { type: 'LineString'; coordinates: LngLat[] },
+  lengthMeters: number,
+  sourceLabel: string,
+) {
+  createForm.geometry = geojson;
+  createForm.panjang = Number.isFinite(lengthMeters)
+    ? Math.round(lengthMeters * 100) / 100
+    : 0;
+  createForm.is_non_pagu = digitasiBudgetMode.value === 'non_pagu';
+  createForm.plotting_id = digitasiBudgetMode.value === 'pagu' ? (selectedSetupPlottingDetail.value?.id ?? null) : null;
+  createForm.keterangan = '';
+  createForm.sumber_data = sourceLabel;
+
+  const refRoad = activeDigitasiRef.value?.data;
+  if (refRoad) {
+    createForm.parent_id = refRoad.id;
+    createForm.namobj = refRoad.nama_ruas || '';
+    createForm.status_jalan = 'Jalan Desa';
+    if (refRoad.lebar != null && Number(refRoad.lebar) > 0) {
+      createForm.lebar = Number(refRoad.lebar);
+    }
+    createForm.id_kecamatan = isKecamatanRestricted.value
+      ? userKecamatanId.value
+      : (refRoad.id_kecamatan ?? filterKecamatan.value ?? null);
+    createForm.id_desa = isDesaRestricted.value
+      ? userDesaId.value
+      : (refRoad.id_desa ?? filterDesa.value ?? null);
+  } else {
+    createForm.parent_id = null;
+    createForm.namobj = '';
+    createForm.id_kecamatan = isKecamatanRestricted.value
+      ? userKecamatanId.value
+      : (filterKecamatan.value ?? null);
+    createForm.id_desa = isDesaRestricted.value
+      ? userDesaId.value
+      : (filterDesa.value ?? null);
+  }
+
+  const activePlot = selectedSetupPlottingDetail.value;
+  if (!createForm.is_non_pagu && activePlot) {
+    createForm.plotting_id = activePlot.id;
+    createForm.sumber_dana = activePlot.sumber_dana;
+    createForm.tahun_pembangunan = activePlot.tahun_anggaran;
+    createForm.id_kecamatan = activePlot.id_kecamatan;
+    createForm.id_desa = activePlot.id_desa;
+    if (!createForm.namobj) {
+      createForm.namobj = activePlot.nama_kegiatan || '';
+    }
+  } else if (sumberDanaList.value.length > 0) {
+    const defaultSd =
+      sumberDanaList.value.find((sd) => sd.kode === createForm.sumber_dana) ??
+      sumberDanaList.value.find((sd) => sd.kode === 'APBD_KAB') ??
+      sumberDanaList.value[0];
+    if (defaultSd?.kode) {
+      createForm.sumber_dana = defaultSd.kode;
+    }
+  }
+
+  if (filterTipe.value) createForm.tipe_kode = filterTipe.value;
+  else {
+    const porosTipe = tipeList.value.find((t) => t.kode === 'jalan_poros');
+    if (porosTipe) createForm.tipe_kode = porosTipe.kode;
+    else if (tipeList.value.length > 0) createForm.tipe_kode = tipeList.value[0]!.kode;
+  }
+
+  resetCreateNumericErrors();
+  isCreateModalOpen.value = true;
+}
+
 function handleConfirmDigitasiSetup() {
   if (!canConfirmDigitasiSetup.value) {
     if (digitasiRefMode.value === 'with_ref' && !selectedSetupRoadId.value) {
       toast.add({
         title: 'Pilih Jalan Poros',
-        description: 'Pilih ruas jalan poros desa terlebih dahulu sebelum mulai menggambar.',
+        description: 'Pilih ruas jalan poros desa terlebih dahulu sebelum mulai digitasi.',
         color: 'warning',
       });
     }
+    return;
+  }
+
+  if (digitasiMethod.value === 'auto') {
+    if (!selectedSetupRoadDetail.value || !autoSlicedResult.value) return;
+    activeDigitasiRef.value = selectedSetupRoadDetail.value;
+    if (savedJalanLayerVisibleBeforeDraw.value === null) {
+      savedJalanLayerVisibleBeforeDraw.value = jalanPorosDesaVisible.value;
+    }
+    jalanPorosDesaVisible.value = true;
+    isPickingAutoPoints.value = false;
+    isDigitasiSetupOpen.value = false;
+    if (mobileDrawerTab.value === 'digitasi-setup') {
+      mobileDrawerOpen.value = false;
+    }
+    if (isDesktop.value) {
+      nextTick(() => collapseRightPanel());
+    }
+
+    const sliced = autoSlicedResult.value;
+    addLog(
+      'INFO',
+      `Geometri otomatis terbentuk mengikuti "${formatRoadOptionLabel(selectedSetupRoadDetail.value.data)}" (${sliced.lengthMeters} m, ${sliced.coordinates.length} titik).`,
+    );
+    openCreateModalFromGeometry(
+      { type: 'LineString', coordinates: sliced.coordinates },
+      sliced.lengthMeters,
+      'Digitasi Otomatis (Ref. Jalan Poros Desa)',
+    );
     return;
   }
 
@@ -1631,18 +2398,48 @@ function handleConfirmDigitasiSetup() {
   }
 }
 
+function handleEditAutoGeometryOnMap() {
+  if (!selectedSetupRoadDetail.value || !autoSlicedResult.value) return;
+  activeDigitasiRef.value = selectedSetupRoadDetail.value;
+  if (savedJalanLayerVisibleBeforeDraw.value === null) {
+    savedJalanLayerVisibleBeforeDraw.value = jalanPorosDesaVisible.value;
+  }
+  jalanPorosDesaVisible.value = true;
+  isPickingAutoPoints.value = false;
+  isDigitasiSetupOpen.value = false;
+  if (mobileDrawerTab.value === 'digitasi-setup') {
+    mobileDrawerOpen.value = false;
+  }
+  if (isDesktop.value) {
+    nextTick(() => collapseRightPanel());
+  }
+
+  const coords = autoSlicedResult.value.coordinates;
+  const feat = selectedSetupRoadDetail.value.feature;
+  clearAutoDigitasiPreview();
+  isDrawingMode.value = true;
+  nextTick(() => {
+    mapCanvasRef.value?.setReferenceJalanPoros(feat, false);
+    mobileMapCanvasRef.value?.setReferenceJalanPoros(feat, false);
+    mapCanvasRef.value?.startDrawing(coords);
+    mobileMapCanvasRef.value?.startDrawing(coords);
+  });
+}
+
 function handleReopenDigitasiSetup() {
   mapCanvasRef.value?.cancelDrawing(false);
   mobileMapCanvasRef.value?.cancelDrawing(false);
   isDrawingMode.value = false;
   isIdentifyMode.value = false;
-  digitasiMethod.value = 'manual';
+  isPickingAutoPoints.value = false;
+  autoPickStep.value = 'start';
   if (activeDigitasiRef.value) {
     digitasiRefMode.value = 'with_ref';
     selectedSetupRoadId.value = activeDigitasiRef.value.data.id;
     selectedSetupRoadDetail.value = activeDigitasiRef.value;
     ensureJalanPorosVisibleForSetup();
   } else {
+    digitasiMethod.value = 'manual';
     digitasiRefMode.value = 'without_ref';
   }
   isDigitasiSetupOpen.value = true;
@@ -1747,43 +2544,18 @@ const desktopSnapRoadCount = computed(() => Number(mapCanvasRef.value?.snapRoadC
 
 function handleDrawSaved(payload: { geojson: any; lengthMeters: number }) {
   isDrawingMode.value = false;
-  createForm.geometry = payload.geojson;
-  createForm.panjang = Number.isFinite(payload.lengthMeters)
-    ? Math.round(payload.lengthMeters * 100) / 100
-    : 0;
-  createForm.plotting_id = null;
-  createForm.keterangan = '';
-
-  const refRoad = activeDigitasiRef.value?.data;
-  if (refRoad) {
-    createForm.parent_id = refRoad.id;
-    createForm.namobj = refRoad.nama_ruas || '';
-    createForm.id_kecamatan = isKecamatanRestricted.value
-      ? userKecamatanId.value
-      : (refRoad.id_kecamatan ?? filterKecamatan.value ?? null);
-    createForm.id_desa = isDesaRestricted.value
-      ? userDesaId.value
-      : (refRoad.id_desa ?? filterDesa.value ?? null);
-  } else {
-    createForm.parent_id = null;
-    createForm.namobj = '';
-    createForm.id_kecamatan = isKecamatanRestricted.value
-      ? userKecamatanId.value
-      : (filterKecamatan.value ?? null);
-    createForm.id_desa = isDesaRestricted.value
-      ? userDesaId.value
-      : (filterDesa.value ?? null);
-  }
-
-  if (filterTipe.value) createForm.tipe_kode = filterTipe.value;
-  else if (tipeList.value.length > 0) createForm.tipe_kode = tipeList.value[0].kode;
-
-  addLog('INFO', `Digitasi garis selesai. Panjang: ${createForm.panjang} m.`);
-  resetCreateNumericErrors();
-  isCreateModalOpen.value = true;
+  addLog('INFO', `Digitasi garis selesai. Panjang: ${Math.round(payload.lengthMeters * 100) / 100} m.`);
+  openCreateModalFromGeometry(
+    payload.geojson,
+    payload.lengthMeters,
+    digitasiMethod.value === 'auto' ? 'Digitasi Otomatis (Ref. Jalan Poros Desa)' : 'Digitasi Canvas GIS',
+  );
 }
 
 watch(isCreateModalOpen, (open, prevOpen) => {
+  if (open) {
+    createModalFeedback.value = null;
+  }
   if (!open && prevOpen) {
     cleanupDigitasiReferenceState();
   }
@@ -1796,24 +2568,21 @@ watch(isDigitasiSetupOpen, (open, prevOpen) => {
 });
 
 async function handleConfirmCreate() {
+  createModalFeedback.value = null;
   if (!validateCreateNumericFields()) {
-    toast.add({
-      title: 'Validasi',
-      description: 'Periksa kembali isian angka yang belum valid.',
-      color: 'warning',
-    });
+    createModalFeedback.value = { type: 'error', message: 'Periksa kembali isian angka yang belum valid.' };
     return;
   }
   if (!createForm.tipe_kode) {
-    toast.add({ title: 'Validasi', description: 'Tipe infrastruktur wajib dipilih.', color: 'warning' });
+    createModalFeedback.value = { type: 'error', message: 'Tipe infrastruktur wajib dipilih.' };
     return;
   }
   if (!createForm.id_kecamatan || !createForm.id_desa) {
-    toast.add({ title: 'Validasi', description: 'Kecamatan dan Desa wajib dipilih.', color: 'warning' });
+    createModalFeedback.value = { type: 'error', message: 'Kecamatan dan Desa wajib dipilih.' };
     return;
   }
   if (!createForm.geometry) {
-    toast.add({ title: 'Validasi', description: 'Geometri segmen tidak valid.', color: 'error' });
+    createModalFeedback.value = { type: 'error', message: 'Geometri segmen tidak valid.' };
     return;
   }
 
@@ -1824,7 +2593,8 @@ async function handleConfirmCreate() {
       namobj: createForm.namobj || 'Segmen Fisik Baru',
       id_kecamatan: createForm.id_kecamatan,
       id_desa: createForm.id_desa,
-      plotting_id: createForm.plotting_id,
+      plotting_id: createForm.is_non_pagu ? null : createForm.plotting_id,
+      is_non_pagu: createForm.is_non_pagu,
       parent_id: createForm.parent_id,
       panjang: createForm.panjang ?? 0,
       lebar: createForm.lebar,
@@ -1840,22 +2610,22 @@ async function handleConfirmCreate() {
       geometry: createForm.geometry,
     });
 
-    toast.add({
-      title: 'Segmen Tersimpan',
-      description: 'Segmen fisik baru berhasil disimpan sebagai draft.',
-      color: 'success',
-    });
     addLog('INFO', `Segmen fisik baru berhasil disimpan: ${createForm.namobj || 'Draft'}`);
 
     isCreateModalOpen.value = false;
     refreshAll();
+    refreshSetupPlottingOptions();
 
     if (res?.data) {
       handleFeatureSelect(res.data);
     }
+    const quotaWarning = (res as any)?.quota_warning ? String((res as any).quota_warning) : null;
+    segmenPanelFeedback.value = quotaWarning
+      ? { type: 'warning', message: `Segmen tersimpan (draft). ${quotaWarning}` }
+      : { type: 'success', message: 'Segmen tersimpan sebagai draft.' };
   } catch (err: any) {
-    const msg = err?.data?.message || err?.message || 'Terjadi kesalahan sistem.';
-    toast.add({ title: 'Gagal Menyimpan', description: msg, color: 'error' });
+    const msg = err?.data?.message || err?.message || 'Gagal menyimpan segmen.';
+    createModalFeedback.value = { type: 'error', message: msg };
     addLog('ERROR', `Gagal menyimpan segmen: ${msg}`);
   } finally {
     isCreating.value = false;
@@ -1865,23 +2635,20 @@ async function handleConfirmCreate() {
 // ─── Edit Action ──────────────────────────────────────────────────────────────
 async function handleSaveSegmen(payload: Partial<InfrastrukturSegmen>) {
   if (!selectedSegmen.value || isSavingSegmen.value) return;
+  segmenPanelFeedback.value = null;
   isSavingSegmen.value = true;
   try {
     await api.updateSegmen(selectedSegmen.value.id, payload);
-    toast.add({
-      title: 'Perubahan Disimpan',
-      description: 'Atribut segmen berhasil diperbarui.',
-      color: 'success',
-    });
     addLog('INFO', `Atribut segmen ${selectedSegmen.value.namobj || selectedSegmen.value.id} diperbarui.`);
     refreshAll();
     const res = await api.getSegmen(selectedSegmen.value.id);
     if (res?.data) selectedSegmen.value = res.data;
     rightPanelRef.value?.setActiveTab('inspector');
     mobileRightPanelRef.value?.setActiveTab('inspector');
+    segmenPanelFeedback.value = { type: 'success', message: 'Atribut segmen diperbarui.' };
   } catch (err: any) {
-    const msg = err?.data?.message || err?.message || 'Terjadi kesalahan.';
-    toast.add({ title: 'Gagal Memperbarui', description: msg, color: 'error' });
+    const msg = err?.data?.message || err?.message || 'Gagal memperbarui segmen.';
+    segmenPanelFeedback.value = { type: 'error', message: msg };
     addLog('ERROR', `Gagal memperbarui segmen: ${msg}`);
   } finally {
     isSavingSegmen.value = false;
@@ -1892,59 +2659,138 @@ async function handleSaveSegmen(payload: Partial<InfrastrukturSegmen>) {
 const isDeleteModalOpen = ref(false);
 const segmenToDelete = ref<InfrastrukturSegmen | null>(null);
 const isDeleting = ref(false);
+const deleteModalError = ref<string | null>(null);
 
 function confirmDelete(seg: InfrastrukturSegmen) {
+  deleteModalError.value = null;
   segmenToDelete.value = seg;
-  isDeleteModalOpen.value = true;
+  nextTick(() => {
+    isDeleteModalOpen.value = true;
+  });
 }
 
 async function handleDelete() {
-  if (!segmenToDelete.value) return;
+  if (!segmenToDelete.value || isDeleting.value) return;
+  deleteModalError.value = null;
   isDeleting.value = true;
+  const target = segmenToDelete.value;
   try {
-    await api.deleteSegmen(segmenToDelete.value.id);
-    toast.add({
-      title: 'Segmen Dihapus',
-      description: 'Segmen berhasil dihapus dari sistem.',
-      color: 'success',
-    });
-    addLog('WARN', `Segmen ${segmenToDelete.value.namobj || segmenToDelete.value.id} dihapus permanen.`);
+    await api.deleteSegmen(target.id);
+    addLog('WARN', `Segmen ${target.namobj || target.id} dihapus permanen.`);
     isDeleteModalOpen.value = false;
-    if (selectedSegmenId.value === segmenToDelete.value.id) {
+    segmenToDelete.value = null;
+    if (selectedSegmenId.value === target.id) {
+      segmenPanelFeedback.value = null;
       selectedSegmenId.value = null;
       selectedSegmen.value = null;
       collapseRightPanel();
       syncQueryToUrl();
     }
     refreshAll();
+    refreshSetupPlottingOptions();
   } catch (err: any) {
     const msg = err?.data?.message || err?.message || 'Tidak dapat menghapus segmen.';
-    toast.add({ title: 'Gagal Menghapus', description: msg, color: 'error' });
+    deleteModalError.value = msg;
     addLog('ERROR', `Gagal menghapus segmen: ${msg}`);
   } finally {
     isDeleting.value = false;
   }
 }
 
-// ─── Submit Verifikasi Action ─────────────────────────────────────────────────
+// ─── Submit & Berjenjang Verifikasi Action ────────────────────────────────────
 async function handleSubmitVerifikasi(seg: InfrastrukturSegmen) {
   try {
     await api.submitSegmen(seg.id);
-    toast.add({
-      title: 'Verifikasi Diajukan',
-      description: 'Segmen berhasil diajukan untuk verifikasi kecamatan.',
-      color: 'success',
-    });
-    addLog('INFO', `Segmen ${seg.namobj || seg.id} diajukan untuk verifikasi kecamatan.`);
+    addLog('INFO', `Segmen ${seg.namobj || seg.id} diajukan ke tahap verifikasi kecamatan.`);
     refreshAll();
     if (selectedSegmen.value?.id === seg.id) {
       const res = await api.getSegmen(seg.id);
       if (res?.data) selectedSegmen.value = res.data;
+      segmenPanelFeedback.value = {
+        type: 'success',
+        message: 'Segmen diajukan (Diajukan ke Kecamatan) dan siap diteruskan ke Bappeda.',
+      };
     }
   } catch (err: any) {
     const msg = err?.data?.message || err?.message || 'Tidak dapat mengajukan verifikasi.';
-    toast.add({ title: 'Gagal Mengajukan', description: msg, color: 'error' });
+    if (selectedSegmen.value?.id === seg.id) {
+      segmenPanelFeedback.value = { type: 'error', message: msg };
+    }
     addLog('ERROR', `Gagal mengajukan verifikasi: ${msg}`);
+  }
+}
+
+const isVerifyModalOpen = ref(false);
+const verifyTargetSegmen = ref<InfrastrukturSegmen | null>(null);
+const verifyLevel = ref<'kecamatan' | 'bappeda'>('kecamatan');
+const verifyAction = ref<'approve' | 'reject'>('approve');
+const verifyCatatan = ref('');
+const verifyingSegmen = ref(false);
+const verifyModalError = ref<string | null>(null);
+
+function openVerifyModal(
+  seg: InfrastrukturSegmen,
+  level?: 'kecamatan' | 'bappeda',
+  defaultAction: 'approve' | 'reject' = 'approve',
+) {
+  const resolvedLevel =
+    level ||
+    (canVerifyBappedaSegmen(seg) ? 'bappeda' : 'kecamatan');
+  verifyTargetSegmen.value = seg;
+  verifyLevel.value = resolvedLevel;
+  verifyAction.value = defaultAction;
+  verifyCatatan.value = '';
+  verifyModalError.value = null;
+  nextTick(() => {
+    isVerifyModalOpen.value = true;
+  });
+}
+
+async function handleConfirmVerify() {
+  if (!verifyTargetSegmen.value || verifyingSegmen.value) return;
+  verifyModalError.value = null;
+
+  const trimmedNote = verifyCatatan.value.trim();
+  if (verifyAction.value === 'reject' && !trimmedNote) {
+    verifyModalError.value = 'Catatan alasan revisi wajib diisi saat menolak segmen.';
+    return;
+  }
+
+  const target = verifyTargetSegmen.value;
+  verifyingSegmen.value = true;
+  try {
+    const res =
+      verifyLevel.value === 'bappeda'
+        ? await api.verifyBappeda(target.id, verifyAction.value, trimmedNote || undefined)
+        : await api.verifyKecamatan(target.id, verifyAction.value, trimmedNote || undefined);
+
+    const statusMsg =
+      res?.message ||
+      (verifyAction.value === 'approve'
+        ? verifyLevel.value === 'kecamatan'
+          ? 'Segmen disetujui Kecamatan dan diteruskan ke Bappeda.'
+          : 'Segmen disahkan final oleh Bappeda.'
+        : 'Segmen dikembalikan untuk revisi.');
+
+    addLog('INFO', `${target.namobj || target.id}: ${statusMsg}`);
+    isVerifyModalOpen.value = false;
+    verifyTargetSegmen.value = null;
+
+    refreshAll();
+    if (selectedSegmen.value?.id === target.id) {
+      const detailRes = await api.getSegmen(target.id);
+      if (detailRes?.data) selectedSegmen.value = detailRes.data;
+      segmenPanelFeedback.value = {
+        type: verifyAction.value === 'approve' ? 'success' : 'warning',
+        message: statusMsg,
+      };
+    }
+  } catch (err: any) {
+    const msg = err?.data?.message || err?.message || 'Gagal memproses verifikasi.';
+    verifyModalError.value = msg;
+    addLog('ERROR', `Gagal verifikasi: ${msg}`);
+  } finally {
+    verifyingSegmen.value = false;
   }
 }
 
@@ -2061,7 +2907,7 @@ const mobileDrawerTab = ref<MobileDrawerTabType>('layer');
 const mobileDrawerSnap = ref<'peek' | 'full'>('peek');
 
 watch(mobileDrawerOpen, (open) => {
-  if (!open && mobileDrawerTab.value === 'digitasi-setup' && isDigitasiSetupOpen.value) {
+  if (!open && mobileDrawerTab.value === 'digitasi-setup' && isDigitasiSetupOpen.value && !isPickingAutoPoints.value) {
     handleCloseDigitasiSetup();
   }
 });
@@ -2664,10 +3510,13 @@ onBeforeUnmount(() => {
                     :floating-mode-toolbar="false"
                     :interaction-mode="mapInteractionMode"
                     :selected-reference-road-id="selectedSetupRoadId"
+                    :auto-pick-hint="autoPickHint"
                     v-model:basemap="currentBasemap"
                     v-model:mouse-coords="mouseCoords"
                     @select="handleFeatureSelect"
                     @pick-reference-road="handleMapPickReferenceRoad"
+                    @pick-auto-point="handlePickAutoPoint"
+                    @cancel-auto-pick="handleCancelAutoPick"
                     @toggle-identify="toggleIdentifyMode"
                     @log="(level, msg) => addLog(level, msg)"
                     @draw-saved="handleDrawSaved"
@@ -2703,6 +3552,13 @@ onBeforeUnmount(() => {
                   v-if="isDigitasiSetupOpen"
                   :collapsed="collapsed"
                   :collapsible="true"
+                  :budget-mode="digitasiBudgetMode"
+                  :plotting-items="setupPlottingItems"
+                  :selected-plotting-id="selectedSetupPlottingId"
+                  :selected-plotting-detail="selectedSetupPlottingDetail"
+                  :plotting-loading="setupPlottingLoading"
+                  :can-create-plotting="canCreatePlotting"
+                  :sumber-dana-list="sumberDanaList"
                   :digitasi-method="digitasiMethod"
                   :ref-mode="digitasiRefMode"
                   :road-items="setupRoadItems"
@@ -2712,12 +3568,35 @@ onBeforeUnmount(() => {
                   :zoom-loading="setupZoomLoading"
                   :road-error="setupRoadError"
                   :can-confirm="canConfirmDigitasiSetup"
+                  :auto-scope="autoScope"
+                  :auto-start-meter="autoStartMeter"
+                  :auto-end-meter="autoEndMeter"
+                  :auto-road-total-meters="autoRoadTotalMeters"
+                  :auto-preview-length="autoSlicedResult?.lengthMeters ?? 0"
+                  :auto-preview-vertex-count="autoSlicedResult?.coordinates.length ?? 0"
+                  :auto-geometry-error="autoGeometryError"
+                  :is-picking-auto-points="isPickingAutoPoints"
+                  :auto-pick-step="autoPickStep"
+                  :schedule-info="setupScheduleInfo"
+                  :show-closed-plottings="showClosedSchedulePlottings"
+                  :hidden-closed-plotting-count="hiddenClosedPlottingCount"
                   @update:collapsed="(c) => c ? collapse() : (resize ? resize(RIGHT_PANEL_WIDTH) : expand())"
-                  @update:digitasi-method="(val) => digitasiMethod = val"
+                  @update:budget-mode="(m) => { digitasiBudgetMode = m; }"
+                  @update:show-closed-plottings="(v) => { showClosedSchedulePlottings = v; }"
+                  @plotting-change="(id) => { selectedSetupPlottingId = id; }"
+                  @open-create-plotting="isQuickPlottingModalOpen = true"
+                  @update:digitasi-method="handleSwitchDigitasiMethod"
                   @switch-ref-mode="handleSwitchSetupRefMode"
                   @road-change="handleSetupRoadChange"
                   @reload-roads="loadSetupRoadOptions"
                   @refocus-road="() => selectedSetupRoadDetail?.feature && focusMapToReferenceRoad(selectedSetupRoadDetail.feature, true)"
+                  @update:auto-scope="handleUpdateAutoScope"
+                  @update:auto-start-meter="handleUpdateAutoStartMeter"
+                  @update:auto-end-meter="handleUpdateAutoEndMeter"
+                  @toggle-pick-auto-points="handleTogglePickAutoPoints"
+                  @swap-auto-direction="handleSwapAutoDirection"
+                  @reset-auto-range="handleResetAutoRange"
+                  @edit-auto-on-map="handleEditAutoGeometryOnMap"
                   @confirm="handleConfirmDigitasiSetup"
                   @cancel="() => handleCloseDigitasiSetup(true)"
                 />
@@ -2732,16 +3611,24 @@ onBeforeUnmount(() => {
                   :saving="isSavingSegmen"
                   :tipe-list="tipeList"
                   :plotting-list="plottingList"
+                  :sumber-dana-list="sumberDanaList"
                   :can-edit="canEditSegmen(selectedSegmen)"
                   :can-delete="canDeleteSegmen(selectedSegmen)"
                   :can-submit="canSubmitSegmen(selectedSegmen)"
                   :can-split="canEditSegmen(selectedSegmen) && canCreate"
+                  :can-verify-kecamatan="canVerifyKecamatanSegmen(selectedSegmen)"
+                  :can-verify-bappeda="canVerifyBappedaSegmen(selectedSegmen)"
+                  :is-kecamatan-role="isKecamatanRestricted"
+                  :save-feedback="segmenPanelFeedback"
                   @update:collapsed="(c) => c ? collapse() : (resize ? resize(RIGHT_PANEL_WIDTH) : expand())"
                   @close="handleFeatureSelect(null)"
                   @zoom-to-feature="handleZoomToFeature"
                   @delete-segmen="confirmDelete"
                   @submit-verifikasi="handleSubmitVerifikasi"
+                  @open-verify="({ segmen, level, defaultAction }) => openVerifyModal(segmen, level, defaultAction)"
                   @save-segmen="handleSaveSegmen"
+                  @fotos-updated="({ segmenId, fotos }) => { if (selectedSegmen && selectedSegmen.id === segmenId) { selectedSegmen = { ...selectedSegmen, fotos, foto_url: fotos[0]?.file_endpoint ?? null }; } }"
+                  @clear-feedback="segmenPanelFeedback = null"
                   @view-in-table="handleViewInTable"
                   @edit-geometry="handleStartEditGeometry"
                   @split-segmen="handleStartSplitSegmen"
@@ -2773,7 +3660,9 @@ onBeforeUnmount(() => {
               :can-edit-row="canEditSegmen"
               :can-delete-row="canDeleteSegmen"
               :can-submit-row="canSubmitSegmen"
+              :can-verify-row="canVerifyAnyRow"
               :tipe-list="tipeList"
+              :sumber-dana-list="sumberDanaList"
               :selected-tipe="filterTipe"
               :selected-tahun-pembangunan="filterTahunPembangunan"
               :selected-perkerasan="filterPerkerasan"
@@ -2809,6 +3698,7 @@ onBeforeUnmount(() => {
               @edit-row="handleEditRowFromTable"
               @delete-row="confirmDelete"
               @submit-row="handleSubmitVerifikasi"
+              @verify-row="(row) => openVerifyModal(row)"
               @clear-logs="consoleLogs = []"
             />
           </template>
@@ -2851,10 +3741,13 @@ onBeforeUnmount(() => {
           :reference-label="activeReferenceLabel"
           :interaction-mode="mapInteractionMode"
           :selected-reference-road-id="selectedSetupRoadId"
+          :auto-pick-hint="autoPickHint"
           v-model:basemap="currentBasemap"
           v-model:mouse-coords="mouseCoords"
           @select="handleFeatureSelect"
           @pick-reference-road="handleMapPickReferenceRoad"
+          @pick-auto-point="handlePickAutoPoint"
+          @cancel-auto-pick="handleCancelAutoPick"
           @toggle-identify="toggleIdentifyMode"
           @log="(level, msg) => addLog(level, msg)"
           @draw-saved="handleDrawSaved"
@@ -2979,13 +3872,19 @@ onBeforeUnmount(() => {
       <button
         v-if="canCreate"
         type="button"
-        class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors cursor-pointer group"
+        class="flex flex-col items-center justify-center min-h-[44px] py-1 px-1 transition-colors cursor-pointer group"
+        :class="isDigitasiSetupOpen || isDrawingMode
+          ? 'text-amber-700 dark:text-amber-300 font-semibold'
+          : 'text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300'"
         @click="handleStartDrawing"
       >
-        <div class="size-7 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-md shadow-amber-500/30 group-active:scale-95 transition-transform">
-          <UIcon name="i-lucide-pen-tool" class="size-4 stroke-[2.5]" />
+        <div
+          class="size-7 rounded-full text-white flex items-center justify-center shadow-md shadow-amber-500/30 group-active:scale-95 transition-transform"
+          :class="isDigitasiSetupOpen || isDrawingMode ? 'bg-amber-600 ring-2 ring-amber-400/50' : 'bg-amber-500'"
+        >
+          <UIcon :name="digitasiMethod === 'auto' && isDigitasiSetupOpen ? 'i-lucide-waypoints' : 'i-lucide-pen-tool'" class="size-4 stroke-[2.5]" />
         </div>
-        <span class="text-[10px] mt-0.5 leading-none font-medium">Gambar</span>
+        <span class="text-[10px] mt-0.5 leading-none font-medium">Digitasi</span>
       </button>
 
       <!-- 4. Properties -->
@@ -3280,6 +4179,7 @@ onBeforeUnmount(() => {
             layer-id="infrastruktur-segmen"
             layer-title="Segmen Fisik Infrastruktur"
             :tipe-list="tipeList"
+            :sumber-dana-list="sumberDanaList"
             :selected-tipe="filterTipe"
             :selected-tahun-pembangunan="filterTahunPembangunan"
             :selected-perkerasan="filterPerkerasan"
@@ -3351,7 +4251,9 @@ onBeforeUnmount(() => {
           :can-edit-row="canEditSegmen"
           :can-delete-row="canDeleteSegmen"
           :can-submit-row="canSubmitSegmen"
+          :can-verify-row="canVerifyAnyRow"
           :tipe-list="tipeList"
+          :sumber-dana-list="sumberDanaList"
           :selected-tipe="filterTipe"
           :selected-tahun-pembangunan="filterTahunPembangunan"
           :selected-perkerasan="filterPerkerasan"
@@ -3386,6 +4288,7 @@ onBeforeUnmount(() => {
           @edit-row="(row) => handleMobileEditRowFromTable(row)"
           @delete-row="(row) => { confirmDelete(row); mobileDrawerOpen = false; }"
           @submit-row="(row) => handleSubmitVerifikasi(row)"
+          @verify-row="(row) => { mobileDrawerOpen = false; openVerifyModal(row); }"
           @clear-logs="consoleLogs = []"
         />
 
@@ -3400,14 +4303,22 @@ onBeforeUnmount(() => {
           :saving="isSavingSegmen"
           :tipe-list="tipeList"
           :plotting-list="plottingList"
+          :sumber-dana-list="sumberDanaList"
           :can-edit="canEditSegmen(selectedSegmen)"
           :can-delete="canDeleteSegmen(selectedSegmen)"
           :can-submit="canSubmitSegmen(selectedSegmen)"
           :can-split="canEditSegmen(selectedSegmen) && canCreate"
+          :can-verify-kecamatan="canVerifyKecamatanSegmen(selectedSegmen)"
+          :can-verify-bappeda="canVerifyBappedaSegmen(selectedSegmen)"
+          :is-kecamatan-role="isKecamatanRestricted"
+          :save-feedback="segmenPanelFeedback"
           @zoom-to-feature="(feat) => { handleZoomToFeature(feat); mobileDrawerOpen = false; }"
           @delete-segmen="(feat) => { confirmDelete(feat); mobileDrawerOpen = false; }"
           @submit-verifikasi="handleSubmitVerifikasi"
+          @open-verify="({ segmen, level, defaultAction }) => { mobileDrawerOpen = false; openVerifyModal(segmen, level, defaultAction); }"
           @save-segmen="handleSaveSegmen"
+          @fotos-updated="({ segmenId, fotos }) => { if (selectedSegmen && selectedSegmen.id === segmenId) { selectedSegmen = { ...selectedSegmen, fotos, foto_url: fotos[0]?.file_endpoint ?? null }; } }"
+          @clear-feedback="segmenPanelFeedback = null"
           @view-in-table="(seg) => { if (seg) tableSearch = seg.namobj || ''; switchMobileTab('table'); }"
           @edit-geometry="(feat) => { mobileDrawerOpen = false; handleStartEditGeometry(feat); }"
           @split-segmen="(feat) => { mobileDrawerOpen = false; handleStartSplitSegmen(feat); }"
@@ -3416,6 +4327,13 @@ onBeforeUnmount(() => {
         <DigitasiSetupPanel
           v-else-if="mobileDrawerTab === 'digitasi-setup'"
           :is-mobile-drawer="true"
+          :budget-mode="digitasiBudgetMode"
+          :plotting-items="setupPlottingItems"
+          :selected-plotting-id="selectedSetupPlottingId"
+          :selected-plotting-detail="selectedSetupPlottingDetail"
+          :plotting-loading="setupPlottingLoading"
+          :can-create-plotting="canCreatePlotting"
+          :sumber-dana-list="sumberDanaList"
           :digitasi-method="digitasiMethod"
           :ref-mode="digitasiRefMode"
           :road-items="setupRoadItems"
@@ -3425,11 +4343,34 @@ onBeforeUnmount(() => {
           :zoom-loading="setupZoomLoading"
           :road-error="setupRoadError"
           :can-confirm="canConfirmDigitasiSetup"
-          @update:digitasi-method="(val) => digitasiMethod = val"
+          :auto-scope="autoScope"
+          :auto-start-meter="autoStartMeter"
+          :auto-end-meter="autoEndMeter"
+          :auto-road-total-meters="autoRoadTotalMeters"
+          :auto-preview-length="autoSlicedResult?.lengthMeters ?? 0"
+          :auto-preview-vertex-count="autoSlicedResult?.coordinates.length ?? 0"
+          :auto-geometry-error="autoGeometryError"
+          :is-picking-auto-points="isPickingAutoPoints"
+          :auto-pick-step="autoPickStep"
+          :schedule-info="setupScheduleInfo"
+          :show-closed-plottings="showClosedSchedulePlottings"
+          :hidden-closed-plotting-count="hiddenClosedPlottingCount"
+          @update:budget-mode="(m) => { digitasiBudgetMode = m; }"
+          @update:show-closed-plottings="(v) => { showClosedSchedulePlottings = v; }"
+          @plotting-change="(id) => { selectedSetupPlottingId = id; }"
+          @open-create-plotting="isQuickPlottingModalOpen = true"
+          @update:digitasi-method="handleSwitchDigitasiMethod"
           @switch-ref-mode="handleSwitchSetupRefMode"
           @road-change="handleSetupRoadChange"
           @reload-roads="loadSetupRoadOptions"
           @refocus-road="() => selectedSetupRoadDetail?.feature && focusMapToReferenceRoad(selectedSetupRoadDetail.feature, true)"
+          @update:auto-scope="handleUpdateAutoScope"
+          @update:auto-start-meter="handleUpdateAutoStartMeter"
+          @update:auto-end-meter="handleUpdateAutoEndMeter"
+          @toggle-pick-auto-points="handleTogglePickAutoPoints"
+          @swap-auto-direction="handleSwapAutoDirection"
+          @reset-auto-range="handleResetAutoRange"
+          @edit-auto-on-map="handleEditAutoGeometryOnMap"
           @confirm="handleConfirmDigitasiSetup"
           @cancel="() => handleCloseDigitasiSetup(true)"
         />
@@ -3441,6 +4382,7 @@ onBeforeUnmount(() => {
       v-model:open="isFilterDialogOpen"
       v-model:active-layer-id="activeLayerId"
       :tipe-list="tipeList"
+      :sumber-dana-list="sumberDanaList"
       v-model:selected-tipe="filterTipe"
       v-model:selected-tahun-pembangunan="filterTahunPembangunan"
       v-model:selected-perkerasan="filterPerkerasan"
@@ -3484,18 +4426,31 @@ onBeforeUnmount(() => {
     >
       <template #body>
         <div class="space-y-3.5 text-xs">
+          <div
+            v-if="createModalFeedback"
+            role="alert"
+            class="p-2.5 rounded-lg bg-red-50/90 dark:bg-red-950/35 border border-red-200 dark:border-red-800/80 text-xs font-medium text-red-900 dark:text-red-100"
+          >
+            {{ createModalFeedback.message }}
+          </div>
+
           <!-- Live Digitized Stats -->
-          <div class="p-2.5 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-500/30 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <UIcon name="i-lucide-check-circle" class="size-4 text-amber-600 dark:text-amber-400" />
-              <span class="font-medium text-gray-800 dark:text-gray-200">Garis LineString Selesai</span>
+          <div class="p-2.5 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-500/30 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <UIcon
+                :name="createForm.sumber_data?.includes('Otomatis') ? 'i-lucide-waypoints' : 'i-lucide-check-circle'"
+                class="size-4 text-amber-600 dark:text-amber-400 shrink-0"
+              />
+              <span class="font-medium text-gray-800 dark:text-gray-200 truncate">
+                {{ createForm.sumber_data?.includes('Otomatis') ? 'Geometri Otomatis Siap' : 'Garis LineString Selesai' }}
+              </span>
             </div>
             <UBadge
               :label="`Panjang: ${(createForm.panjang ?? 0).toLocaleString('id-ID', { maximumFractionDigits: 4 })} m`"
               color="warning"
               variant="subtle"
               size="xs"
-              class="tabular-nums"
+              class="tabular-nums shrink-0"
             />
           </div>
 
@@ -3527,7 +4482,20 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <UFormField label="Nama Objek / Ruas" required size="sm">
+            <UFormField required size="sm">
+              <template #label>
+                <div class="flex items-center justify-between gap-2 w-full">
+                  <span>Nama Objek / Ruas</span>
+                  <button
+                    v-if="activeDigitasiRef?.data?.nama_ruas && createForm.namobj !== activeDigitasiRef.data.nama_ruas"
+                    type="button"
+                    class="text-[10px] font-semibold text-blue-700 dark:text-blue-300 hover:underline cursor-pointer"
+                    @click="createForm.namobj = activeDigitasiRef.data.nama_ruas || ''"
+                  >
+                    Pakai Nama Poros
+                  </button>
+                </div>
+              </template>
               <UInput
                 v-model="createForm.namobj"
                 placeholder="Contoh: Jl. Poros Dusun Barat"
@@ -3562,18 +4530,27 @@ onBeforeUnmount(() => {
           />
 
           <!-- Kaitan Plotting Anggaran -->
-          <UFormField label="Kaitan Plotting Anggaran" size="sm">
+          <UFormField
+            label="Dasar Plotting Anggaran / Pagu"
+            :hint="createForm.is_non_pagu
+              ? 'Mode Inventarisasi Eksisting Non-Pagu (plotting_id = null).'
+              : isCreateLockedByPlotting
+                ? 'Dikunci otomatis dari Pagu Resmi yang dipilih sebelum digitasi.'
+                : undefined"
+            size="sm"
+          >
             <USelectMenu
               v-model="createForm.plotting_id"
               :items="[
-                { label: 'Tanpa Kaitan Plotting (Mandiri)', value: null },
+                { label: 'Tanpa Kaitan Plotting (Non-Pagu)', value: null },
                 ...plottingList.map(p => ({
-                  label: `${p.nama_kegiatan} (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(p.target_pagu_anggaran)})`,
+                  label: `${p.nomor_sk ? `${p.nomor_sk} · ` : ''}${p.nama_kegiatan} (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(p.target_pagu_anggaran)})`,
                   value: p.id,
                 }))
               ]"
               value-key="value"
               label-key="label"
+              :disabled="createForm.is_non_pagu || isCreateLockedByPlotting"
               placeholder="Pilih alokasi plotting..."
               size="sm"
               class="w-full"
@@ -3655,12 +4632,18 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <UFormField label="Sumber Dana" size="sm">
+            <UFormField
+              label="Sumber Dana"
+              :hint="isCreateLockedByPlotting ? 'Mengikuti Pagu Resmi' : undefined"
+              size="sm"
+            >
               <USelectMenu
                 v-model="createForm.sumber_dana"
-                :items="SUMBER_DANA_OPTIONS"
+                :items="createSumberDanaItems"
                 value-key="value"
                 label-key="label"
+                :disabled="isCreateLockedByPlotting"
+                placeholder="Pilih sumber dana..."
                 size="sm"
                 class="w-full"
               />
@@ -3679,19 +4662,21 @@ onBeforeUnmount(() => {
             </UFormField>
 
             <UFormField
-              label="Tahun Bangun"
+              label="Tahun Anggaran"
               :error="createNumericErrors.tahun_pembangunan || undefined"
+              :hint="isCreateLockedByPlotting ? 'Mengikuti Pagu Resmi' : undefined"
               size="sm"
             >
               <NumericTextInput
                 ref="createTahunRef"
                 v-model="createForm.tahun_pembangunan"
-                field-label="Tahun bangun"
+                field-label="Tahun anggaran"
                 :allow-decimal="false"
                 :min="1900"
                 :max="maxBuildYear"
                 :max-digits="4"
-                placeholder="Contoh: 2024"
+                :disabled="isCreateLockedByPlotting"
+                placeholder="Contoh: 2026"
                 size="sm"
                 @update:error="createNumericErrors.tahun_pembangunan = $event"
               />
@@ -3735,19 +4720,28 @@ onBeforeUnmount(() => {
     <!-- ═══ MODAL: Konfirmasi Hapus Segmen ═════════════════════════════════════ -->
     <UModal
       v-model:open="isDeleteModalOpen"
-      :overlay="false"
-      :modal="false"
+      :dismissible="!isDeleting"
       title="Hapus Segmen Fisik"
+      description="Konfirmasi penghapusan segmen infrastruktur."
       :ui="{ content: 'max-w-sm bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl' }"
     >
       <template #body>
-        <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-          Apakah Anda yakin ingin menghapus segmen
-          <span class="font-semibold text-gray-900 dark:text-white">
-            {{ segmenToDelete?.namobj || 'ini' }}
-          </span>?
-          Data koordinat spasial PostGIS dan atribut terkait akan dihapus.
-        </p>
+        <div class="space-y-3 text-xs">
+          <div
+            v-if="deleteModalError"
+            role="alert"
+            class="p-2.5 rounded-lg bg-red-50/90 dark:bg-red-950/35 border border-red-200 dark:border-red-800/80 font-medium text-red-900 dark:text-red-100"
+          >
+            {{ deleteModalError }}
+          </div>
+          <p class="text-gray-600 dark:text-gray-300 leading-relaxed">
+            Apakah Anda yakin ingin menghapus segmen
+            <span class="font-semibold text-gray-900 dark:text-white">
+              {{ segmenToDelete?.namobj || 'ini' }}
+            </span>?
+            Data koordinat spasial PostGIS dan atribut terkait akan dihapus.
+          </p>
+        </div>
       </template>
 
       <template #footer>
@@ -3757,6 +4751,7 @@ onBeforeUnmount(() => {
             color="neutral"
             variant="ghost"
             class="cursor-pointer"
+            :disabled="isDeleting"
             @click="isDeleteModalOpen = false"
           />
           <UButton
@@ -3771,6 +4766,111 @@ onBeforeUnmount(() => {
       </template>
     </UModal>
 
+    <!-- ═══ MODAL: Verifikasi Segmen (Kecamatan -> Bappeda / Final Bappeda) ═════ -->
+    <UModal
+      v-model:open="isVerifyModalOpen"
+      :dismissible="!verifyingSegmen"
+      :title="verifyLevel === 'kecamatan' ? 'Verifikasi Tingkat Kecamatan' : 'Verifikasi Final Bappeda'"
+      description="Setujui untuk meneruskan ke tingkat berikutnya atau kembalikan dengan catatan perbaikan."
+      :ui="{ content: 'max-w-md bg-white dark:bg-[#0b0f19] border border-slate-300/90 dark:border-slate-700/90 ring-1 ring-slate-900/10 dark:ring-white/10 shadow-2xl rounded-2xl' }"
+    >
+      <template #body>
+        <div class="space-y-3 text-xs">
+          <div
+            v-if="verifyModalError"
+            role="alert"
+            class="p-2.5 rounded-lg bg-red-50/90 dark:bg-red-950/35 border border-red-200 dark:border-red-800/80 font-medium text-red-900 dark:text-red-100"
+          >
+            {{ verifyModalError }}
+          </div>
+
+          <div v-if="verifyTargetSegmen" class="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 space-y-1">
+            <p class="font-semibold text-gray-900 dark:text-white">
+              {{ verifyTargetSegmen.namobj || 'Segmen Infrastruktur' }}
+            </p>
+            <p class="text-[11px] text-gray-600 dark:text-gray-400">
+              {{ formatWilayah(verifyTargetSegmen.desa) }}, Kec. {{ formatWilayah(verifyTargetSegmen.kecamatan) }}
+              <span v-if="verifyTargetSegmen.panjang">
+                · {{ Number(verifyTargetSegmen.panjang).toLocaleString('id-ID', { maximumFractionDigits: 2 }) }} m
+              </span>
+            </p>
+          </div>
+
+          <div class="space-y-1.5">
+            <span class="block font-medium text-gray-700 dark:text-gray-300">Keputusan Verifikasi</span>
+            <div role="radiogroup" aria-label="Keputusan verifikasi segmen" class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                role="radio"
+                :aria-checked="verifyAction === 'approve'"
+                class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors"
+                :class="
+                  verifyAction === 'approve'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-400 dark:border-emerald-700'
+                    : 'bg-white dark:bg-[#0b0f19] border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300'
+                "
+                @click="verifyAction = 'approve'"
+              >
+                <UIcon name="i-lucide-check-circle-2" class="size-3.5 shrink-0" aria-hidden="true" />
+                <span>{{ verifyLevel === 'kecamatan' ? 'Teruskan ke Bappeda' : 'Sahkan Final' }}</span>
+              </button>
+
+              <button
+                type="button"
+                role="radio"
+                :aria-checked="verifyAction === 'reject'"
+                class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors"
+                :class="
+                  verifyAction === 'reject'
+                    ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border-rose-400 dark:border-rose-700'
+                    : 'bg-white dark:bg-[#0b0f19] border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300'
+                "
+                @click="verifyAction = 'reject'"
+              >
+                <UIcon name="i-lucide-rotate-ccw" class="size-3.5 shrink-0" aria-hidden="true" />
+                <span>Tolak / Revisi</span>
+              </button>
+            </div>
+          </div>
+
+          <UFormField
+            label="Catatan Verifikasi"
+            :required="verifyAction === 'reject'"
+            size="sm"
+          >
+            <UTextarea
+              v-model="verifyCatatan"
+              :rows="3"
+              :placeholder="verifyAction === 'reject' ? 'Tuliskan alasan perbaikan yang diperlukan...' : 'Catatan verifikasi (opsional)...'"
+              size="sm"
+              class="w-full"
+            />
+          </UFormField>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton
+            label="Batal"
+            color="neutral"
+            variant="ghost"
+            class="cursor-pointer"
+            :disabled="verifyingSegmen"
+            @click="isVerifyModalOpen = false"
+          />
+          <UButton
+            :label="verifyAction === 'approve' ? (verifyLevel === 'kecamatan' ? 'Teruskan ke Bappeda' : 'Sahkan Final') : 'Kembalikan untuk Revisi'"
+            :color="verifyAction === 'approve' ? 'success' : 'error'"
+            variant="solid"
+            class="cursor-pointer"
+            :loading="verifyingSegmen"
+            @click="handleConfirmVerify"
+          />
+        </div>
+      </template>
+    </UModal>
+
     <!-- ═══ MODAL: Konfirmasi Split Segmen ══════════════════════════════════════ -->
     <DialogSplitSegmen
       v-model:open="isSplitDialogOpen"
@@ -3779,6 +4879,14 @@ onBeforeUnmount(() => {
       :loading="isSplitting"
       @confirm="handleConfirmSplit"
       @cancel="handleCancelSplit"
+    />
+
+    <!-- ═══ MODAL: Buat Pagu / Plotting Anggaran Cepat ═══════════════════════════ -->
+    <PlottingFormModal
+      v-model:open="isQuickPlottingModalOpen"
+      :default-kecamatan="isKecamatanRestricted ? userKecamatanId : filterKecamatan"
+      :default-desa="isDesaRestricted ? userDesaId : filterDesa"
+      @created="handleQuickPlottingCreated"
     />
   </div>
 </template>

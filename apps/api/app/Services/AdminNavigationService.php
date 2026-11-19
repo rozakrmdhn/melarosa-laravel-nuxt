@@ -135,6 +135,12 @@ class AdminNavigationService
                         'to' => '/admin/ref-sumber-dana',
                         'permission' => ['ref-sumber-dana-view', 'ref-sumber-dana-manage'],
                     ],
+                    [
+                        'label' => 'Jadwal Tahun Anggaran',
+                        'icon' => 'i-lucide-calendar-clock',
+                        'to' => '/admin/jadwal-anggaran',
+                        'permission' => ['jadwal-anggaran-view', 'jadwal-anggaran-manage'],
+                    ],
                 ],
             ],
             [
@@ -188,6 +194,18 @@ class AdminNavigationService
                 'icon' => 'i-lucide-layers',
                 'to' => '/admin/layers',
                 'permission' => ['layers-view'],
+            ],
+            [
+                'label' => 'Basemap',
+                'icon' => 'i-lucide-globe',
+                'to' => '/admin/basemaps',
+                'permission' => ['layers-view', 'layers-manage', 'settings-view', 'settings-manage'],
+            ],
+            [
+                'label' => 'Publikasi',
+                'icon' => 'i-lucide-file-down',
+                'to' => '/admin/publikasi-peta',
+                'permission' => ['layers-view', 'layers-manage', 'batas-desa-view', 'batas-desa-manage', 'settings-view', 'settings-manage'],
             ],
             [
                 'label' => 'Audit Log',

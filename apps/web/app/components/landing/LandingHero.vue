@@ -827,36 +827,6 @@ onBeforeUnmount(() => {
     aria-labelledby="hero-title"
     class="relative w-full overflow-x-clip bg-[#F7F8F5] dark:bg-[#070b14] pt-24 pb-10 sm:pt-28 sm:pb-12 lg:pt-28 lg:pb-14 border-b border-[#DFE5DE] dark:border-white/10"
   >
-    <!-- Grid kartografis dua tingkat (mayor 96px & sub-grid 24px) sesuai identitas lembar peta MELAROSA (R-07) -->
-    <div
-      aria-hidden="true"
-      class="pointer-events-none absolute inset-0 dark:hidden"
-      style="
-        background-image:
-          linear-gradient(to right, rgba(23, 107, 77, 0.11) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(23, 107, 77, 0.11) 1px, transparent 1px),
-          linear-gradient(to right, rgba(23, 37, 31, 0.045) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(23, 37, 31, 0.045) 1px, transparent 1px);
-        background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
-        mask-image: radial-gradient(ellipse 90% 85% at 50% 45%, #000 65%, transparent 100%);
-        -webkit-mask-image: radial-gradient(ellipse 90% 85% at 50% 45%, #000 65%, transparent 100%);
-      "
-    />
-    <div
-      aria-hidden="true"
-      class="pointer-events-none absolute inset-0 hidden dark:block"
-      style="
-        background-image:
-          linear-gradient(to right, rgba(52, 211, 153, 0.11) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(52, 211, 153, 0.11) 1px, transparent 1px),
-          linear-gradient(to right, rgba(148, 163, 184, 0.045) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
-        background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
-        mask-image: radial-gradient(ellipse 90% 85% at 50% 45%, #000 65%, transparent 100%);
-        -webkit-mask-image: radial-gradient(ellipse 90% 85% at 50% 45%, #000 65%, transparent 100%);
-      "
-    />
-
     <div class="relative z-10 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
       <div
         class="grid grid-cols-1 md:grid-cols-[minmax(0,48fr)_minmax(0,52fr)] lg:grid-cols-[minmax(0,44fr)_minmax(0,56fr)] gap-8 md:gap-7 lg:gap-9 xl:gap-10 items-center lg:items-stretch"
@@ -888,10 +858,10 @@ onBeforeUnmount(() => {
               Temukan infrastruktur pembangunan, dan potensi Kabupaten Bojonegoro.
             </p>
 
-            <div class="flex flex-wrap items-center gap-3 pt-0.5">
+            <div class="flex flex-wrap items-center gap-4 pt-0.5">
               <NuxtLink
                 to="/maps"
-                class="inline-flex items-center justify-center gap-2 rounded-xl bg-[#2563EB] hover:bg-blue-700 px-6 py-3 text-sm font-semibold text-white shadow-xs transition-colors min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
+                class="inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-6 py-3 text-sm font-semibold text-white shadow-xs transition-colors min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E] focus-visible:ring-offset-2"
               >
                 <UIcon name="i-lucide-map" class="size-4 shrink-0" />
                 <span>Jelajahi Peta</span>
@@ -899,10 +869,11 @@ onBeforeUnmount(() => {
 
               <a
                 href="#cerita-geopark"
-                class="inline-flex items-center justify-center gap-2 rounded-xl border border-[#B8C4BC] dark:border-white/20 bg-white dark:bg-[#0c1522] hover:border-[#176B4D] dark:hover:border-emerald-400 px-5 py-3 text-sm font-semibold text-[#17251F] dark:text-white transition-colors min-h-[46px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                class="inline-flex items-center gap-1.5 py-2 px-1 text-sm font-semibold text-[#176B4D] dark:text-emerald-400 hover:underline min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded-lg"
               >
-                <UIcon name="i-lucide-mountain" class="size-4 text-[#176B4D] dark:text-emerald-400 shrink-0" />
+                <UIcon name="i-lucide-mountain" class="size-4 shrink-0" />
                 <span>Kenali Geopark</span>
+                <UIcon name="i-lucide-arrow-down" class="size-3.5 shrink-0" />
               </a>
             </div>
           </div>
@@ -1005,6 +976,20 @@ onBeforeUnmount(() => {
                 </p>
               </div>
             </div>
+
+            <!-- Quick Search Chips -->
+            <div class="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+              <span class="text-[#647067] dark:text-slate-400 mr-0.5">Coba cari:</span>
+              <button
+                v-for="sample in ['Kec. Balen', 'Kayangan Api', 'Dander']"
+                :key="sample"
+                type="button"
+                class="px-2.5 py-1 rounded-full bg-white dark:bg-[#0c1522] border border-[#DFE5DE] dark:border-white/15 text-[#17251F] dark:text-slate-200 hover:border-[#2563EB] hover:text-[#2563EB] dark:hover:text-blue-400 transition-colors cursor-pointer font-medium"
+                @click="heroSearchQuery = sample; isSearchFocused = true"
+              >
+                {{ sample }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1012,26 +997,18 @@ onBeforeUnmount(() => {
           <div
             class="w-full lg:max-h-[560px] flex flex-col rounded-2xl border border-[#DFE5DE] dark:border-white/15 bg-white dark:bg-[#0c1522] overflow-hidden shadow-xs"
           >
-            <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-[#DFE5DE] dark:border-white/10 bg-[#F7F8F5]/60 dark:bg-[#09111d]">
-              <div class="flex items-center gap-2 text-xs">
-                <UIcon name="i-lucide-compass" class="size-4 text-[#2563EB] dark:text-blue-400 shrink-0" />
-                <span class="font-semibold text-[#17251F] dark:text-white">
-                  Observatorium Peta Wilayah Bojonegoro
-                </span>
-                <span class="text-[#647067] dark:text-slate-400 hidden sm:inline">
-                  · {{ isMapFallback ? 'Pratinjau Kartografis' : 'Peta Langsung' }}
-                </span>
-              </div>
-
-              <div class="font-mono text-xs text-[#647067] dark:text-slate-300 tabular-nums">
-                WGS 84 · {{ displayCoordinates }}
-              </div>
-            </div>
-
             <div
-              class="relative w-full aspect-[4/3] sm:aspect-[16/10] md:aspect-[5/4] lg:aspect-auto lg:h-[395px] xl:h-[415px] bg-[#E9EFEA] dark:bg-[#08101c] overflow-hidden"
+              class="relative w-full aspect-[4/3] sm:aspect-[16/10] md:aspect-[5/4] lg:aspect-auto lg:h-[435px] xl:h-[455px] bg-[#E9EFEA] dark:bg-[#08101c] overflow-hidden"
               @mouseleave="liveCursorCoords = null"
             >
+              <!-- Badge Status Minimalis di Pojok Kiri Atas -->
+              <div class="absolute top-3 left-3 z-20 inline-flex items-center gap-1.5 rounded-full border border-[#DFE5DE]/90 dark:border-white/15 bg-white/95 dark:bg-[#0c1522]/95 px-2.5 py-1 text-[11px] font-semibold text-[#17251F] dark:text-slate-100 shadow-2xs pointer-events-none">
+                <span
+                  class="size-2 rounded-full shrink-0"
+                  :class="isMapFallback ? 'bg-amber-500' : 'bg-[#2B5B9E] dark:bg-sky-400'"
+                />
+                <span>{{ isMapFallback ? 'Pratinjau Wilayah' : 'Peta Interaktif' }}</span>
+              </div>
               <!-- Kanvas fallback berbasis proyeksi koordinat aktual apabila tile eksternal tidak dapat dimuat -->
               <svg
                 v-if="isMapFallback || isUsingVectorFallbackTiles || isMapLoading"
@@ -1166,26 +1143,10 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <div
-                class="absolute bottom-3 left-3 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-[#DFE5DE]/90 dark:border-white/15 bg-white/90 dark:bg-[#0c1522]/90 backdrop-blur-xs px-3 py-1.5 text-[11px] font-medium text-[#17251F] dark:text-slate-200"
-              >
-                <span class="inline-flex items-center gap-1.5">
-                  <span class="inline-block w-3.5 h-0.5 border-b-2 border-dashed border-[#2563EB]" />
-                  <span>Batas Kecamatan</span>
-                </span>
-                <span class="inline-flex items-center gap-1.5">
-                  <span class="inline-block w-3.5 h-0.5 bg-[#10B981]" />
-                  <span>Jalan Poros</span>
-                </span>
-                <span class="inline-flex items-center gap-1.5">
-                  <span class="inline-block size-2 rounded-full bg-[#176B4D] border border-white" />
-                  <span>Titik Geopark</span>
-                </span>
-              </div>
             </div>
 
             <div class="px-4 py-3 sm:px-5 sm:py-3.5 border-t border-[#DFE5DE] dark:border-white/10 bg-white dark:bg-[#0c1522] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div class="min-w-0 space-y-0.5">
+              <div class="min-w-0 space-y-1">
                 <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <h2 class="text-sm sm:text-base font-bold text-[#17251F] dark:text-white">
                     Kecamatan {{ activeInspectorKecamatan.name }}
@@ -1194,15 +1155,26 @@ onBeforeUnmount(() => {
                     · Zona {{ activeInspectorKecamatan.zona }}
                   </span>
                 </div>
-                <p class="text-xs text-[#647067] dark:text-slate-300 truncate">
-                  {{ activeInspectorKecamatan.desc }} · Pusat {{ formatCoordPair(activeInspectorKecamatan.coordinate) }}
-                </p>
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium text-[#647067] dark:text-slate-300">
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block w-3 h-0.5 border-b-2 border-dashed border-[#2563EB]" />
+                    <span>Batas Kec.</span>
+                  </span>
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block w-3 h-0.5 bg-[#10B981]" />
+                    <span>Jalan Poros</span>
+                  </span>
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block size-2 rounded-full bg-[#176B4D]" />
+                    <span>Geopark</span>
+                  </span>
+                </div>
               </div>
 
               <div class="flex items-center shrink-0">
                 <button
                   type="button"
-                  class="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 rounded-xl border border-blue-200 dark:border-blue-800/70 bg-blue-50/80 dark:bg-blue-950/50 hover:bg-[#2563EB] hover:text-white dark:hover:bg-blue-600 dark:hover:text-white px-4 py-2 text-xs sm:text-sm font-semibold text-blue-700 dark:text-blue-300 transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                  class="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-100/80 dark:bg-white/[0.06] hover:bg-[#2B5B9E] hover:border-[#2B5B9E] hover:text-white dark:hover:bg-[#2B5B9E] dark:hover:text-white px-4 py-2 text-xs sm:text-sm font-semibold text-[#17251F] dark:text-slate-100 transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E]"
                   @click="openKecamatanInMap(activeInspectorKecamatan)"
                 >
                   <UIcon name="i-lucide-locate-fixed" class="size-4 shrink-0" />

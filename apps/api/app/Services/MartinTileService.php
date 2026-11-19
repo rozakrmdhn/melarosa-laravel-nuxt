@@ -49,6 +49,11 @@ class MartinTileService
             'description' => 'Layer vektor MVT ruas jalan poros desa beserta atribut panjang dan kondisi eksisting (sumber PostGIS Martin).',
             'default_visible' => true,
         ],
+        'jalan_kabupaten_luarkota' => [
+            'name' => 'Jalan Kabupaten Luarkota',
+            'category' => 'Jaringan Jalan',
+            'description' => 'Layer vektor MVT ruas jalan kewenangan kabupaten beserta lintasan kecamatan dan desa.',
+        ],
         'infrastruktur_segmen' => [
             'name' => 'Segmen Infrastruktur Jalan',
             'category' => 'Infrastruktur Jalan',

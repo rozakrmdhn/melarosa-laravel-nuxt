@@ -12,33 +12,47 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (DB::getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE "infrastruktur_segmen" DROP CONSTRAINT IF EXISTS "infrastruktur_segmen_parent_id_foreign"');
+        if (DB::getDriverName() === 'sqlite') {
+            Schema::table('infrastruktur_segmen', function (Blueprint $table) {
+                $table->dropForeign(['parent_id']);
 
-            if (Schema::hasTable('jalan_porosdesa')) {
-                $hasPkOrUnique = DB::selectOne("
-                    SELECT 1
-                    FROM pg_index i
-                    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                    WHERE i.indrelid = 'jalan_porosdesa'::regclass
-                      AND (i.indisprimary OR i.indisunique)
-                      AND i.indnatts = 1
-                      AND a.attname = 'id'
-                    LIMIT 1
-                ");
-
-                if (!$hasPkOrUnique) {
-                    DB::statement('ALTER TABLE "jalan_porosdesa" ADD CONSTRAINT "jalan_porosdesa_id_unique" UNIQUE ("id")');
-                }
-
-                Schema::table('infrastruktur_segmen', function (Blueprint $table) {
+                if (Schema::hasTable('jalan_porosdesa')) {
                     $table->foreign('parent_id')
                         ->references('id')
                         ->on('jalan_porosdesa')
                         ->cascadeOnUpdate()
                         ->nullOnDelete();
-                });
+                }
+            });
+
+            return;
+        }
+
+        DB::statement('ALTER TABLE "infrastruktur_segmen" DROP CONSTRAINT IF EXISTS "infrastruktur_segmen_parent_id_foreign"');
+
+        if (Schema::hasTable('jalan_porosdesa')) {
+            $hasPkOrUnique = DB::selectOne("
+                SELECT 1
+                FROM pg_index i
+                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                WHERE i.indrelid = 'jalan_porosdesa'::regclass
+                  AND (i.indisprimary OR i.indisunique)
+                  AND i.indnatts = 1
+                  AND a.attname = 'id'
+                LIMIT 1
+            ");
+
+            if (!$hasPkOrUnique) {
+                DB::statement('ALTER TABLE "jalan_porosdesa" ADD CONSTRAINT "jalan_porosdesa_id_unique" UNIQUE ("id")');
             }
+
+            Schema::table('infrastruktur_segmen', function (Blueprint $table) {
+                $table->foreign('parent_id')
+                    ->references('id')
+                    ->on('jalan_porosdesa')
+                    ->cascadeOnUpdate()
+                    ->nullOnDelete();
+            });
         }
     }
 
@@ -47,16 +61,29 @@ return new class extends Migration
      */
     public function down(): void
     {
-        if (DB::getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE "infrastruktur_segmen" DROP CONSTRAINT IF EXISTS "infrastruktur_segmen_parent_id_foreign"');
+        if (DB::getDriverName() === 'sqlite') {
+            if (Schema::hasTable('infrastruktur_segmen')) {
+                Schema::table('infrastruktur_segmen', function (Blueprint $table) {
+                    $table->dropForeign(['parent_id']);
+                    $table->foreign('parent_id')
+                        ->references('id')
+                        ->on('infrastruktur_segmen')
+                        ->cascadeOnUpdate()
+                        ->nullOnDelete();
+                });
+            }
 
-            Schema::table('infrastruktur_segmen', function (Blueprint $table) {
-                $table->foreign('parent_id')
-                    ->references('id')
-                    ->on('infrastruktur_segmen')
-                    ->cascadeOnUpdate()
-                    ->nullOnDelete();
-            });
+            return;
         }
+
+        DB::statement('ALTER TABLE "infrastruktur_segmen" DROP CONSTRAINT IF EXISTS "infrastruktur_segmen_parent_id_foreign"');
+
+        Schema::table('infrastruktur_segmen', function (Blueprint $table) {
+            $table->foreign('parent_id')
+                ->references('id')
+                ->on('infrastruktur_segmen')
+                ->cascadeOnUpdate()
+                ->nullOnDelete();
+        });
     }
 };

@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 
 class InfrastrukturSegmen extends Model
@@ -47,6 +48,7 @@ class InfrastrukturSegmen extends Model
         'id_kecamatan',
         'namobj',
         'plotting_id',
+        'is_non_pagu',
         'verifikator',
         'user_id',
         'status_parent',
@@ -72,6 +74,7 @@ class InfrastrukturSegmen extends Model
         'tahun_pembangunan'     => 'integer',
         'atribut'               => 'array',
         'status_parent'         => 'boolean',
+        'is_non_pagu'           => 'boolean',
         'id_desa'               => 'integer',
         'id_kecamatan'          => 'integer',
         'submitted_desa_at'     => 'datetime',
@@ -115,6 +118,13 @@ class InfrastrukturSegmen extends Model
         return $this->belongsTo(PlottingAnggaran::class, 'plotting_id', 'id');
     }
 
+    public function fotos(): HasMany
+    {
+        return $this->hasMany(InfrastrukturSegmenFoto::class, 'segmen_id', 'id')
+            ->orderBy('urutan')
+            ->orderBy('created_at');
+    }
+
     public function kecamatan(): BelongsTo
     {
         return $this->belongsTo(BatasWilayahKecamatan::class, 'id_kecamatan', 'id');
@@ -154,7 +164,7 @@ class InfrastrukturSegmen extends Model
      */
     public function scopeForUser(Builder $query, ?User $user = null): Builder
     {
-        if (!$user || $user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+        if (!$user || $user->isAdminOrBappeda()) {
             return $query;
         }
 
@@ -164,7 +174,7 @@ class InfrastrukturSegmen extends Model
         }
 
         // Jika user dibatasi tingkat kecamatan (verifier kecamatan)
-        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
+        if ($user->hasAnyRole(['verifierKecamatan', 'verifikator-kecamatan', 'kecamatan']) || $user->id_kecamatan) {
             return $query->where('infrastruktur_segmen.id_kecamatan', $user->id_kecamatan);
         }
 

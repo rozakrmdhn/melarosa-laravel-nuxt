@@ -259,8 +259,29 @@ class InfrastrukturVerificationTest extends TestCase
             ->assertJsonPath('ok', true)
             ->assertJsonPath('data.status_verifikasi', 'verified_bappeda');
 
-        // 7. Cleanup
-        InfrastrukturSegmen::where('id', $segmenId)->delete();
+        // 7. Kecamatan dapat mengajukan segmen draft buatannya sendiri dan meneruskannya ke Bappeda
+        $kecDraftRes = $this->actingAs($this->kecamatanUser)
+            ->postJson('/api/v1/admin/infrastruktur-segmen', array_merge($segmenPayload, [
+                'namobj' => 'Segmen Draft Buatan Kecamatan',
+            ]));
+        $kecDraftRes->assertStatus(201);
+        $kecSegId = $kecDraftRes->json('data.id');
+
+        $this->actingAs($this->kecamatanUser)
+            ->postJson("/api/v1/admin/infrastruktur-segmen/{$kecSegId}/submit")
+            ->assertOk()
+            ->assertJsonPath('data.status_verifikasi', 'submitted_desa');
+
+        $this->actingAs($this->kecamatanUser)
+            ->postJson("/api/v1/admin/infrastruktur-segmen/{$kecSegId}/verify-kecamatan", [
+                'action'  => 'approve',
+                'catatan' => 'Diteruskan kecamatan ke Bappeda.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status_verifikasi', 'verified_kecamatan');
+
+        // 8. Cleanup
+        InfrastrukturSegmen::whereIn('id', [$segmenId, $kecSegId])->delete();
     }
 
     public function test_monitoring_realisasi_with_items_and_revisi(): void

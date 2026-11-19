@@ -3,6 +3,7 @@ import WilayahSelector from '~/components/common/WilayahSelector.vue';
 import { useAuthStore } from '~/stores/auth';
 import { useWilayahStore } from '~/stores/wilayah';
 import {
+  buildSumberDanaSelectItems,
   JALAN_POROS_KONDISI_OPTIONS,
   KONDISI_OPTIONS,
   PERKERASAN_OPTIONS,
@@ -12,6 +13,7 @@ import {
   STATUS_VERIFIKASI_OPTIONS,
   SUMBER_DANA_OPTIONS,
   type InfrastrukturTipe,
+  type RefSumberDana,
   type SelectOptionItem,
 } from '~/types/infrastruktur';
 
@@ -19,6 +21,7 @@ interface Props {
   layerId?: string;
   layerTitle?: string;
   tipeList?: InfrastrukturTipe[];
+  sumberDanaList?: RefSumberDana[];
   selectedTipe?: string | null;
   selectedTahunPembangunan?: number | string | null;
   selectedTahun?: number | string | null;
@@ -42,6 +45,7 @@ const props = withDefaults(defineProps<Props>(), {
   layerId: 'infrastruktur-segmen',
   layerTitle: 'Segmen Fisik Infrastruktur',
   tipeList: () => [],
+  sumberDanaList: () => [],
   selectedTipe: null,
   selectedTahunPembangunan: null,
   selectedTahun: null,
@@ -223,7 +227,12 @@ const perkerasanOptions = withAllOption('Semua Perkerasan', PERKERASAN_OPTIONS);
 const statusJalanOptions = withAllOption('Semua Status Jalan', STATUS_JALAN_OPTIONS);
 const statusKondisiOptions = withAllOption('Semua Status Kondisi', STATUS_KONDISI_OPTIONS);
 const statusAsetOptions = withAllOption('Semua Status Aset', STATUS_ASET_OPTIONS);
-const sumberDanaOptions = withAllOption('Semua Sumber Dana', SUMBER_DANA_OPTIONS);
+const sumberDanaSelectOptions = computed<SelectOptionItem[]>(() =>
+  buildSumberDanaSelectItems(props.sumberDanaList, props.selectedSumberDana, SUMBER_DANA_OPTIONS),
+);
+const sumberDanaOptions = computed(() =>
+  withAllOption('Semua Sumber Dana', sumberDanaSelectOptions.value),
+);
 const verifikasiOptions = withAllOption('Semua Status', STATUS_VERIFIKASI_OPTIONS);
 
 interface FilterFieldDescriptor {
@@ -331,8 +340,8 @@ const physicalFields = computed<FilterFieldDescriptor[]>(() => {
     },
     {
       key: 'tahun',
-      label: 'Tahun Pembangunan',
-      placeholder: 'Pilih tahun bangun',
+      label: 'Tahun Anggaran',
+      placeholder: 'Pilih tahun anggaran',
       items: tahunPembangunanSelectItems.value,
       modelValue: resolvedTahunValue.value ?? 'ALL',
       activeLabel: resolvedTahunValue.value ? String(resolvedTahunValue.value) : null,
@@ -385,9 +394,9 @@ const governanceFields = computed<FilterFieldDescriptor[]>(() => {
       key: 'sumber-dana',
       label: 'Sumber Dana',
       placeholder: 'Pilih sumber dana',
-      items: sumberDanaOptions,
+      items: sumberDanaOptions.value,
       modelValue: props.selectedSumberDana || 'ALL',
-      activeLabel: findOptionLabel(SUMBER_DANA_OPTIONS, props.selectedSumberDana),
+      activeLabel: findOptionLabel(sumberDanaSelectOptions.value, props.selectedSumberDana),
       searchInput: { placeholder: 'Cari sumber dana...' },
       onUpdate: handleSumberDanaChange,
       onClear: () => handleSumberDanaChange(null),

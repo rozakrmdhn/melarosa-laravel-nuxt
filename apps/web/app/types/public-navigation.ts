@@ -1,6 +1,6 @@
 export interface PublicNavItem {
   label: string;
-  to: string;
+  to?: string;
   exact?: boolean;
   description?: string;
   icon?: string;

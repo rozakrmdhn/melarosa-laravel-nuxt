@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PlottingAnggaran, RefSumberDana } from '~/types/infrastruktur';
+import type { ActiveJadwalPeriod, PlottingAnggaran, RefSumberDana } from '~/types/infrastruktur';
 import { useInfrastrukturApi } from '~/composables/useInfrastrukturApi';
 import { usePermission } from '~/composables/usePermission';
 import PlottingMetricsCard from '~/components/plotting-anggaran/PlottingMetricsCard.vue';
@@ -15,9 +15,11 @@ useSeoMeta({
   title: 'Perencanaan Plotting Pagu Anggaran',
 });
 
-const toast = useToast();
 const { can } = usePermission();
 const api = useInfrastrukturApi();
+
+const pageFeedback = ref<{ type: 'success' | 'error'; message: string } | null>(null);
+const deleteError = ref<string | null>(null);
 
 const canManage = computed(() => can('plotting-anggaran-manage'));
 
@@ -43,6 +45,46 @@ const summary = reactive({
 
 // Referensi Sumber Dana untuk Filter
 const sumberDanaList = ref<RefSumberDana[]>([]);
+const jadwalConfigured = ref(false);
+const jadwalBypass = ref(false);
+const jadwalPeriods = ref<ActiveJadwalPeriod[]>([]);
+
+async function loadActiveJadwal() {
+  try {
+    const res = await api.fetchActiveJadwal({
+      id_kecamatan: filterKecamatan.value ?? undefined,
+      id_desa: filterDesa.value ?? undefined,
+    });
+    jadwalConfigured.value = Boolean(res?.configured);
+    jadwalBypass.value = Boolean(res?.is_bypass);
+    jadwalPeriods.value = res?.data || [];
+  } catch {
+    // Abaikan error transien jadwal agar tabel tetap tampil
+  }
+}
+
+function isPlottingRowOpenBySchedule(row: PlottingAnggaran): boolean {
+  if (!jadwalConfigured.value || jadwalBypass.value) return true;
+  const period = jadwalPeriods.value.find(
+    (j) => Number(j.tahun_anggaran) === Number(row.tahun_anggaran),
+  );
+  if (!period) return false;
+  const desaId = Number(row.id_desa || 0);
+  if (desaId > 0 && period.closed_desa_override_ids?.includes(desaId)) {
+    return false;
+  }
+  if (desaId > 0 && period.open_plotting_desa_ids?.includes(desaId)) {
+    return true;
+  }
+  return Boolean(period.effective_open && period.allow_plotting);
+}
+
+const canCreateBySchedule = computed(() => {
+  if (!jadwalConfigured.value || jadwalBypass.value) return true;
+  return jadwalPeriods.value.some(
+    (p) => (p.effective_open && p.allow_plotting) || (p.open_plotting_desa_ids?.length ?? 0) > 0,
+  );
+});
 
 const sumberDanaFilterItems = computed(() => [
   { label: 'Semua Sumber Dana', value: 'ALL' },
@@ -88,12 +130,10 @@ async function loadData() {
       summary.total_target_panjang = res.summary.total_target_panjang || 0;
     }
   } catch (err: any) {
-    toast.add({
-      icon: 'i-lucide-alert-circle',
-      title: 'Gagal Memuat Data',
-      description: err?.data?.message || 'Terjadi kesalahan saat memuat data plotting anggaran.',
-      color: 'error',
-    });
+    pageFeedback.value = {
+      type: 'error',
+      message: err?.data?.message || 'Gagal memuat data plotting anggaran.',
+    };
   } finally {
     loading.value = false;
   }
@@ -162,30 +202,26 @@ const itemToDelete = ref<PlottingAnggaran | null>(null);
 const deleting = ref(false);
 
 function confirmDelete(item: PlottingAnggaran) {
+  deleteError.value = null;
   itemToDelete.value = item;
   isDeleteOpen.value = true;
 }
 
 async function handleDelete() {
   if (!itemToDelete.value) return;
+  deleteError.value = null;
   deleting.value = true;
   try {
     await api.deletePlotting(itemToDelete.value.id);
-    toast.add({
-      icon: 'i-lucide-check-circle',
-      title: 'Berhasil Dihapus',
-      description: `Plotting kegiatan '${itemToDelete.value.nama_kegiatan}' telah dihapus.`,
-      color: 'success',
-    });
+    pageFeedback.value = {
+      type: 'success',
+      message: `Plotting '${itemToDelete.value.nama_kegiatan}' dihapus.`,
+    };
     isDeleteOpen.value = false;
     await loadData();
   } catch (err: any) {
-    toast.add({
-      icon: 'i-lucide-alert-circle',
-      title: 'Gagal Menghapus',
-      description: err?.data?.message || 'Data plotting tidak dapat dihapus karena sudah memiliki segmen atau realisasi terkait.',
-      color: 'error',
-    });
+    deleteError.value =
+      err?.data?.message || 'Data plotting tidak dapat dihapus karena masih memiliki segmen atau realisasi terkait.';
   } finally {
     deleting.value = false;
   }
@@ -211,6 +247,7 @@ function formatMeter(val: number): string {
 onMounted(() => {
   loadData();
   loadSumberDanaOptions();
+  loadActiveJadwal();
 });
 </script>
 
@@ -230,7 +267,7 @@ onMounted(() => {
 
       <div class="flex items-center gap-2">
         <UButton
-          v-if="canManage"
+          v-if="canManage && canCreateBySchedule"
           label="Tambah Plotting"
           icon="i-lucide-plus"
           size="sm"
@@ -238,7 +275,35 @@ onMounted(() => {
           variant="solid"
           @click="openCreateModal"
         />
+        <UBadge
+          v-else-if="canManage && !canCreateBySchedule"
+          label="Jadwal Input Ditutup"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        />
       </div>
+    </div>
+
+    <div
+      v-if="pageFeedback"
+      role="status"
+      :class="[
+        'px-3 py-2 rounded-lg border text-xs flex items-center justify-between gap-2',
+        pageFeedback.type === 'success'
+          ? 'bg-emerald-50/90 dark:bg-emerald-950/35 border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-100'
+          : 'bg-red-50/90 dark:bg-red-950/35 border-red-200 dark:border-red-800/80 text-red-900 dark:text-red-100',
+      ]"
+    >
+      <span class="font-medium">{{ pageFeedback.message }}</span>
+      <button
+        type="button"
+        aria-label="Tutup pesan status"
+        class="p-0.5 rounded opacity-75 hover:opacity-100 cursor-pointer"
+        @click="pageFeedback = null"
+      >
+        <UIcon name="i-lucide-x" class="size-3.5" aria-hidden="true" />
+      </button>
     </div>
 
     <!-- 1. KPI Metrik Ringkasan -->
@@ -403,6 +468,18 @@ onMounted(() => {
                 <div class="font-medium text-gray-900 dark:text-white line-clamp-2">
                   {{ row.nama_kegiatan }}
                 </div>
+                <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                  <UBadge
+                    :label="row.status_penetapan === 'draft' ? 'Draft' : row.status_penetapan === 'selesai' ? 'Selesai' : 'Ditetapkan'"
+                    :color="row.status_penetapan === 'draft' ? 'warning' : row.status_penetapan === 'selesai' ? 'neutral' : 'success'"
+                    variant="subtle"
+                    size="xs"
+                    class="text-[10px] px-1.5 py-0 h-4"
+                  />
+                  <span v-if="row.nomor_sk" class="text-[11px] font-mono text-gray-600 dark:text-gray-300">
+                    {{ row.nomor_sk }}
+                  </span>
+                </div>
                 <div v-if="row.lokasi_kegiatan" class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">
                   {{ row.lokasi_kegiatan }}
                 </div>
@@ -431,19 +508,35 @@ onMounted(() => {
 
               <!-- Target Fisik (Panjang) -->
               <td class="py-3 px-4 text-right">
-                <span class="font-mono font-medium text-gray-900 dark:text-white">
+                <span
+                  v-if="Number(row.target_panjang_m || 0) > 0"
+                  class="font-mono font-medium text-gray-900 dark:text-white"
+                >
                   {{ formatMeter(row.target_panjang_m) }}
                 </span>
+                <span
+                  v-else
+                  class="text-xs italic text-gray-500 dark:text-gray-400"
+                >
+                  Opsional (diisi di digitasi)
+                </span>
+                <div
+                  v-if="row.used_panjang_m !== undefined && row.used_panjang_m !== null"
+                  class="text-[10px] font-mono text-gray-500 dark:text-gray-400 mt-0.5"
+                >
+                  Terdigitasi: {{ formatMeter(Number(row.used_panjang_m || 0)) }}
+                </div>
               </td>
 
               <!-- Aksi -->
               <td v-if="canManage" class="py-3 px-4 text-right">
-                <div class="flex items-center justify-end gap-1">
+                <div v-if="isPlottingRowOpenBySchedule(row)" class="flex items-center justify-end gap-1">
                   <UButton
                     icon="i-lucide-pencil"
                     size="xs"
                     color="neutral"
                     variant="ghost"
+                    aria-label="Edit plotting anggaran"
                     @click="openEditModal(row)"
                   />
                   <UButton
@@ -451,9 +544,18 @@ onMounted(() => {
                     size="xs"
                     color="error"
                     variant="ghost"
+                    aria-label="Hapus plotting anggaran"
                     @click="confirmDelete(row)"
                   />
                 </div>
+                <span
+                  v-else
+                  class="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 dark:text-gray-400"
+                  title="Jadwal tahun anggaran ini ditutup untuk wilayah ini"
+                >
+                  <UIcon name="i-lucide-lock" class="size-3 shrink-0" aria-hidden="true" />
+                  <span>Terkunci</span>
+                </span>
               </td>
             </tr>
           </tbody>
@@ -484,7 +586,7 @@ onMounted(() => {
       v-model:open="isFormOpen"
       :is-editing="isEditing"
       :item="selectedItem"
-      @success="loadData"
+      @success="(msg) => { if (msg) pageFeedback = { type: 'success', message: msg }; loadData(); }"
     />
 
     <!-- Modal Konfirmasi Hapus -->
@@ -494,11 +596,20 @@ onMounted(() => {
       description="Apakah Anda yakin ingin menghapus perencanaan kegiatan ini? Tindakan ini tidak dapat dibatalkan jika belum memiliki segmen fisik terkait."
     >
       <template #body>
-        <p class="text-sm text-gray-600 dark:text-gray-300">
-          Anda akan menghapus plotting kegiatan:
-          <strong class="text-gray-900 dark:text-white font-semibold">{{ itemToDelete?.nama_kegiatan }}</strong>
-          (Tahun {{ itemToDelete?.tahun_anggaran }}).
-        </p>
+        <div class="space-y-3">
+          <div
+            v-if="deleteError"
+            role="alert"
+            class="p-2.5 rounded-lg bg-red-50/90 dark:bg-red-950/35 border border-red-200 dark:border-red-800/80 text-xs font-medium text-red-900 dark:text-red-100"
+          >
+            {{ deleteError }}
+          </div>
+          <p class="text-sm text-gray-600 dark:text-gray-300">
+            Anda akan menghapus plotting kegiatan:
+            <strong class="text-gray-900 dark:text-white font-semibold">{{ itemToDelete?.nama_kegiatan }}</strong>
+            (Tahun {{ itemToDelete?.tahun_anggaran }}).
+          </p>
+        </div>
       </template>
 
       <template #footer>

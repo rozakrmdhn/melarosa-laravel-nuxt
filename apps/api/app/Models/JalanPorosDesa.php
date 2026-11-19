@@ -137,7 +137,7 @@ class JalanPorosDesa extends Model
      */
     public function scopeForUser($query, ?User $user = null)
     {
-        if (!$user || $user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+        if (!$user || $user->isAdminOrBappeda()) {
             return $query;
         }
 

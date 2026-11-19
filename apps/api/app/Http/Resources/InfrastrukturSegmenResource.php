@@ -38,6 +38,8 @@ class InfrastrukturSegmenResource extends JsonResource
                 'kecamatan'          => $this->kecamatan,
                 'id_desa'            => $this->id_desa,
                 'id_kecamatan'       => $this->id_kecamatan,
+                'plotting_id'        => $this->plotting_id,
+                'is_non_pagu'        => (bool) $this->is_non_pagu,
                 'sumber_data'        => $this->sumber_data,
                 'keterangan'         => $this->keterangan,
                 'foto_url'           => $this->foto_url,

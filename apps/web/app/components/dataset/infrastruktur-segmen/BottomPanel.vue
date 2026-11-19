@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { InfrastrukturSegmen, InfrastrukturTipe } from '~/types/infrastruktur';
+import { resolveSumberDanaLabel, type InfrastrukturSegmen, type InfrastrukturTipe, type RefSumberDana } from '~/types/infrastruktur';
 import type { ConsoleLog } from '~/types/dataset-editor';
 import { formatWilayah } from '~/utils/helpers';
 
@@ -26,9 +26,11 @@ interface Props {
   canEditRow?: (row: InfrastrukturSegmen) => boolean;
   canDeleteRow?: (row: InfrastrukturSegmen) => boolean;
   canSubmitRow?: (row: InfrastrukturSegmen) => boolean;
+  canVerifyRow?: (row: InfrastrukturSegmen) => boolean;
 
   // Active filters for chips
   tipeList?: InfrastrukturTipe[];
+  sumberDanaList?: RefSumberDana[];
   selectedTipe?: string | null;
   selectedTahunPembangunan?: number | string | null;
   selectedKondisi?: string | null;
@@ -70,6 +72,7 @@ const props = withDefaults(defineProps<Props>(), {
   canDeleteRow: undefined,
   canSubmitRow: undefined,
   tipeList: () => [],
+  sumberDanaList: () => [],
   selectedTipe: null,
   selectedTahunPembangunan: null,
   selectedKondisi: null,
@@ -116,6 +119,7 @@ const emit = defineEmits<{
   (e: 'editRow', row: InfrastrukturSegmen): void;
   (e: 'deleteRow', row: InfrastrukturSegmen): void;
   (e: 'submitRow', row: InfrastrukturSegmen): void;
+  (e: 'verifyRow', row: InfrastrukturSegmen): void;
   (e: 'clearLogs'): void;
 }>();
 
@@ -181,6 +185,10 @@ function isRowSubmittable(row: InfrastrukturSegmen) {
     props.canSubmit &&
       (row.status_verifikasi === 'draft' || row.status_verifikasi === 'rejected_kecamatan'),
   );
+}
+
+function isRowVerifiable(row: InfrastrukturSegmen) {
+  return props.canVerifyRow ? props.canVerifyRow(row) : false;
 }
 
 const kecamatanLabel = computed(() => {
@@ -303,32 +311,76 @@ watch(
 function getKondisiBadge(kondisi?: string | null) {
   switch (kondisi) {
     case 'Baik':
-      return { label: 'Baik', color: 'success' as const };
+      return {
+        label: 'Baik',
+        dotClass: 'bg-emerald-600 dark:bg-emerald-400',
+        pillClass: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700/80',
+      };
     case 'Sedang':
-      return { label: 'Sedang', color: 'warning' as const };
+      return {
+        label: 'Sedang',
+        dotClass: 'bg-amber-500 dark:bg-amber-400',
+        pillClass: 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700/80',
+      };
     case 'Rusak Ringan':
-      return { label: 'Rusak Ringan', color: 'warning' as const };
+      return {
+        label: 'Rusak Ringan',
+        dotClass: 'bg-orange-600 dark:bg-orange-400',
+        pillClass: 'bg-orange-50 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 border-orange-300 dark:border-orange-700/80',
+      };
     case 'Rusak Berat':
-      return { label: 'Rusak Berat', color: 'error' as const };
+      return {
+        label: 'Rusak Berat',
+        dotClass: 'bg-rose-600 dark:bg-rose-400',
+        pillClass: 'bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border-rose-300 dark:border-rose-700/80',
+      };
     default:
-      return { label: kondisi || '-', color: 'neutral' as const };
+      return {
+        label: kondisi || 'Belum Diisi',
+        dotClass: 'bg-slate-400 dark:bg-slate-500',
+        pillClass: 'bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700',
+      };
   }
 }
 
 function getStatusBadge(status?: string | null) {
   switch (status) {
     case 'verified_bappeda':
-      return { label: 'Disahkan Bappeda', color: 'success' as const };
+      return {
+        label: 'Disahkan Bappeda',
+        icon: 'i-lucide-badge-check',
+        pillClass: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700/80',
+      };
     case 'verified_kecamatan':
-      return { label: 'Terverifikasi Kec.', color: 'info' as const };
+      return {
+        label: 'Disetujui Kecamatan',
+        icon: 'i-lucide-check-circle-2',
+        pillClass: 'bg-sky-50 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 border-sky-300 dark:border-sky-700/80',
+      };
     case 'submitted_desa':
-      return { label: 'Diajukan', color: 'warning' as const };
+      return {
+        label: 'Menunggu Kecamatan',
+        icon: 'i-lucide-clock-3',
+        pillClass: 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700/80',
+      };
     case 'rejected_kecamatan':
-      return { label: 'Ditolak Kec.', color: 'error' as const };
+      return {
+        label: 'Revisi Kecamatan',
+        icon: 'i-lucide-rotate-ccw',
+        pillClass: 'bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border-rose-300 dark:border-rose-700/80',
+      };
     case 'rejected_bappeda':
-      return { label: 'Ditolak Bappeda', color: 'error' as const };
+      return {
+        label: 'Revisi Bappeda',
+        icon: 'i-lucide-alert-circle',
+        pillClass: 'bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border-rose-300 dark:border-rose-700/80',
+      };
     default:
-      return { label: 'Draft', color: 'neutral' as const };
+      return {
+        label: 'Draft',
+        icon: 'i-lucide-file-edit',
+        pillClass: 'bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700',
+      };
   }
 }
 
@@ -636,18 +688,18 @@ function handleTabClick(tab: 'table' | 'console') {
               </button>
             </span>
 
-            <!-- Chip Tahun Pembangunan -->
+            <!-- Chip Tahun Anggaran -->
             <span
               v-if="selectedTahunPembangunan"
               class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800/80 shrink-0 text-[11px] shadow-2xs"
             >
-              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Tahun:</span>
+              <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">TA:</span>
               <span class="font-semibold tracking-tight tabular-nums">{{ selectedTahunPembangunan }}</span>
               <button
                 type="button"
-                aria-label="Hapus filter tahun pembangunan"
+                aria-label="Hapus filter tahun anggaran"
                 class="p-0.5 rounded-full hover:bg-emerald-200/60 dark:hover:bg-emerald-800/60 transition-colors cursor-pointer flex items-center justify-center text-emerald-700 dark:text-emerald-300 hover:text-emerald-950 dark:hover:text-white"
-                title="Hapus filter tahun pembangunan"
+                title="Hapus filter tahun anggaran"
                 @click="emit('update:selectedTahunPembangunan', null); emit('update:selected-tahun-pembangunan', null)"
               >
                 <UIcon name="i-lucide-x" class="size-3" />
@@ -792,7 +844,7 @@ function handleTabClick(tab: 'table' | 'console') {
               class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/80 shrink-0 text-[11px] shadow-2xs"
             >
               <span class="text-[10px] uppercase tracking-wider font-medium opacity-70">Dana:</span>
-              <span class="font-semibold tracking-tight">{{ selectedSumberDana }}</span>
+              <span class="font-semibold tracking-tight">{{ resolveSumberDanaLabel(sumberDanaList, selectedSumberDana) }}</span>
               <button
                 type="button"
                 aria-label="Hapus filter sumber dana"
@@ -965,35 +1017,47 @@ function handleTabClick(tab: 'table' | 'console') {
                   </span>
                 </div>
 
-                <!-- Baris 3: Status Kondisi & Verifikasi + Detail Teknis -->
-                <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
-                  <UBadge
-                    :label="getKondisiBadge(row.kondisi).label"
-                    :color="getKondisiBadge(row.kondisi).color"
-                    variant="subtle"
-                    size="xs"
-                  />
-                  <UBadge
-                    :label="getStatusBadge(row.status_verifikasi).label"
-                    :color="getStatusBadge(row.status_verifikasi).color"
-                    variant="subtle"
-                    size="xs"
-                  />
+                <!-- Baris 3: Detail Teknis Ringkas -->
+                <div
+                  v-if="row.lebar != null || row.jenis_perkerasan || row.tahun_pembangunan"
+                  class="text-[11px] text-gray-600 dark:text-gray-400 tabular-nums flex flex-wrap items-center gap-1.5"
+                >
+                  <template v-if="row.lebar != null">
+                    <span>Lebar {{ Number(row.lebar).toLocaleString('id-ID', { maximumFractionDigits: 2 }) }} m</span>
+                  </template>
+                  <template v-if="row.jenis_perkerasan">
+                    <span v-if="row.lebar != null" aria-hidden="true">&middot;</span>
+                    <span>{{ row.jenis_perkerasan }}</span>
+                  </template>
+                  <template v-if="row.tahun_pembangunan">
+                    <span v-if="row.lebar != null || row.jenis_perkerasan" aria-hidden="true">&middot;</span>
+                    <span>TA {{ row.tahun_pembangunan }}</span>
+                  </template>
+                </div>
+
+                <!-- Baris 4: Label Kondisi & Verifikasi (Lebih Jelas & Mudah Dipindai) -->
+                <div class="flex flex-wrap items-center gap-2 pt-0.5">
                   <span
-                    v-if="row.lebar != null || row.jenis_perkerasan || row.tahun_pembangunan"
-                    class="text-[11px] text-gray-600 dark:text-gray-400 tabular-nums ml-auto flex items-center gap-1.5"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold whitespace-nowrap leading-none"
+                    :class="getKondisiBadge(row.kondisi).pillClass"
                   >
-                    <template v-if="row.lebar != null">
-                      <span>L {{ Number(row.lebar).toLocaleString('id-ID', { maximumFractionDigits: 2 }) }} m</span>
-                    </template>
-                    <template v-if="row.jenis_perkerasan">
-                      <span v-if="row.lebar != null" aria-hidden="true">&middot;</span>
-                      <span>{{ row.jenis_perkerasan }}</span>
-                    </template>
-                    <template v-if="row.tahun_pembangunan">
-                      <span v-if="row.lebar != null || row.jenis_perkerasan" aria-hidden="true">&middot;</span>
-                      <span>{{ row.tahun_pembangunan }}</span>
-                    </template>
+                    <span
+                      class="size-2 rounded-full shrink-0"
+                      :class="getKondisiBadge(row.kondisi).dotClass"
+                      aria-hidden="true"
+                    />
+                    <span>{{ getKondisiBadge(row.kondisi).label }}</span>
+                  </span>
+                  <span
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold whitespace-nowrap leading-none"
+                    :class="getStatusBadge(row.status_verifikasi).pillClass"
+                  >
+                    <UIcon
+                      :name="getStatusBadge(row.status_verifikasi).icon"
+                      class="size-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>{{ getStatusBadge(row.status_verifikasi).label }}</span>
                   </span>
                 </div>
               </button>
@@ -1019,6 +1083,18 @@ function handleTabClick(tab: 'table' | 'console') {
                   >
                     <UIcon name="i-lucide-pencil" class="size-3.5 shrink-0" />
                     <span>Edit</span>
+                  </button>
+
+                  <button
+                    v-if="isRowVerifiable(row)"
+                    type="button"
+                    :aria-label="`Verifikasi ${row.namobj || 'segmen'}`"
+                    title="Proses Verifikasi"
+                    class="relative inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors cursor-pointer after:content-[''] after:absolute after:-inset-y-1.5 after:-inset-x-1"
+                    @click="emit('verifyRow', row)"
+                  >
+                    <UIcon name="i-lucide-shield-check" class="size-3.5 shrink-0" />
+                    <span>Verifikasi</span>
                   </button>
 
                   <button
@@ -1056,8 +1132,8 @@ function handleTabClick(tab: 'table' | 'console') {
                   <th class="py-2 px-3 min-w-[150px]">Wilayah</th>
                   <th class="py-2 px-3 text-right">Dimensi</th>
                   <th class="py-2 px-3 min-w-[130px]">Fisik & Status</th>
-                  <th class="py-2 px-3">Kondisi</th>
-                  <th class="py-2 px-3">Verifikasi</th>
+                  <th class="py-2 px-3 min-w-[125px]">Kondisi</th>
+                  <th class="py-2 px-3 min-w-[170px]">Verifikasi</th>
                   <th class="sticky right-0 z-20 bg-gray-50 dark:bg-[#0b0f19] py-2 px-3 text-center border-l border-gray-200 dark:border-gray-800">
                     Aksi
                   </th>
@@ -1112,21 +1188,31 @@ function handleTabClick(tab: 'table' | 'console') {
                       {{ row.status_jalan || '-' }}
                     </div>
                   </td>
-                  <td class="py-2 px-3 whitespace-nowrap">
-                    <UBadge
-                      :label="getKondisiBadge(row.kondisi).label"
-                      :color="getKondisiBadge(row.kondisi).color"
-                      variant="subtle"
-                      size="xs"
-                    />
+                  <td class="py-2.5 px-3 whitespace-nowrap">
+                    <span
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold leading-none"
+                      :class="getKondisiBadge(row.kondisi).pillClass"
+                    >
+                      <span
+                        class="size-2 rounded-full shrink-0"
+                        :class="getKondisiBadge(row.kondisi).dotClass"
+                        aria-hidden="true"
+                      />
+                      <span>{{ getKondisiBadge(row.kondisi).label }}</span>
+                    </span>
                   </td>
-                  <td class="py-2 px-3 whitespace-nowrap">
-                    <UBadge
-                      :label="getStatusBadge(row.status_verifikasi).label"
-                      :color="getStatusBadge(row.status_verifikasi).color"
-                      variant="subtle"
-                      size="xs"
-                    />
+                  <td class="py-2.5 px-3 whitespace-nowrap">
+                    <span
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold leading-none"
+                      :class="getStatusBadge(row.status_verifikasi).pillClass"
+                    >
+                      <UIcon
+                        :name="getStatusBadge(row.status_verifikasi).icon"
+                        class="size-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span>{{ getStatusBadge(row.status_verifikasi).label }}</span>
+                    </span>
                   </td>
                   <td
                     class="sticky right-0 z-10 py-2 px-3 text-center whitespace-nowrap border-l border-gray-100 dark:border-gray-800/80 transition-colors"
@@ -1154,6 +1240,17 @@ function handleTabClick(tab: 'table' | 'console') {
                         title="Edit Segmen"
                         class="cursor-pointer"
                         @click="emit('editRow', row)"
+                      />
+                      <UButton
+                        v-if="isRowVerifiable(row)"
+                        icon="i-lucide-shield-check"
+                        size="xs"
+                        color="success"
+                        variant="ghost"
+                        :aria-label="`Verifikasi ${row.namobj || 'segmen'}`"
+                        title="Proses Verifikasi / Teruskan ke Bappeda"
+                        class="cursor-pointer"
+                        @click="emit('verifyRow', row)"
                       />
                       <UButton
                         v-if="isRowSubmittable(row)"

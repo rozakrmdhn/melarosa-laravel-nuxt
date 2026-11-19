@@ -1,6 +1,17 @@
 <script lang="ts" setup>
 const route = useRoute();
 const nuxtApp = useNuxtApp();
+const { toasts: globalToasts, remove: removeGlobalToast } = useToast();
+const toasterConfig = {
+  duration: 4000,
+  progress: true,
+  expand: true,
+};
+let cleanupToastWatchdog: (() => void) | null = null;
+onBeforeUnmount(() => {
+  cleanupToastWatchdog?.();
+  cleanupToastWatchdog = null;
+});
 const isAdmin = computed(() => route.path.startsWith("/admin"));
 const isAuth = computed(() => route.path.startsWith("/auth"));
 const isMaps = computed(() => route.path.startsWith("/maps"));
@@ -66,12 +77,134 @@ onMounted(() => {
       },
       { passive: false }
     );
+
+    // 3. Watchdog notifikasi toast agar selalu menutup otomatis tepat waktu
+    //    walaupun kursor di luar browser atau jendela kehilangan fokus (window.blur).
+    const DEFAULT_TOAST_MS = 4000;
+    const trackedToasts = new Map<string, { sig: string; expiresAt: number }>();
+    let toastPollTimer: ReturnType<typeof setInterval> | null = null;
+
+    const getToastViewportEl = () =>
+      document.querySelector<HTMLElement>('[role="region"] ol[data-slot="viewport"]') ||
+      document.querySelector<HTMLElement>('ol[data-slot="viewport"]');
+
+    const isHoveringToastCard = () => {
+      if (document.hidden || !document.hasFocus()) return false;
+      return Boolean(
+        document.querySelector('[role="region"] ol[data-slot="viewport"] li[data-slot="root"]:hover') ||
+        document.querySelector('ol[data-slot="viewport"] li[data-slot="root"]:hover')
+      );
+    };
+
+    const resumeRekaToastViewport = () => {
+      const viewport = getToastViewportEl();
+      if (!viewport || isHoveringToastCard()) return;
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (activeEl && viewport.contains(activeEl)) {
+        activeEl.blur();
+      }
+      if (typeof PointerEvent !== "undefined") {
+        viewport.dispatchEvent(new PointerEvent("pointerleave", { bubbles: false }));
+      }
+      viewport.dispatchEvent(new CustomEvent("toast.viewportResume"));
+    };
+
+    const checkAndDismissExpiredToasts = () => {
+      if (globalToasts.value.length === 0) {
+        if (toastPollTimer !== null) {
+          clearInterval(toastPollTimer);
+          toastPollTimer = null;
+        }
+        return;
+      }
+
+      if (isHoveringToastCard()) {
+        // Perpanjang sedikit selama pengguna benar-benar menyorot kartu toast di jendela aktif
+        for (const entry of trackedToasts.values()) {
+          entry.expiresAt = Math.max(entry.expiresAt, Date.now() + 500);
+        }
+        return;
+      }
+
+      resumeRekaToastViewport();
+
+      const now = Date.now();
+      for (const [id, entry] of trackedToasts.entries()) {
+        if (now >= entry.expiresAt) {
+          trackedToasts.delete(id);
+          removeGlobalToast(id);
+        }
+      }
+    };
+
+    watch(
+      globalToasts,
+      (list) => {
+        const activeIds = new Set<string>();
+
+        for (const item of list as Array<Record<string, any>>) {
+          if (!item?.id || item.open === false) continue;
+          activeIds.add(item.id);
+
+          const rawDuration = item.duration;
+          const durationMs = typeof rawDuration === "number" ? rawDuration : DEFAULT_TOAST_MS;
+          if (durationMs <= 0 || !Number.isFinite(durationMs)) {
+            trackedToasts.delete(item.id);
+            continue;
+          }
+
+          const sig = `${durationMs}|${item._duplicate ?? 0}|${item._updated ? 1 : 0}`;
+          const prev = trackedToasts.get(item.id);
+          if (!prev || prev.sig !== sig) {
+            trackedToasts.set(item.id, { sig, expiresAt: Date.now() + durationMs });
+          }
+        }
+
+        for (const id of trackedToasts.keys()) {
+          if (!activeIds.has(id)) {
+            trackedToasts.delete(id);
+          }
+        }
+
+        if (activeIds.size > 0 && toastPollTimer === null) {
+          toastPollTimer = setInterval(checkAndDismissExpiredToasts, 250);
+        } else if (activeIds.size === 0 && toastPollTimer !== null) {
+          clearInterval(toastPollTimer);
+          toastPollTimer = null;
+        }
+
+        nextTick(() => {
+          setTimeout(resumeRekaToastViewport, 0);
+        });
+      },
+      { deep: true, immediate: true }
+    );
+
+    const handleToastWindowEvent = () => {
+      setTimeout(checkAndDismissExpiredToasts, 0);
+    };
+
+    window.addEventListener("blur", handleToastWindowEvent);
+    window.addEventListener("focus", handleToastWindowEvent);
+    document.addEventListener("visibilitychange", handleToastWindowEvent);
+    document.documentElement.addEventListener("mouseleave", handleToastWindowEvent);
+
+    cleanupToastWatchdog = () => {
+      if (toastPollTimer !== null) {
+        clearInterval(toastPollTimer);
+        toastPollTimer = null;
+      }
+      window.removeEventListener("blur", handleToastWindowEvent);
+      window.removeEventListener("focus", handleToastWindowEvent);
+      document.removeEventListener("visibilitychange", handleToastWindowEvent);
+      document.documentElement.removeEventListener("mouseleave", handleToastWindowEvent);
+    };
   }
 });
 </script>
 
 <template>
-  <UApp>
+  <UApp :toaster="toasterConfig">
     <!-- Dedicated Admin Panel Layout (Standalone Full-Screen without Default Header & Footer) -->
     <template v-if="isAdmin">
       <div class="h-screen w-screen overflow-hidden flex flex-col bg-gray-50 dark:bg-gray-950">
@@ -98,7 +231,7 @@ onMounted(() => {
 
     <!-- Public Site Layout (with Header and Footer) -->
     <template v-else>
-      <div class="min-h-screen flex flex-col bg-white dark:bg-[#070b14] text-slate-900 dark:text-slate-100">
+      <div class="min-h-screen flex flex-col bg-[#F7F8F5] dark:bg-[#070b14] text-slate-900 dark:text-slate-100">
         <!-- Fixed floating navbar (does not take space in flow) -->
         <AppPublicNavbar />
 

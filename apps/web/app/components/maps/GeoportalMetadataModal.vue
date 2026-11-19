@@ -6,6 +6,8 @@ import {
   type LayerAttributesData,
   type PycswMetadataRecord,
 } from "~/composables/useGeoportalLayers";
+import { resolveEffectiveWmsLegendUrl } from "~/utils/mvt-legend";
+import { hasWmsCustomStyle } from "~/utils/wms-sld";
 
 const props = withDefaults(
   defineProps<{
@@ -223,8 +225,17 @@ function getDirectCswUrl(schema: "iso" | "dc"): string {
 
 function getMelarosaXmlUrl(schema: "iso" | "dc", download = false): string {
   if (!props.layer?.id) return "";
-  const base = String(config.public.apiBase || "http://localhost:9000").replace(/\/+$/, "");
-  const prefix = config.public.apiPrefix || "/api/v1";
+  const prefix = String(config.public.apiPrefix || "/api/v1").replace(/\/+$/, "");
+  const configuredBase = String(config.public.apiBase || "").replace(/\/+$/, "");
+  const isLocalConfigured = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(configuredBase);
+
+  let base = "";
+  if (configuredBase && !isLocalConfigured) {
+    base = configuredBase;
+  } else if (import.meta.client && typeof window !== "undefined") {
+    base = window.location.origin;
+  }
+
   return `${base}${prefix}/layers/geoportal/${props.layer.id}/csw-xml?schema=${schema}${download ? "&download=1" : ""}`;
 }
 
@@ -541,16 +552,16 @@ const spatialExtent = computed(() => {
             </div>
           </div>
 
-          <!-- Official Legend Preview -->
-          <div v-if="props.layer.legend_url" class="p-3.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-2">
+          <!-- Official / Custom SLD Legend Preview -->
+          <div v-if="resolveEffectiveWmsLegendUrl(props.layer) || props.layer.legend_url" class="p-3.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0b0f19] space-y-2">
             <div class="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-semibold text-xs">
               <UIcon name="i-lucide-list" class="size-4 text-slate-400" />
-              <span>Simbol Legenda Resmi (GetLegendGraphic)</span>
+              <span>{{ hasWmsCustomStyle(props.layer.style_config) ? 'Simbol Legenda (Custom SLD)' : 'Simbol Legenda Resmi (GetLegendGraphic)' }}</span>
             </div>
             <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200/80 dark:border-white/5 inline-block">
               <img
-                :src="props.layer.legend_url"
-                alt="Legenda Resmi Geoportal Bojonegoro"
+                :src="resolveEffectiveWmsLegendUrl(props.layer) || props.layer.legend_url || ''"
+                alt="Legenda Layer Geoportal Bojonegoro"
                 class="max-h-36 object-contain"
                 loading="lazy"
               />

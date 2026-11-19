@@ -29,10 +29,14 @@ class InfrastrukturVerifikasiController extends Controller
         Gate::authorize('submitDesa', $segmen);
 
         $currentStatus = $segmen->status_verifikasi?->value ?? $segmen->status_verifikasi;
-        if (!in_array($currentStatus, [StatusVerifikasi::Draft->value, StatusVerifikasi::RejectedKecamatan->value], true)) {
+        if (!in_array($currentStatus, [
+            StatusVerifikasi::Draft->value,
+            StatusVerifikasi::RejectedKecamatan->value,
+            StatusVerifikasi::RejectedBappeda->value,
+        ], true)) {
             return response()->json([
                 'ok'      => false,
-                'message' => 'Hanya segmen berstatus draft atau ditolak kecamatan yang dapat diajukan verifikasi.',
+                'message' => 'Hanya segmen berstatus draft atau perlu revisi yang dapat diajukan verifikasi.',
             ], 422);
         }
 

@@ -25,6 +25,10 @@ class InfrastrukturPermissionSeeder extends Seeder
             'ref-sumber-dana-view',
             'ref-sumber-dana-manage',
 
+            // Jadwal Tahun Anggaran & Override Desa
+            'jadwal-anggaran-view',
+            'jadwal-anggaran-manage',
+
             // Plotting Anggaran
             'plotting-anggaran-view',
             'plotting-anggaran-manage',
@@ -52,17 +56,28 @@ class InfrastrukturPermissionSeeder extends Seeder
         $adminRole = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
         $verifierBappeda = Role::firstOrCreate(['name' => 'verifierBappeda', 'guard_name' => 'web']);
         $verifierKecamatan = Role::firstOrCreate(['name' => 'verifierKecamatan', 'guard_name' => 'web']);
+        $operatorDesa = Role::firstOrCreate(['name' => 'operatorDesa', 'guard_name' => 'web']);
 
-        // Admin mendapatkan seluruh permission
-        $adminRole->syncPermissions(Permission::all());
+        // Admin mendapatkan seluruh permission yang terdaftar
+        $adminRole->givePermissionTo(Permission::all());
 
-        // Role verifierBappeda: Mengelola seluruh segmen dan verifikasi tingkat Bappeda
-        $verifierBappeda->syncPermissions([
+        // Helper non-destruktif agar permission modul lain (mis. bkkd-*) tidak terhapus saat seeder dijalankan ulang
+        $grantExisting = static function (Role $role, array $permissionNames): void {
+            $validNames = Permission::whereIn('name', $permissionNames)->pluck('name')->all();
+            if ($validNames !== []) {
+                $role->givePermissionTo($validNames);
+            }
+        };
+
+        // Role verifierBappeda: Mengelola seluruh segmen, jadwal tahun anggaran, dan verifikasi tingkat Bappeda
+        $grantExisting($verifierBappeda, [
             'dashboard-view',
             'infrastruktur-tipe-view',
             'infrastruktur-tipe-manage',
             'ref-sumber-dana-view',
             'ref-sumber-dana-manage',
+            'jadwal-anggaran-view',
+            'jadwal-anggaran-manage',
             'plotting-anggaran-view',
             'plotting-anggaran-manage',
             'infrastruktur-segmen-view',
@@ -78,7 +93,7 @@ class InfrastrukturPermissionSeeder extends Seeder
         ]);
 
         // Role verifierKecamatan: Mengelola segmen di kecamatannya dan verifikasi seluruh segmen di kecamatannya
-        $verifierKecamatan->syncPermissions([
+        $grantExisting($verifierKecamatan, [
             'dashboard-view',
             'infrastruktur-tipe-view',
             'ref-sumber-dana-view',
@@ -87,6 +102,22 @@ class InfrastrukturPermissionSeeder extends Seeder
             'infrastruktur-segmen-create',
             'infrastruktur-segmen-update',
             'infrastruktur-segmen-verify-kecamatan',
+            'monitoring-realisasi-view',
+            'batas-kecamatan-view',
+            'batas-desa-view',
+            'jalan-poros-desa-view',
+        ]);
+
+        // Role operatorDesa: Mengelola dan mendigitasi segmen infrastruktur serta plotting sumber dana desa
+        $grantExisting($operatorDesa, [
+            'dashboard-view',
+            'infrastruktur-tipe-view',
+            'ref-sumber-dana-view',
+            'plotting-anggaran-view',
+            'plotting-anggaran-manage',
+            'infrastruktur-segmen-view',
+            'infrastruktur-segmen-create',
+            'infrastruktur-segmen-update',
             'monitoring-realisasi-view',
             'batas-kecamatan-view',
             'batas-desa-view',

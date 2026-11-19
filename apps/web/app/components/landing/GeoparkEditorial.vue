@@ -219,7 +219,7 @@ function getCategoryTextClass(categorySlug: string): string {
         </p>
         <button
           type="button"
-          class="inline-flex items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white min-h-[44px] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+          class="inline-flex items-center justify-center rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-4 py-2.5 text-xs sm:text-sm font-semibold text-white min-h-[44px] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E]"
           @click="activeTab = 'ALL'"
         >
           Tampilkan Semua Situs

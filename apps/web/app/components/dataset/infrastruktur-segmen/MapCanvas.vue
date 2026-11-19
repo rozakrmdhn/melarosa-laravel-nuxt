@@ -4,6 +4,9 @@ import { $http } from '~/utils/helpers';
 import type { GeoJsonFeatureCollection, InfrastrukturSegmen } from '~/types/infrastruktur';
 import type { BasemapType, LayerSymbology } from '~/types/dataset-editor';
 import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from '~/types/dataset-editor';
+import BasemapSwitcher from '~/components/common/BasemapSwitcher.vue';
+import { useBasemapStore } from '~/stores/basemap';
+import { createOpenLayersBasemapSource } from '~/utils/basemap-sources';
 
 interface Props {
   apiBase?: string;
@@ -32,8 +35,9 @@ interface Props {
   activeLayerId?: string;
   floatingModeToolbar?: boolean;
   referenceLabel?: string | null;
-  interactionMode?: 'pan' | 'identify' | 'pick-reference';
+  interactionMode?: 'pan' | 'identify' | 'pick-reference' | 'pick-auto-points';
   selectedReferenceRoadId?: string | null;
+  autoPickHint?: string | null;
 
   // Jalan Poros Desa Layer Props
   jalanPorosDesaVisible?: boolean;
@@ -84,11 +88,14 @@ const props = withDefaults(defineProps<Props>(), {
   referenceLabel: null,
   interactionMode: 'identify',
   selectedReferenceRoadId: null,
+  autoPickHint: null,
 });
 
 const emit = defineEmits<{
   (e: 'select', feature: any | null): void;
   (e: 'pickReferenceRoad', payload: { id: string; namobj?: string; kode_ruas?: string | null }): void;
+  (e: 'pickAutoPoint', coords: [number, number]): void;
+  (e: 'cancelAutoPick'): void;
   (e: 'toggleIdentify'): void;
   (e: 'log', level: 'INFO' | 'WARN' | 'ERROR', message: string): void;
   (e: 'update:basemap', val: BasemapType): void;
@@ -112,29 +119,17 @@ const tooltipEl = ref<HTMLDivElement | null>(null);
 const pulseEl = ref<HTMLDivElement | null>(null);
 const isPulseVisible = ref(false);
 
+const basemapStore = useBasemapStore();
 const currentBasemap = ref<BasemapType>(props.basemap);
 
-const BASEMAP_OPTIONS: Array<{ value: BasemapType; label: string; icon: string }> = [
-  { value: 'osm', label: 'OSM', icon: 'i-lucide-map' },
-  { value: 'dark', label: 'Gelap', icon: 'i-lucide-moon' },
-  { value: 'satellite', label: 'Satelit', icon: 'i-lucide-globe' },
-  { value: 'topo', label: 'Topografi', icon: 'i-lucide-mountain' },
-  { value: 'none', label: 'Polos', icon: 'i-lucide-square' },
-];
-
-const activeBasemapMeta = computed(() => {
-  return BASEMAP_OPTIONS.find(b => b.value === currentBasemap.value) ?? BASEMAP_OPTIONS[0]!;
-});
-
-const basemapDropdownItems = computed(() => [
-  BASEMAP_OPTIONS.map(bm => ({
-    label: bm.label,
-    icon: bm.icon,
-    type: 'checkbox' as const,
-    checked: currentBasemap.value === bm.value,
-    onSelect: () => setBasemap(bm.value),
-  })),
-]);
+watch(
+  () => basemapStore.items,
+  () => {
+    if (baseTileLayer && olModules && currentBasemap.value !== 'none') {
+      baseTileLayer.setSource(getBasemapSource(currentBasemap.value));
+    }
+  },
+);
 const isMapLoaded = ref(false);
 const isMvtLoading = ref(false);
 let activeTileCount = 0;
@@ -172,6 +167,14 @@ let refHighlightSource: any = null;
 let refHighlightLayer: any = null;
 let refSnapInteraction: any = null;
 let pendingRefFeature: { featureOrGeom: any; shouldZoom: boolean } | null = null;
+
+let autoPreviewSource: any = null;
+let autoPreviewLayer: any = null;
+let pendingAutoPreview: {
+  coordinates?: [number, number][];
+  startPoint?: [number, number] | null;
+  endPoint?: [number, number] | null;
+} | null = null;
 
 const isEditGeometryMode = ref(false);
 const editingSegmenData = ref<InfrastrukturSegmen | null>(null);
@@ -574,27 +577,8 @@ function getJalanPorosStyle(feature: any) {
 // ─── Basemap Source Factory ───────────────────────────────────────────────────
 function getBasemapSource(type: BasemapType) {
   if (!olModules || type === 'none') return null;
-  const { OSM, XYZ } = olModules;
-  if (type === 'satellite') {
-    return new XYZ({
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      maxZoom: 19,
-    });
-  }
-  if (type === 'dark') {
-    return new XYZ({
-      url: 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png',
-      attributions: '&copy; CARTO',
-      maxZoom: 19,
-    });
-  }
-  if (type === 'topo') {
-    return new XYZ({
-      url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
-      maxZoom: 17,
-    });
-  }
-  return new OSM();
+  const item = basemapStore.getByCode(type, 'openlayers');
+  return createOpenLayersBasemapSource(item ?? type, olModules);
 }
 
 function setBasemap(type: BasemapType) {
@@ -1012,6 +996,63 @@ function setReferenceJalanPoros(featureOrGeom: any | null, shouldZoom = false) {
   }
 }
 
+function setAutoDigitasiPreview(
+  payload: {
+    coordinates?: [number, number][];
+    startPoint?: [number, number] | null;
+    endPoint?: [number, number] | null;
+  } | null,
+) {
+  if (!mapInstance || !olModules || !autoPreviewSource) {
+    pendingAutoPreview = payload;
+    return;
+  }
+
+  pendingAutoPreview = null;
+  autoPreviewSource.clear();
+  if (!payload) return;
+
+  const { Feature, Point, GeoJSON, fromLonLat } = olModules;
+  if (Array.isArray(payload.coordinates) && payload.coordinates.length >= 2) {
+    try {
+      const format = new GeoJSON();
+      const lineFeat = format.readFeature(
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: payload.coordinates,
+          },
+          properties: { role: 'line' },
+        },
+        {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857',
+        },
+      );
+      autoPreviewSource.addFeature(lineFeat);
+    } catch (err) {
+      console.error('Gagal merender pratinjau segmen otomatis:', err);
+    }
+  }
+
+  if (payload.startPoint && payload.startPoint.length >= 2) {
+    const fStart = new Feature({
+      geometry: new Point(fromLonLat(payload.startPoint)),
+      role: 'start',
+    });
+    autoPreviewSource.addFeature(fStart);
+  }
+
+  if (payload.endPoint && payload.endPoint.length >= 2) {
+    const fEnd = new Feature({
+      geometry: new Point(fromLonLat(payload.endPoint)),
+      role: 'end',
+    });
+    autoPreviewSource.addFeature(fEnd);
+  }
+}
+
 function zoomIn() {
   if (!mapInstance) return;
   const view = mapInstance.getView();
@@ -1061,7 +1102,40 @@ function handleRedraw() {
 }
 
 // ─── Drawing / Digitizing Operations ──────────────────────────────────────────
-function startDrawing() {
+function attachDrawModifyInteraction(geom: any) {
+  if (!mapInstance || !olModules || !drawSource) return;
+  const { Modify, Style, Circle, Fill, Stroke, sphere } = olModules;
+
+  modifyInteraction = new Modify({
+    source: drawSource,
+    style: new Style({
+      image: new Circle({
+        radius: 6,
+        fill: new Fill({ color: '#f59e0b' }),
+        stroke: new Stroke({ color: '#ffffff', width: 2.5 }),
+      }),
+    }),
+  });
+
+  modifyInteraction.on('modifystart', () => {
+    redoStack.value = [];
+  });
+
+  activeGeomListener = () => {
+    const coords = geom?.getCoordinates();
+    if (Array.isArray(coords)) {
+      drawnPointCount.value = coords.length;
+      if (coords.length >= 2) {
+        drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
+      }
+    }
+  };
+  geom?.on('change', activeGeomListener);
+  mapInstance.addInteraction(modifyInteraction);
+  updateSnapInteractions();
+}
+
+function startDrawing(initialCoordinates?: [number, number][] | null) {
   if (!mapInstance || !olModules) return;
   cancelDrawing(false);
   if (isEditGeometryMode.value) cancelEditGeometry();
@@ -1073,6 +1147,44 @@ function startDrawing() {
   drawnLengthMeters.value = 0;
   drawnFeature.value = null;
   redoStack.value = [];
+
+  if (Array.isArray(initialCoordinates) && initialCoordinates.length >= 2) {
+    try {
+      const format = new olModules.GeoJSON();
+      const feat = format.readFeature(
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: initialCoordinates,
+          },
+        },
+        {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857',
+        },
+      );
+      drawSource.addFeature(feat);
+      const geom = feat.getGeometry();
+      drawnFeature.value = feat;
+      hasCompletedLine.value = true;
+      drawnPointCount.value = geom?.getCoordinates()?.length || 0;
+      drawnLengthMeters.value = geom ? roundLengthMeters(olModules.sphere.getLength(geom)) : 0;
+
+      snapSource = new olModules.VectorSource({ wrapX: false });
+      attachDrawModifyInteraction(geom);
+      snapRoadCount.value = refHighlightSource?.getFeatures().length || 0;
+      mapInstance.on('moveend', onMapMoveEndDuringDraw);
+      loadSnapFeatures();
+      if (geom) {
+        fitGeometryToCenter(geom, 450);
+      }
+      emit('log', 'INFO', 'Geometri otomatis dimuat ke mode sesuaikan titik. Geser vertex jika perlu lalu klik Simpan.');
+      return;
+    } catch (err) {
+      console.error('Gagal memuat geometri awal ke mode edit draw:', err);
+    }
+  }
 
   const { Draw, sphere, Style, Stroke, Circle, Fill } = olModules;
 
@@ -1139,34 +1251,7 @@ function startDrawing() {
     }
 
     // Attach Modify interaction for vertex refinement before saving
-    const { Modify, Style, Circle, Fill, Stroke } = olModules;
-    modifyInteraction = new Modify({
-      source: drawSource,
-      style: new Style({
-        image: new Circle({
-          radius: 6,
-          fill: new Fill({ color: '#f59e0b' }),
-          stroke: new Stroke({ color: '#ffffff', width: 2.5 }),
-        }),
-      }),
-    });
-
-    modifyInteraction.on('modifystart', () => {
-      redoStack.value = [];
-    });
-
-    activeGeomListener = () => {
-      const coords = geom?.getCoordinates();
-      if (Array.isArray(coords)) {
-        drawnPointCount.value = coords.length;
-        if (coords.length >= 2) {
-          drawnLengthMeters.value = roundLengthMeters(sphere.getLength(geom));
-        }
-      }
-    };
-    geom?.on('change', activeGeomListener);
-    mapInstance.addInteraction(modifyInteraction);
-    updateSnapInteractions();
+    attachDrawModifyInteraction(geom);
   });
 
   mapInstance.addInteraction(drawInteraction);
@@ -1887,6 +1972,52 @@ async function initMap() {
       ],
     });
 
+    // 2.9 Auto-Digitasi Preview Layer (hasil potongan otomatis Jalan Poros + Pin A/B)
+    autoPreviewSource = new VectorSource({ wrapX: false });
+    autoPreviewLayer = new VectorLayer({
+      source: autoPreviewSource,
+      zIndex: 45,
+      style: (feature: any) => {
+        const role = feature.get('role');
+        if (role === 'start' || role === 'end') {
+          const isStart = role === 'start';
+          return new stylePkg.Style({
+            image: new stylePkg.Circle({
+              radius: 10,
+              fill: new stylePkg.Fill({ color: isStart ? '#059669' : '#e11d48' }),
+              stroke: new stylePkg.Stroke({ color: '#ffffff', width: 2.5 }),
+            }),
+            text: new stylePkg.Text({
+              text: isStart ? 'A' : 'B',
+              font: '700 10px Inter, sans-serif',
+              fill: new stylePkg.Fill({ color: '#ffffff' }),
+            }),
+            zIndex: 48,
+          });
+        }
+        return [
+          new stylePkg.Style({
+            stroke: new stylePkg.Stroke({
+              color: '#ffffff',
+              width: 8.5,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }),
+            zIndex: 45,
+          }),
+          new stylePkg.Style({
+            stroke: new stylePkg.Stroke({
+              color: '#f59e0b',
+              width: 4.5,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }),
+            zIndex: 46,
+          }),
+        ];
+      },
+    });
+
     // 3. Draw Vector Layer (Digitasi)
     drawSource = new VectorSource({ wrapX: false });
     drawLayer = new VectorLayer({
@@ -2002,7 +2133,7 @@ async function initMap() {
     // 6. Map Instance
     mapInstance = new Map({
       target: mapContainer.value,
-      layers: [baseTileLayer, jalanPorosVectorTileLayer, refHighlightLayer, vectorTileLayer, drawLayer, editGeometryLayer, splitLayer],
+      layers: [baseTileLayer, jalanPorosVectorTileLayer, refHighlightLayer, vectorTileLayer, autoPreviewLayer, drawLayer, editGeometryLayer, splitLayer],
       view: new View({
         center: olModules.fromLonLat([111.88, -7.2]),
         zoom: 11,
@@ -2020,6 +2151,12 @@ async function initMap() {
       const { featureOrGeom, shouldZoom } = pendingRefFeature;
       pendingRefFeature = null;
       setReferenceJalanPoros(featureOrGeom, shouldZoom);
+    }
+
+    if (pendingAutoPreview) {
+      const prev = pendingAutoPreview;
+      pendingAutoPreview = null;
+      setAutoDigitasiPreview(prev);
     }
 
     // ─── Pointer Move Interaction (Coords & Hover Tooltip) ────────────────────
@@ -2051,9 +2188,11 @@ async function initMap() {
       pointerRafId = requestAnimationFrame(() => {
         pointerRafId = null;
 
-        if (props.interactionMode === 'pan') {
+        if (props.interactionMode === 'pan' || props.interactionMode === 'pick-auto-points') {
           const hadHover = Boolean(hoveredFeature.value);
-          if (mapContainer.value) mapContainer.value.style.cursor = '';
+          if (mapContainer.value) {
+            mapContainer.value.style.cursor = props.interactionMode === 'pick-auto-points' ? 'crosshair' : '';
+          }
           hoveredFeature.value = null;
           if (!isPopupPinned.value) {
             tooltipData.value = null;
@@ -2140,6 +2279,16 @@ async function initMap() {
       if (props.interactionMode === 'pan') {
         if (isPopupPinned.value) {
           closePopup();
+        }
+        return;
+      }
+
+      if (props.interactionMode === 'pick-auto-points') {
+        if (olModules?.toLonLat && e.coordinate) {
+          const lonLat = olModules.toLonLat(e.coordinate);
+          if (lonLat && lonLat.length >= 2) {
+            emit('pickAutoPoint', [lonLat[0], lonLat[1]]);
+          }
         }
         return;
       }
@@ -2335,7 +2484,7 @@ watch(
   (mode) => {
     hoveredFeature.value = null;
     if (mapContainer.value && !isDrawing.value && !isEditGeometryMode.value && !isSplitMode.value) {
-      mapContainer.value.style.cursor = '';
+      mapContainer.value.style.cursor = mode === 'pick-auto-points' ? 'crosshair' : '';
     }
     if (mode !== 'identify') {
       closePopup();
@@ -2457,8 +2606,17 @@ watch(
   }
 );
 
+function handleMapKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && props.interactionMode === 'pick-auto-points') {
+    emit('cancelAutoPick');
+  }
+}
+
 onMounted(() => {
   initMap();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', handleMapKeydown);
+  }
 
   if (mapContainer.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => {
@@ -2472,6 +2630,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', handleMapKeydown);
+  }
   cancelDrawing(false);
   cancelEditGeometry();
   cancelSplitMode();
@@ -2496,11 +2657,12 @@ onUnmounted(() => {
   }
 });
 
-defineExpose({
+  defineExpose({
   fitBounds,
   zoomToFeature,
   zoomToGeometry,
   setReferenceJalanPoros,
+  setAutoDigitasiPreview,
   zoomIn,
   zoomOut,
   setBasemap,
@@ -2664,12 +2826,29 @@ defineExpose({
     >
       <div
         v-if="interactionMode === 'pick-reference' && !isDrawing && !isEditGeometryMode && !isSplitMode && isMapLoaded"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-sky-500/40 dark:border-sky-500/40 rounded-lg shadow-sm text-sky-800 dark:text-sky-200"
+        class="flex items-center gap-2 px-3 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-sky-500/50 dark:border-sky-500/40 rounded-lg shadow-sm text-sky-900 dark:text-sky-100"
       >
-        <UIcon name="i-lucide-route" class="size-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+        <UIcon name="i-lucide-route" class="size-4 text-sky-600 dark:text-sky-400 shrink-0" aria-hidden="true" />
         <span class="text-[11px] font-medium leading-tight">
-          Klik ruas jalan poros di peta sebagai referensi
+          Klik ruas Jalan Poros Desa (garis biru) di peta untuk memilih referensi
         </span>
+      </div>
+
+      <div
+        v-else-if="interactionMode === 'pick-auto-points' && !isDrawing && !isEditGeometryMode && !isSplitMode && isMapLoaded"
+        class="pointer-events-auto flex items-center gap-2.5 px-3 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-amber-500/60 dark:border-amber-500/50 rounded-lg shadow-md text-amber-900 dark:text-amber-100"
+      >
+        <UIcon name="i-lucide-map-pin" class="size-4 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
+        <span class="text-[11px] font-medium leading-tight">
+          {{ autoPickHint || 'Klik ruas jalan poros di peta untuk menentukan Titik Awal (A) dan Akhir (B)' }}
+        </span>
+        <button
+          type="button"
+          class="px-2.5 py-1 min-h-[28px] rounded-md bg-amber-700 hover:bg-amber-800 text-white text-[11px] font-semibold cursor-pointer shrink-0 transition-colors"
+          @click="emit('cancelAutoPick')"
+        >
+          Selesai
+        </button>
       </div>
 
       <Transition
@@ -2900,7 +3079,7 @@ defineExpose({
             :aria-pressed="interactionMode === 'identify'"
             aria-label="Toggle mode Identify Feature"
             :disabled="isDrawing || isEditGeometryMode || isSplitMode"
-            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-1.5 lg:after:hidden"
+            class="relative w-9 h-9 lg:w-7 lg:h-7 p-0 justify-center [&_svg]:size-4 cursor-pointer after:content-[''] after:absolute after:-inset-1 lg:after:hidden"
             @click="emit('toggleIdentify')"
           />
         </UTooltip>
@@ -2914,7 +3093,7 @@ defineExpose({
             color="neutral"
             variant="ghost"
             aria-label="Perbesar peta"
-            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5 lg:after:hidden"
+            class="relative w-9 h-9 lg:w-7 lg:h-7 p-0 justify-center [&_svg]:size-4 cursor-pointer after:content-[''] after:absolute after:-inset-x-1 after:-inset-y-0.5 lg:after:hidden"
             @click="zoomIn"
           />
         </UTooltip>
@@ -2928,7 +3107,7 @@ defineExpose({
             color="neutral"
             variant="ghost"
             aria-label="Perkecil peta"
-            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-x-1.5 after:-inset-y-0.5 lg:after:hidden"
+            class="relative w-9 h-9 lg:w-7 lg:h-7 p-0 justify-center [&_svg]:size-4 cursor-pointer after:content-[''] after:absolute after:-inset-x-1 after:-inset-y-0.5 lg:after:hidden"
             @click="zoomOut"
           />
         </UTooltip>
@@ -2942,33 +3121,26 @@ defineExpose({
             color="primary"
             variant="ghost"
             aria-label="Fokus semua segmen"
-            class="relative w-8 h-8 lg:w-6 lg:h-6 p-0 justify-center [&_svg]:size-3.5 cursor-pointer after:content-[''] after:absolute after:-inset-1.5 lg:after:hidden"
+            class="relative w-9 h-9 lg:w-7 lg:h-7 p-0 justify-center [&_svg]:size-4 cursor-pointer after:content-[''] after:absolute after:-inset-1 lg:after:hidden"
             @click="fitBounds()"
           />
         </UTooltip>
       </div>
     </div>
 
-    <!-- ═══ FLOATING BASEMAP POPOVER (Bottom Left, Compact & Dock-Safe) ══════ -->
+    <!-- ═══ FLOATING BASEMAP POPOVER (Bottom Left, Medium Basemap) ══════ -->
     <div
       class="absolute left-2.5 lg:left-3 z-20 transition-all duration-150"
       :class="selectedSegmen ? 'bottom-[calc(11.25rem+env(safe-area-inset-bottom))] lg:bottom-3' : 'bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-3'"
     >
-      <UDropdownMenu
-        :items="basemapDropdownItems"
-        :content="{ side: 'top', align: 'start', sideOffset: 6 }"
-      >
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="xs"
-          :icon="activeBasemapMeta.icon"
-          :label="activeBasemapMeta.label"
-          trailing-icon="i-lucide-chevron-up"
-          aria-label="Pilih gaya peta dasar"
-          class="relative bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 shadow-sm h-7 lg:h-auto px-2 py-1 text-[11px] lg:text-xs font-medium cursor-pointer after:content-[''] after:absolute after:-inset-2 lg:after:hidden"
-        />
-      </UDropdownMenu>
+      <BasemapSwitcher
+        :model-value="currentBasemap"
+        variant="medium"
+        engine="openlayers"
+        :allow-none="true"
+        placement="bottom-left"
+        @update:model-value="setBasemap($event as BasemapType)"
+      />
     </div>
 
     <!-- ═══ FLOATING COORDINATES PILL (Desktop only, Bottom Center) ═════════════ -->

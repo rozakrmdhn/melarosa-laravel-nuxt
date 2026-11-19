@@ -10,6 +10,9 @@ import type {
 } from "~/types/dataset-editor";
 import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from "~/types/dataset-editor";
 import { $http } from "~/utils/helpers";
+import BasemapSwitcher from "~/components/common/BasemapSwitcher.vue";
+import { useBasemapStore } from "~/stores/basemap";
+import { createOpenLayersBasemapSource } from "~/utils/basemap-sources";
 
 const props = withDefaults(
   defineProps<{
@@ -165,24 +168,22 @@ let tooltipOverlay: any = null;
 let pulseOverlay: any = null;
 let olModules: any = null;
 
+const basemapStore = useBasemapStore();
+
 function getBasemapSource(type: BasemapType) {
   if (!olModules || type === "none") return null;
-  const { OSM, XYZ } = olModules;
-  if (type === "satellite") {
-    return new XYZ({
-      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      maxZoom: 19,
-    });
-  }
-  if (type === "dark") {
-    return new XYZ({
-      url: "https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png",
-      attributions: '&copy; <a href="https://carto.com/">CARTO</a>',
-      maxZoom: 19,
-    });
-  }
-  return new OSM();
+  const item = basemapStore.getByCode(type, "openlayers");
+  return createOpenLayersBasemapSource(item ?? type, olModules);
 }
+
+watch(
+  () => basemapStore.items,
+  () => {
+    if (tileLayer && olModules && props.basemap !== "none") {
+      tileLayer.setSource(getBasemapSource(props.basemap));
+    }
+  },
+);
 
 function setBasemap(type: BasemapType) {
   emit("update:basemap", type);
@@ -2141,17 +2142,15 @@ defineExpose({
       </UTooltip>
     </div>
 
-    <!-- Floating Basemap Selector (Bottom Left, Clean Solid) -->
-    <div class="absolute bottom-16 sm:bottom-3 left-3 z-20 flex items-center gap-1 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-      <UButton
-        v-for="bm in (['osm', 'dark', 'satellite', 'none'] as const)"
-        :key="bm"
-        :label="bm === 'satellite' ? 'Satelit' : bm === 'dark' ? 'Gelap' : bm === 'none' ? 'None' : 'OSM'"
-        size="xs"
-        :color="basemap === bm ? 'primary' : 'neutral'"
-        :variant="basemap === bm ? 'subtle' : 'ghost'"
-        class="capitalize text-xs font-medium"
-        @click="setBasemap(bm)"
+    <!-- Floating Basemap Selector (Bottom Left, Medium Basemap) -->
+    <div class="absolute bottom-16 sm:bottom-3 left-3 z-20">
+      <BasemapSwitcher
+        :model-value="basemap"
+        variant="medium"
+        engine="openlayers"
+        :allow-none="true"
+        placement="bottom-left"
+        @update:model-value="setBasemap($event as BasemapType)"
       />
     </div>
 

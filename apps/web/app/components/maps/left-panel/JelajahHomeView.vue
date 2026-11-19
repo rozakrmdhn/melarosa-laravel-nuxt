@@ -11,6 +11,7 @@ import {
   formatCountId,
   normalizeWilayahKey,
 } from "~/composables/useMapRekapOverview";
+import DynamicMartinLegend from "./DynamicMartinLegend.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -87,6 +88,16 @@ const roadStatusLabel = computed(() => {
 const activeDistrictStat = computed(() => {
   return findKecamatanStatByName(props.selectedKecamatanFilter);
 });
+
+watch(
+  () => props.selectedKecamatanFilter,
+  (next, prev) => {
+    if (!next && prev) {
+      showDistrictPicker.value = false;
+      districtPickerQuery.value = "";
+    }
+  }
+);
 
 watch(
   activeDistrictStat,
@@ -600,36 +611,11 @@ const featuredWisataSite = computed(() => {
         </div>
       </div>
 
-      <!-- Kartu 2: Legenda Warna Kondisi Jalan pada Peta -->
-      <div class="rounded-2xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0f172a] p-3.5 space-y-2.5 shadow-2xs">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-bold text-slate-900 dark:text-white">
-            Arti Warna Garis Jalan di Peta
-          </span>
-          <span class="text-[11px] text-slate-500 dark:text-slate-400">
-            Legenda
-          </span>
-        </div>
-
-        <div class="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px] font-medium text-slate-700 dark:text-slate-200">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="w-5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-            <span class="truncate">Kondisi Baik</span>
-          </div>
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="w-5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-            <span class="truncate">Sedang / Rusak Ringan</span>
-          </div>
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="w-5 h-1.5 rounded-full bg-red-500 shrink-0" />
-            <span class="truncate">Rusak Berat</span>
-          </div>
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="w-5 h-0 border-t-2 border-dashed border-slate-400 dark:border-slate-500 shrink-0" />
-            <span class="truncate">Belum Dibangun</span>
-          </div>
-        </div>
-      </div>
+      <!-- Kartu 2: Legenda Dinamis Layer Martin Tile Server -->
+      <DynamicMartinLegend
+        :active-layers="props.activeLayers"
+        @open-other-layers="emit('open-other-layers')"
+      />
     </section>
   </div>
 </template>

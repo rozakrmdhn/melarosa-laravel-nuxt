@@ -31,8 +31,7 @@ watch(
   () => props.identifiedFeatures,
   () => {
     selectedFeatureIndex.value = 0;
-  },
-  { deep: true }
+  }
 );
 
 onBeforeUnmount(() => {
@@ -67,7 +66,7 @@ const googleMapsUrl = computed(() => {
 const activeFeatureName = computed(() => {
   if (!activeFeature.value) return null;
   const p = activeFeature.value.properties || {};
-  const layerHint = `${activeFeature.value.layerId || ""} ${activeFeature.value.layerTitle || ""}`.toLowerCase();
+  const layerHint = `${activeFeature.value.layerName || ""} ${activeFeature.value.layerId || ""} ${activeFeature.value.layerTitle || ""}`.toLowerCase();
 
   const preferredKeys = layerHint.includes("bataswilayah_kecamatan") || (layerHint.includes("kecamatan") && !layerHint.includes("palapa:"))
     ? ["nama_kecamatan", "wadmkc", "kecamatan", "namobj", "nama", "title", "name"]

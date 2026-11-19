@@ -51,11 +51,19 @@ export default defineNuxtConfig({
 
   app: {
     head: {
+      htmlAttrs: {
+        lang: 'id',
+      },
       title: 'Home',
       titleTemplate: '%s · Melarosa GIS Bojonegoro',
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover' },
+        { name: 'theme-color', content: '#2B5B9E' },
+        { name: 'robots', content: 'index, follow' },
+        { property: 'og:site_name', content: 'MELAROSA Bojonegoro' },
+        { property: 'og:locale', content: 'id_ID' },
+        { name: 'twitter:card', content: 'summary_large_image' },
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
         { name: 'mobile-web-app-capable', content: 'yes' },
@@ -130,6 +138,7 @@ export default defineNuxtConfig({
           "https://geoportal.bojonegorokab.go.id",
           "https://*.big.go.id",
           "https://*.meritech.cloud",
+          "https://*.google.com",
           "https://*.my.id",
           "https:",
           process.env.APP_URL || 'http://127.0.0.1:9000',
@@ -138,8 +147,11 @@ export default defineNuxtConfig({
           'http://127.0.0.1:9090',
         ],
         "worker-src": ["'self'", "blob:"],
+        "frame-src": ["'self'", "blob:"],
+        "object-src": ["'self'", "blob:"],
         "connect-src": [
           "'self'",
+          "blob:",
           "https://*.cartocdn.com",
           "https://*.arcgisonline.com",
           "https://*.openstreetmap.org",
@@ -149,6 +161,7 @@ export default defineNuxtConfig({
           "https://geoportal.bojonegorokab.go.id",
           "https://*.big.go.id",
           "https://*.meritech.cloud",
+          "https://*.google.com",
           "https://*.my.id",
           "wss://*.my.id",
           "https://api.iconify.design",

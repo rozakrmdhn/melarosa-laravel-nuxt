@@ -17,7 +17,7 @@ class JalanPorosDesaPolicy
         }
 
         foreach ($perms as $perm) {
-            if ($user->hasPermissionTo($perm)) {
+            if ($user->checkPermissionTo($perm)) {
                 return true;
             }
         }
@@ -33,6 +33,9 @@ class JalanPorosDesaPolicy
         return $this->hasPerm($user, [
             'jalan-poros-desa-view',
             'jalan-poros-desa-manage',
+            'infrastruktur-segmen-view',
+            'infrastruktur-segmen-create',
+            'infrastruktur-segmen-update',
         ]);
     }
 

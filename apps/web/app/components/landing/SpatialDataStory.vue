@@ -813,7 +813,7 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-3 shrink-0">
           <NuxtLink
             to="/dataset"
-            class="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] hover:bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-xs transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            class="inline-flex items-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-5 py-2.5 text-sm font-semibold text-white shadow-xs transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B5B9E]"
           >
             <span>Jelajahi Data Spasial</span>
             <UIcon name="i-lucide-database" class="size-4" />
@@ -932,7 +932,7 @@ onBeforeUnmount(() => {
                 </p>
                 <button
                   type="button"
-                  class="mt-3.5 inline-flex items-center justify-center gap-2 rounded-xl bg-[#2563EB] hover:bg-blue-500 px-4 py-2 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  class="mt-3.5 inline-flex items-center justify-center gap-2 rounded-xl bg-[#2B5B9E] hover:bg-[#224A82] px-4 py-2 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   @click="activateDefaultLayers"
                 >
                   <UIcon name="i-lucide-rotate-ccw" class="size-3.5" />

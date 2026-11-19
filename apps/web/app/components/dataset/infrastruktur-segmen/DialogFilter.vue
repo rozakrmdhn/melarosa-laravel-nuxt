@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import FilterContent from '~/components/dataset/infrastruktur-segmen/FilterContent.vue';
 import { useAuthStore } from '~/stores/auth';
-import type { InfrastrukturTipe } from '~/types/infrastruktur';
+import type { InfrastrukturTipe, RefSumberDana } from '~/types/infrastruktur';
 
 interface Props {
   open?: boolean;
   activeLayerId?: string;
   tipeList?: InfrastrukturTipe[];
+  sumberDanaList?: RefSumberDana[];
   // Filter Layer Segmen Fisik
   selectedTipe?: string | null;
   selectedTahunPembangunan?: number | string | null;
@@ -33,6 +34,7 @@ const props = withDefaults(defineProps<Props>(), {
   open: false,
   activeLayerId: 'infrastruktur-segmen',
   tipeList: () => [],
+  sumberDanaList: () => [],
   selectedTipe: null,
   selectedTahunPembangunan: null,
   selectedKondisi: null,
@@ -346,6 +348,7 @@ function handleApply() {
         layer-id="infrastruktur-segmen"
         layer-title="Segmen Fisik Infrastruktur"
         :tipe-list="tipeList"
+        :sumber-dana-list="sumberDanaList"
         :selected-tipe="draft.selectedTipe"
         :selected-tahun-pembangunan="draft.selectedTahunPembangunan"
         :selected-kondisi="draft.selectedKondisi"

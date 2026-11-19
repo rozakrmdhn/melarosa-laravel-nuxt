@@ -32,6 +32,10 @@ class PlottingAnggaran extends Model
         'nama_kegiatan',
         'lokasi_kegiatan',
         'sumber_dana',
+        'nomor_sk',
+        'tanggal_sk',
+        'status_penetapan',
+        'bkkd_proposal_id',
         'target_pagu_anggaran',
         'target_panjang_m',
         'user_id',
@@ -41,9 +45,15 @@ class PlottingAnggaran extends Model
         'tahun_anggaran'       => 'integer',
         'id_kecamatan'         => 'integer',
         'id_desa'              => 'integer',
+        'tanggal_sk'           => 'date:Y-m-d',
         'target_pagu_anggaran' => 'decimal:2',
         'target_panjang_m'     => 'decimal:2',
     ];
+
+    public function proposal(): BelongsTo
+    {
+        return $this->belongsTo(BkkdProposal::class, 'bkkd_proposal_id', 'id');
+    }
 
     public function kecamatan(): BelongsTo
     {
@@ -75,16 +85,16 @@ class PlottingAnggaran extends Model
      */
     public function scopeForUser(Builder $query, ?User $user = null): Builder
     {
-        if (!$user || $user->hasRole('admin') || $user->hasRole('verifierBappeda')) {
+        if (!$user || $user->isAdminOrBappeda()) {
             return $query;
-        }
-
-        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
-            return $query->where('plotting_anggaran.id_kecamatan', $user->id_kecamatan);
         }
 
         if ($user->id_desa) {
             return $query->where('plotting_anggaran.id_desa', $user->id_desa);
+        }
+
+        if ($user->hasAnyRole(['verifierKecamatan', 'verifikator-kecamatan', 'kecamatan']) || $user->id_kecamatan) {
+            return $query->where('plotting_anggaran.id_kecamatan', $user->id_kecamatan);
         }
 
         return $query;

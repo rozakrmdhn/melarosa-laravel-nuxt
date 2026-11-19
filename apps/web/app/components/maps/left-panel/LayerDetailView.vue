@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import type { ActiveLayerItem } from "~/types/map-layers";
 import type { KecamatanEntry } from "~/components/maps/LeftPanel.vue";
+import {
+  buildMartinLayerLegend,
+  isCustomStyledWmsLayer,
+  isMartinMvtLayer,
+  resolveEffectiveWmsLegendUrl,
+} from "~/utils/mvt-legend";
+import MartinSymbolSwatch from "./MartinSymbolSwatch.vue";
 
 const props = defineProps<{
   selectedLayer: ActiveLayerItem | null;
@@ -17,6 +24,16 @@ const emit = defineEmits<{
   (e: "zoom-to-layer", layer: ActiveLayerItem): void;
   (e: "remove-layer", layerId: string): void;
 }>();
+
+const effectiveLegendUrl = computed(() => resolveEffectiveWmsLegendUrl(props.selectedLayer));
+const isCustomWms = computed(() => isCustomStyledWmsLayer(props.selectedLayer));
+const legendImgFailed = ref(false);
+watch(
+  () => [props.selectedLayer?.id, effectiveLegendUrl.value],
+  () => {
+    legendImgFailed.value = false;
+  }
+);
 
 function hasLayerFilter(layer: ActiveLayerItem): boolean {
   return (
@@ -184,8 +201,47 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
             </span>
           </div>
 
-          <div v-if="props.selectedLayer.legend_url" class="pt-1 space-y-1.5">
-            <span class="text-xs text-slate-500 font-semibold block uppercase tracking-wider">Simbol Legenda Resmi:</span>
+          <!-- Simbol Legenda (Custom SLD WMS atau Simbologi Vektor MVT) -->
+          <div v-if="isCustomWms || isMartinMvtLayer(props.selectedLayer) || (!props.selectedLayer.legend_url && props.selectedLayer.style_config)" class="pt-1 space-y-2">
+            <span class="text-xs text-slate-600 dark:text-slate-300 font-semibold block uppercase tracking-wider">
+              {{ isCustomWms ? 'Simbol Legenda (Custom SLD):' : 'Simbologi Layer Vektor:' }}
+            </span>
+
+            <div
+              v-if="isCustomWms && effectiveLegendUrl && !legendImgFailed"
+              class="p-2 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 flex items-center justify-center"
+            >
+              <img
+                :src="effectiveLegendUrl"
+                alt="Legenda Custom SLD Layer WMS"
+                class="max-h-28 object-contain rounded bg-white p-1 border border-slate-200/80"
+                loading="lazy"
+                @error="legendImgFailed = true"
+              />
+            </div>
+
+            <div
+              v-else
+              class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 space-y-2 text-xs"
+            >
+              <div
+                v-for="item in buildMartinLayerLegend(props.selectedLayer).items"
+                :key="item.key"
+                class="flex items-center gap-2.5"
+              >
+                <MartinSymbolSwatch :swatch="item.swatch" />
+                <span class="text-slate-700 dark:text-slate-200 capitalize font-medium">
+                  {{ item.label }}
+                </span>
+                <span v-if="item.field" class="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                  ({{ item.field }})
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="props.selectedLayer.legend_url" class="pt-1 space-y-1.5">
+            <span class="text-xs text-slate-600 dark:text-slate-300 font-semibold block uppercase tracking-wider">Simbol Legenda Resmi:</span>
             <div class="p-2 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 flex items-center justify-center">
               <img
                 :src="props.selectedLayer.legend_url"
@@ -193,42 +249,6 @@ function getLayerCode(layer: ActiveLayerItem | null): string {
                 class="max-h-24 object-contain rounded bg-white p-1 border border-slate-200/80"
                 loading="lazy"
               />
-            </div>
-          </div>
-          <!-- Simbologi Vektor MVT -->
-          <div v-else-if="props.selectedLayer.style_config" class="pt-1 space-y-2">
-            <span class="text-xs text-slate-500 font-semibold block uppercase tracking-wider">Simbologi Layer Vektor:</span>
-            <div class="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 space-y-2 text-xs">
-              <div v-if="props.selectedLayer.style_config.rules?.length" class="space-y-1.5">
-                <div
-                  v-for="(rule, rIdx) in props.selectedLayer.style_config.rules"
-                  :key="rule.id || rIdx"
-                  class="flex items-center gap-2"
-                >
-                  <span
-                    class="size-3.5 rounded-full shrink-0 border border-black/10 dark:border-white/20 shadow-2xs"
-                    :style="{ backgroundColor: rule.color || props.selectedLayer.style_config.color }"
-                  />
-                  <span class="text-slate-700 dark:text-slate-300 capitalize font-medium">
-                    {{ rule.value }}
-                  </span>
-                  <span class="text-[10px] text-slate-400 font-mono">
-                    ({{ rule.field }})
-                  </span>
-                </div>
-              </div>
-              <div v-else class="flex items-center gap-2">
-                <span
-                  class="size-3.5 rounded-full shrink-0 border border-black/10 dark:border-white/20 shadow-2xs"
-                  :style="{ backgroundColor: props.selectedLayer.style_config.color || '#2563eb' }"
-                />
-                <span class="text-slate-700 dark:text-slate-300 font-medium">
-                  {{ props.selectedLayer.style_config.geom_type === 'polygon' ? 'Area Poligon' : props.selectedLayer.style_config.geom_type === 'point' ? 'Titik Lokasi' : 'Trase Garis' }}
-                </span>
-                <span v-if="props.selectedLayer.style_config.dash && props.selectedLayer.style_config.dash !== 'solid'" class="text-[10px] text-slate-400 font-mono">
-                  ({{ props.selectedLayer.style_config.dash }})
-                </span>
-              </div>
             </div>
           </div>
 

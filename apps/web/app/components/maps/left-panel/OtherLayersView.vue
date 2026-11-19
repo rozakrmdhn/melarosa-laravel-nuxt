@@ -29,8 +29,17 @@ const {
 
 const filterText = ref("");
 const isReorderMode = ref(false);
+const dragHandleIndex = ref<number | null>(null);
 const draggedIndex = ref<number | null>(null);
 const dragOverIndex = ref<number | null>(null);
+
+function enableDragHandle(index: number) {
+  dragHandleIndex.value = index;
+}
+
+function disableDragHandle() {
+  dragHandleIndex.value = null;
+}
 
 function moveLayer(index: number, delta: -1 | 1) {
   const list = [...(props.activeLayers || [])];
@@ -43,6 +52,10 @@ function moveLayer(index: number, delta: -1 | 1) {
 }
 
 function handleDragStart(index: number, event: DragEvent) {
+  if (dragHandleIndex.value !== index) {
+    event.preventDefault();
+    return;
+  }
   draggedIndex.value = index;
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "move";
@@ -70,6 +83,7 @@ function handleDrop(index: number, event: DragEvent) {
 }
 
 function handleDragEnd() {
+  dragHandleIndex.value = null;
   draggedIndex.value = null;
   dragOverIndex.value = null;
 }
@@ -235,8 +249,8 @@ const extraCatalogLayers = computed(() => {
         <div
           v-for="(item, idx) in primaryMapLayers"
           :key="item.id"
-          draggable="true"
-          class="w-full px-3.5 py-3 space-y-2.5 transition-colors cursor-grab active:cursor-grabbing"
+          :draggable="dragHandleIndex === idx"
+          class="w-full px-3.5 py-3 space-y-2 transition-colors"
           :class="[
             dragOverIndex === idx
               ? 'bg-blue-100/80 dark:bg-blue-950/40'
@@ -250,7 +264,19 @@ const extraCatalogLayers = computed(() => {
         >
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2.5 min-w-0 flex-1">
-              <UIcon name="i-lucide-grip-vertical" class="size-4 text-slate-400 shrink-0" />
+              <span
+                role="button"
+                tabindex="-1"
+                aria-label="Seret untuk mengubah urutan layer"
+                title="Seret untuk mengubah urutan"
+                class="size-8 -ml-1 inline-flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-white/10 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                @pointerdown="enableDragHandle(idx)"
+                @mousedown="enableDragHandle(idx)"
+                @pointerup="disableDragHandle"
+                @mouseup="disableDragHandle"
+              >
+                <UIcon name="i-lucide-grip-vertical" class="size-4" aria-hidden="true" />
+              </span>
               <span class="size-7 rounded-lg bg-white dark:bg-[#0f172a] shadow-2xs text-xs font-bold text-slate-700 dark:text-slate-200 inline-flex items-center justify-center shrink-0 tabular-nums">
                 {{ idx + 1 }}
               </span>
@@ -258,7 +284,7 @@ const extraCatalogLayers = computed(() => {
                 <p class="text-[13px] font-bold text-slate-900 dark:text-white truncate">
                   {{ item.title }}
                 </p>
-                <span class="text-[11px] font-medium" :class="item.visible ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'">
+                <span class="text-[11px] font-medium" :class="item.visible ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'">
                   {{ item.visible ? 'Aktif di peta' : 'Disembunyikan' }}
                 </span>
               </div>
@@ -269,37 +295,53 @@ const extraCatalogLayers = computed(() => {
                 type="button"
                 :disabled="idx === 0"
                 aria-label="Naikkan urutan layer"
-                class="size-8 inline-flex items-center justify-center rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0f172a] hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 disabled:opacity-35 cursor-pointer"
+                class="size-9 inline-flex items-center justify-center rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0f172a] hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 disabled:opacity-35 cursor-pointer"
                 @click="moveLayer(idx, -1)"
               >
-                <UIcon name="i-lucide-chevron-up" class="size-4" />
+                <UIcon name="i-lucide-chevron-up" class="size-4" aria-hidden="true" />
               </button>
               <button
                 type="button"
                 :disabled="idx === primaryMapLayers.length - 1"
                 aria-label="Turunkan urutan layer"
-                class="size-8 inline-flex items-center justify-center rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0f172a] hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 disabled:opacity-35 cursor-pointer"
+                class="size-9 inline-flex items-center justify-center rounded-xl border border-slate-200/80 dark:border-white/10 bg-white dark:bg-[#0f172a] hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 disabled:opacity-35 cursor-pointer"
                 @click="moveLayer(idx, 1)"
               >
-                <UIcon name="i-lucide-chevron-down" class="size-4" />
+                <UIcon name="i-lucide-chevron-down" class="size-4" aria-hidden="true" />
               </button>
             </div>
           </div>
 
-          <!-- Slider Opacity Layer -->
-          <div class="flex items-center gap-2.5 pl-6">
-            <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
+          <!-- Slider Opacity Layer (terisolasi dari drag row & bottom-sheet) -->
+          <div
+            data-sheet-no-drag
+            draggable="false"
+            class="flex items-center gap-2.5 pl-7"
+            @pointerdown.stop
+            @mousedown.stop
+            @touchstart.stop
+            @touchmove.stop
+            @dragstart.prevent.stop
+          >
+            <span class="text-[11px] font-medium text-slate-600 dark:text-slate-300 shrink-0">
               Opacity
             </span>
             <input
               :value="item.opacity"
               type="range"
+              draggable="false"
               min="0"
               max="1"
               step="0.05"
               :aria-label="`Atur opacity ${item.title}`"
-              class="flex-1 h-1.5 accent-blue-600 cursor-pointer"
+              class="flex-1 h-8 py-2 accent-blue-600 cursor-pointer touch-none"
+              @pointerdown.stop
+              @mousedown.stop
+              @touchstart.stop
+              @touchmove.stop
+              @dragstart.prevent.stop
               @input="emit('update-layer-opacity', { layerId: item.id, opacity: Number(($event.target as HTMLInputElement).value) })"
+              @change="emit('update-layer-opacity', { layerId: item.id, opacity: Number(($event.target as HTMLInputElement).value) })"
             />
             <span class="text-[11px] font-bold text-slate-700 dark:text-slate-200 tabular-nums w-9 text-right shrink-0">
               {{ Math.round(item.opacity * 100) }}%

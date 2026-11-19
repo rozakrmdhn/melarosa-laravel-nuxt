@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import {
+  buildSumberDanaSelectItems,
+  FOTO_TAHAP_OPTIONS,
+  IDEAL_MIN_SEGMEN_FOTOS,
   KONDISI_OPTIONS,
+  MAX_SEGMEN_FOTOS,
   PERKERASAN_OPTIONS,
+  resolveSumberDanaLabel,
   STATUS_ASET_OPTIONS,
   STATUS_JALAN_OPTIONS,
   SUMBER_DANA_OPTIONS,
   withCurrentOption,
   type InfrastrukturSegmen,
+  type InfrastrukturSegmenFoto,
   type InfrastrukturTipe,
   type JalanPorosRef,
   type PlottingAnggaran,
+  type RefSumberDana,
 } from '~/types/infrastruktur';
 import { useInfrastrukturApi } from '~/composables/useInfrastrukturApi';
 import { formatWilayah } from '~/utils/helpers';
@@ -26,10 +33,15 @@ interface Props {
   collapsible?: boolean;
   tipeList?: InfrastrukturTipe[];
   plottingList?: PlottingAnggaran[];
+  sumberDanaList?: RefSumberDana[];
   canEdit?: boolean;
   canDelete?: boolean;
   canSubmit?: boolean;
   canSplit?: boolean;
+  canVerifyKecamatan?: boolean;
+  canVerifyBappeda?: boolean;
+  isKecamatanRole?: boolean;
+  saveFeedback?: { type: 'success' | 'error' | 'warning'; message: string } | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -43,10 +55,15 @@ const props = withDefaults(defineProps<Props>(), {
   collapsible: true,
   tipeList: () => [],
   plottingList: () => [],
+  sumberDanaList: () => [],
   canEdit: true,
   canDelete: true,
   canSubmit: true,
   canSplit: undefined,
+  canVerifyKecamatan: false,
+  canVerifyBappeda: false,
+  isKecamatanRole: false,
+  saveFeedback: null,
 });
 
 const emit = defineEmits<{
@@ -56,10 +73,13 @@ const emit = defineEmits<{
   (e: 'editSegmen', segmen: InfrastrukturSegmen): void;
   (e: 'deleteSegmen', segmen: InfrastrukturSegmen): void;
   (e: 'submitVerifikasi', segmen: InfrastrukturSegmen): void;
+  (e: 'openVerify', payload: { segmen: InfrastrukturSegmen; level: 'kecamatan' | 'bappeda'; defaultAction: 'approve' | 'reject' }): void;
   (e: 'viewInTable', segmen: InfrastrukturSegmen): void;
   (e: 'saveSegmen', payload: Partial<InfrastrukturSegmen>): void;
   (e: 'editGeometry', segmen: InfrastrukturSegmen): void;
   (e: 'splitSegmen', segmen: InfrastrukturSegmen): void;
+  (e: 'fotosUpdated', payload: { segmenId: string; fotos: InfrastrukturSegmenFoto[] }): void;
+  (e: 'clearFeedback'): void;
 }>();
 
 const activeTab = ref<'inspector' | 'edit'>('inspector');
@@ -71,6 +91,159 @@ const infrastrukturApi = useInfrastrukturApi();
 const jalanPorosOptions = ref<JalanPorosRef[]>([]);
 const isLoadingJalanPoros = ref(false);
 let lastJalanPorosRegionKey = '';
+
+// ─── Attachment Foto Dokumentasi Lapangan (Privat + Sanitasi Ketat) ─────────
+const fotoInputRef = ref<HTMLInputElement | null>(null);
+const fotoBlobUrls = reactive<Record<string, string>>({});
+const uploadingFoto = ref(false);
+const deletingFotoId = ref<string | null>(null);
+const confirmDeleteFotoId = ref<string | null>(null);
+const previewFoto = ref<InfrastrukturSegmenFoto | null>(null);
+const fotoFeedback = ref<{ type: 'success' | 'error'; message: string } | null>(null);
+const selectedTahapFoto = ref<string>(FOTO_TAHAP_OPTIONS[0]!.value);
+const keteranganFoto = ref('');
+
+const attachedFotos = computed<InfrastrukturSegmenFoto[]>(
+  () => props.selectedSegmen?.fotos || [],
+);
+
+function suggestNextTahapFoto(fotos: InfrastrukturSegmenFoto[]) {
+  const used = new Set(fotos.map((f) => f.tahap_label));
+  const nextOption = FOTO_TAHAP_OPTIONS.find((opt) => !used.has(opt.value));
+  selectedTahapFoto.value = (nextOption || FOTO_TAHAP_OPTIONS[0]!).value;
+}
+
+function revokeUnusedBlobUrls(activeIds: Set<string>) {
+  Object.keys(fotoBlobUrls).forEach((fotoId) => {
+    if (!activeIds.has(fotoId)) {
+      const url = fotoBlobUrls[fotoId];
+      if (url) URL.revokeObjectURL(url);
+      delete fotoBlobUrls[fotoId];
+    }
+  });
+}
+
+async function syncFotoBlobPreviews(fotos: InfrastrukturSegmenFoto[]) {
+  const activeIds = new Set(fotos.map((f) => f.id));
+  revokeUnusedBlobUrls(activeIds);
+
+  await Promise.all(
+    fotos.map(async (foto) => {
+      if (fotoBlobUrls[foto.id] || !foto.file_endpoint) return;
+      try {
+        fotoBlobUrls[foto.id] = await infrastrukturApi.fetchSegmenFotoBlobUrl(foto.file_endpoint);
+      } catch {
+        // Biarkan kosong jika preview gagal dimuat
+      }
+    }),
+  );
+}
+
+watch(
+  () => props.selectedSegmen?.id,
+  () => {
+    fotoFeedback.value = null;
+    confirmDeleteFotoId.value = null;
+    previewFoto.value = null;
+    keteranganFoto.value = '';
+  },
+);
+
+watch(
+  attachedFotos,
+  (fotos) => {
+    suggestNextTahapFoto(fotos);
+    syncFotoBlobPreviews(fotos);
+  },
+  { immediate: true, deep: true },
+);
+
+onBeforeUnmount(() => {
+  revokeUnusedBlobUrls(new Set());
+});
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function triggerSelectFoto() {
+  fotoFeedback.value = null;
+  fotoInputRef.value?.click();
+}
+
+async function handleFotoFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !props.selectedSegmen?.id) return;
+
+  fotoFeedback.value = null;
+
+  if (attachedFotos.value.length >= MAX_SEGMEN_FOTOS) {
+    fotoFeedback.value = { type: 'error', message: `Maksimal ${MAX_SEGMEN_FOTOS} foto per segmen.` };
+    return;
+  }
+
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    fotoFeedback.value = { type: 'error', message: 'Format foto harus JPG, PNG, atau WebP.' };
+    return;
+  }
+
+  if (/\.(php\d*|phtml|phar|svg|html?|js|exe|sh)$/i.test(file.name)) {
+    fotoFeedback.value = { type: 'error', message: 'Nama file tidak diizinkan.' };
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    fotoFeedback.value = { type: 'error', message: 'Ukuran file maksimal 5 MB.' };
+    return;
+  }
+
+  uploadingFoto.value = true;
+  try {
+    const res = await infrastrukturApi.uploadSegmenFoto(props.selectedSegmen.id, file, {
+      tahap_label: selectedTahapFoto.value,
+      keterangan: keteranganFoto.value,
+    });
+    keteranganFoto.value = '';
+    const updatedFotos = res?.fotos || [];
+    emit('fotosUpdated', { segmenId: props.selectedSegmen.id, fotos: updatedFotos });
+    fotoFeedback.value = { type: 'success', message: 'Foto terunggah dan disanitasi.' };
+  } catch (err: any) {
+    const firstValidationErr = err?.data?.errors?.foto?.[0];
+    fotoFeedback.value = {
+      type: 'error',
+      message: firstValidationErr || err?.data?.message || 'Gagal mengunggah foto.',
+    };
+  } finally {
+    uploadingFoto.value = false;
+  }
+}
+
+async function handleConfirmDeleteFoto(fotoId: string) {
+  if (!props.selectedSegmen?.id || deletingFotoId.value) return;
+  fotoFeedback.value = null;
+  deletingFotoId.value = fotoId;
+  try {
+    const res = await infrastrukturApi.deleteSegmenFoto(props.selectedSegmen.id, fotoId);
+    confirmDeleteFotoId.value = null;
+    if (previewFoto.value?.id === fotoId) {
+      previewFoto.value = null;
+    }
+    emit('fotosUpdated', { segmenId: props.selectedSegmen.id, fotos: res?.fotos || [] });
+    fotoFeedback.value = { type: 'success', message: 'Foto dihapus.' };
+  } catch (err: any) {
+    fotoFeedback.value = {
+      type: 'error',
+      message: err?.data?.message || 'Gagal menghapus foto.',
+    };
+  } finally {
+    deletingFotoId.value = null;
+  }
+}
 
 async function loadEditJalanPorosOptions(seg?: InfrastrukturSegmen | null) {
   if (!seg) return;
@@ -285,20 +458,34 @@ watch(
     if (newId !== oldId) {
       activeTab.value = 'inspector';
       syncEditFormFromSegmen(seg);
-    } else if (activeTab.value === 'inspector') {
+    } else if (activeTab.value === 'inspector' || !isEditDirty.value) {
       syncEditFormFromSegmen(seg);
+      if (activeTab.value === 'edit') {
+        loadEditJalanPorosOptions(seg);
+      }
     }
   },
   { immediate: true },
 );
 
-const panjangGisDisplay = computed(() => {
+const panjangGisNumeric = computed(() => {
   const raw = props.selectedSegmen?.panjang_meter_gis;
-  if (raw === null || raw === undefined || String(raw).trim() === '') return '-';
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
   const num = Number(raw);
-  if (!Number.isFinite(num)) return '-';
-  return String(Number(num.toFixed(2)));
+  return Number.isFinite(num) && num > 0 ? Math.round(num * 100) / 100 : null;
 });
+
+const panjangGisDisplay = computed(() => {
+  if (panjangGisNumeric.value === null) return '-';
+  return String(panjangGisNumeric.value);
+});
+
+function syncPanjangFromGis() {
+  if (panjangGisNumeric.value === null) return;
+  editForm.panjang = panjangGisNumeric.value;
+  editNumericErrors.panjang = null;
+  editPanjangRef.value?.clearValidation();
+}
 
 const tipeItems = computed(() =>
   props.tipeList.map((t) => ({
@@ -307,13 +494,20 @@ const tipeItems = computed(() =>
   })),
 );
 
-const plottingItems = computed(() => [
-  { label: 'Tanpa Kaitan Plotting (Mandiri)', value: null },
-  ...props.plottingList.map((p) => ({
-    label: `${p.nama_kegiatan} (${formatRupiah(p.target_pagu_anggaran)})`,
-    value: p.id,
-  })),
-]);
+const plottingItems = computed(() => {
+  const list = [...props.plottingList];
+  const currentPlot = props.selectedSegmen?.plotting;
+  if (currentPlot?.id && !list.some((p) => p.id === currentPlot.id)) {
+    list.unshift(currentPlot);
+  }
+  return [
+    { label: 'Tanpa Kaitan Plotting (Mandiri)', value: null },
+    ...list.map((p) => ({
+      label: `${p.nama_kegiatan} (${formatRupiah(p.target_pagu_anggaran)})`,
+      value: p.id,
+    })),
+  ];
+});
 
 function formatJalanPorosLabel(refRoad?: JalanPorosRef | null): string {
   if (!refRoad) return 'Tanpa Referensi (Mandiri)';
@@ -337,6 +531,32 @@ const jalanPorosItems = computed(() => {
 });
 
 const kondisiItems = KONDISI_OPTIONS;
+const editKondisiButtons = [
+  {
+    value: 'Baik',
+    label: 'Baik',
+    dotClass: 'bg-emerald-600 dark:bg-emerald-400',
+    activeClass: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-400 dark:border-emerald-700 ring-1 ring-emerald-500/30',
+  },
+  {
+    value: 'Sedang',
+    label: 'Sedang',
+    dotClass: 'bg-amber-500 dark:bg-amber-400',
+    activeClass: 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-400 dark:border-amber-700 ring-1 ring-amber-500/30',
+  },
+  {
+    value: 'Rusak Ringan',
+    label: 'Rusak Ringan',
+    dotClass: 'bg-orange-600 dark:bg-orange-400',
+    activeClass: 'bg-orange-50 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 border-orange-400 dark:border-orange-700 ring-1 ring-orange-500/30',
+  },
+  {
+    value: 'Rusak Berat',
+    label: 'Rusak Berat',
+    dotClass: 'bg-rose-600 dark:bg-rose-400',
+    activeClass: 'bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border-rose-400 dark:border-rose-700 ring-1 ring-rose-500/30',
+  },
+];
 const perkerasanItems = computed(() =>
   withCurrentOption(PERKERASAN_OPTIONS, editForm.jenis_perkerasan),
 );
@@ -344,7 +564,21 @@ const statusJalanItems = computed(() =>
   withCurrentOption(STATUS_JALAN_OPTIONS, editForm.status_jalan),
 );
 const sumberDanaItems = computed(() =>
-  withCurrentOption(SUMBER_DANA_OPTIONS, editForm.sumber_dana),
+  buildSumberDanaSelectItems(props.sumberDanaList, editForm.sumber_dana, SUMBER_DANA_OPTIONS),
+);
+
+watch(
+  () => editForm.plotting_id,
+  (newPlottingId, oldPlottingId) => {
+    if (!newPlottingId || newPlottingId === oldPlottingId || activeTab.value !== 'edit') return;
+    const match = props.plottingList.find((p) => p.id === newPlottingId);
+    if (match?.sumber_dana) {
+      editForm.sumber_dana = match.sumber_dana;
+    }
+    if (match?.tahun_anggaran) {
+      editForm.tahun_pembangunan = match.tahun_anggaran;
+    }
+  },
 );
 const statusAsetItems = computed(() =>
   withCurrentOption(STATUS_ASET_OPTIONS, editForm.status_aset),
@@ -404,7 +638,10 @@ function handleSaveEdit() {
   }
   showUnsavedGuard.value = false;
   editBaselineJson.value = serializeEditForm();
-  emit('saveSegmen', { ...editForm });
+  emit('saveSegmen', {
+    ...editForm,
+    is_non_pagu: !editForm.plotting_id,
+  });
 }
 
 function handleCancelEdit() {
@@ -415,6 +652,13 @@ function handleCancelEdit() {
 
 const canSubmitCurrentSegmen = computed(() => {
   if (!props.canSubmit || !props.selectedSegmen) return false;
+  const status = String(props.selectedSegmen.status_verifikasi || '').toLowerCase();
+  return status === 'draft' || status === 'rejected_kecamatan' || status === 'rejected_bappeda';
+});
+
+const isWaitingDesaSubmission = computed(() => {
+  if (!props.isKecamatanRole || !props.selectedSegmen) return false;
+  if (props.canVerifyKecamatan || props.canVerifyBappeda || canSubmitCurrentSegmen.value) return false;
   const status = String(props.selectedSegmen.status_verifikasi || '').toLowerCase();
   return status === 'draft' || status === 'rejected_kecamatan';
 });
@@ -542,6 +786,12 @@ const secondaryActionItems = computed(() => {
             />
           </div>
         </UTooltip>
+        <span
+          class="text-[11px] font-medium text-gray-500 dark:text-gray-400 tracking-wide whitespace-nowrap"
+          style="writing-mode: vertical-rl;"
+        >
+          Detail Data
+        </span>
       </button>
 
       <!-- Content: Body Area -->
@@ -654,6 +904,29 @@ const secondaryActionItems = computed(() => {
 
           <!-- Scrollable Body -->
           <div class="flex-1 overflow-y-auto p-3 space-y-3 text-xs">
+            <div
+              v-if="saveFeedback"
+              role="status"
+              :class="[
+                'p-2 rounded-lg border text-[11px] flex items-start justify-between gap-2',
+                saveFeedback.type === 'success'
+                  ? 'bg-emerald-50/90 dark:bg-emerald-950/35 border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-100'
+                  : saveFeedback.type === 'warning'
+                    ? 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-200 dark:border-amber-800/80 text-amber-900 dark:text-amber-100'
+                    : 'bg-red-50/90 dark:bg-red-950/35 border-red-200 dark:border-red-800/80 text-red-900 dark:text-red-100',
+              ]"
+            >
+              <span class="font-medium leading-snug">{{ saveFeedback.message }}</span>
+              <button
+                type="button"
+                aria-label="Tutup pesan"
+                class="p-0.5 rounded opacity-75 hover:opacity-100 cursor-pointer shrink-0"
+                @click="emit('clearFeedback')"
+              >
+                <UIcon name="i-lucide-x" class="size-3" aria-hidden="true" />
+              </button>
+            </div>
+
             <!-- TAB 1: INFORMASI TEKNIS -->
             <template v-if="activeTab === 'inspector'">
               <!-- Info banner if segmen cannot be edited by user (mode baca) -->
@@ -720,6 +993,106 @@ const secondaryActionItems = computed(() => {
                     class="tabular-nums"
                   />
                 </div>
+
+                <!-- 2x2 Quick Specs Strip -->
+                <div class="grid grid-cols-2 gap-1.5 pt-2 border-t border-gray-200/70 dark:border-gray-800/80">
+                  <div class="px-2 py-1.5 rounded-lg bg-white dark:bg-[#0b0f19] border border-gray-200/70 dark:border-gray-800">
+                    <span class="block text-[10px] text-gray-500 dark:text-gray-400">Panjang GIS</span>
+                    <span class="font-semibold text-gray-900 dark:text-white tabular-nums">
+                      {{ panjangGisNumeric !== null ? `${panjangGisNumeric.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m` : '-' }}
+                    </span>
+                  </div>
+                  <div class="px-2 py-1.5 rounded-lg bg-white dark:bg-[#0b0f19] border border-gray-200/70 dark:border-gray-800">
+                    <span class="block text-[10px] text-gray-500 dark:text-gray-400">Lebar & Perkerasan</span>
+                    <span class="font-semibold text-gray-900 dark:text-white truncate block">
+                      {{ selectedSegmen.lebar ? `${Number(selectedSegmen.lebar).toLocaleString('id-ID')} m` : '-' }} · {{ selectedSegmen.jenis_perkerasan || '-' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Aksi Alur Verifikasi 3 Tingkat -->
+              <div
+                v-if="canSubmitCurrentSegmen || canVerifyKecamatan || canVerifyBappeda || isWaitingDesaSubmission"
+                class="p-2.5 rounded-xl border space-y-2"
+                :class="
+                  canVerifyKecamatan || canVerifyBappeda
+                    ? 'bg-emerald-50/75 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/80'
+                    : canSubmitCurrentSegmen
+                      ? 'bg-sky-50/75 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/80'
+                      : 'bg-amber-50/70 dark:bg-amber-950/25 border-amber-200 dark:border-amber-800/70'
+                "
+              >
+                <template v-if="canVerifyKecamatan">
+                  <p class="text-[11px] font-semibold text-emerald-950 dark:text-emerald-100">
+                    Verifikasi Tingkat Kecamatan
+                  </p>
+                  <div class="flex items-center gap-1.5">
+                    <UButton
+                      icon="i-lucide-send-horizontal"
+                      label="Teruskan ke Bappeda"
+                      size="xs"
+                      color="success"
+                      variant="solid"
+                      class="flex-1 justify-center cursor-pointer"
+                      @click="emit('openVerify', { segmen: selectedSegmen, level: 'kecamatan', defaultAction: 'approve' })"
+                    />
+                    <UButton
+                      icon="i-lucide-rotate-ccw"
+                      label="Tolak"
+                      size="xs"
+                      color="error"
+                      variant="outline"
+                      class="cursor-pointer shrink-0"
+                      @click="emit('openVerify', { segmen: selectedSegmen, level: 'kecamatan', defaultAction: 'reject' })"
+                    />
+                  </div>
+                </template>
+
+                <template v-else-if="canVerifyBappeda">
+                  <p class="text-[11px] font-semibold text-emerald-950 dark:text-emerald-100">
+                    Verifikasi Final Bappeda
+                  </p>
+                  <div class="flex items-center gap-1.5">
+                    <UButton
+                      icon="i-lucide-badge-check"
+                      label="Sahkan Final"
+                      size="xs"
+                      color="success"
+                      variant="solid"
+                      class="flex-1 justify-center cursor-pointer"
+                      @click="emit('openVerify', { segmen: selectedSegmen, level: 'bappeda', defaultAction: 'approve' })"
+                    />
+                    <UButton
+                      icon="i-lucide-rotate-ccw"
+                      label="Tolak"
+                      size="xs"
+                      color="error"
+                      variant="outline"
+                      class="cursor-pointer shrink-0"
+                      @click="emit('openVerify', { segmen: selectedSegmen, level: 'bappeda', defaultAction: 'reject' })"
+                    />
+                  </div>
+                </template>
+
+                <template v-else-if="canSubmitCurrentSegmen">
+                  <p class="text-[11px] font-semibold text-sky-950 dark:text-sky-100">
+                    Siap Diajukan Verifikasi
+                  </p>
+                  <UButton
+                    icon="i-lucide-send"
+                    label="Ajukan ke Verifikasi Kecamatan"
+                    size="xs"
+                    color="primary"
+                    variant="solid"
+                    class="w-full justify-center cursor-pointer"
+                    @click="emit('submitVerifikasi', selectedSegmen)"
+                  />
+                </template>
+
+                <p v-else-if="isWaitingDesaSubmission" class="text-[11px] text-amber-900 dark:text-amber-100 leading-snug">
+                  Segmen masih berstatus <strong>Draft</strong> di Desa. Menunggu akun Desa mengajukan verifikasi sebelum dapat diteruskan ke Bappeda.
+                </p>
               </div>
 
               <!-- Properties Key-Value Table -->
@@ -738,9 +1111,9 @@ const secondaryActionItems = computed(() => {
                     ['Status Jalan', selectedSegmen.status_jalan],
                     ['Kondisi', selectedSegmen.kondisi],
                     ['Status Kondisi', selectedSegmen.status_kondisi],
-                    ['Sumber Dana', selectedSegmen.sumber_dana],
+                    ['Sumber Dana', resolveSumberDanaLabel(sumberDanaList, selectedSegmen.sumber_dana)],
                     ['Status Aset', selectedSegmen.status_aset],
-                    ['Tahun Bangun', selectedSegmen.tahun_pembangunan],
+                    ['Tahun Anggaran', selectedSegmen.tahun_pembangunan],
                     ['Sumber Data', selectedSegmen.sumber_data],
                   ]"
                   :key="key"
@@ -759,9 +1132,19 @@ const secondaryActionItems = computed(() => {
                   Plotting Anggaran Terkait
                 </span>
                 <div v-if="selectedSegmen.plotting" class="p-2.5 rounded-lg bg-blue-50/30 dark:bg-blue-950/20 border border-blue-500/20 space-y-1">
-                  <p class="font-semibold text-blue-700 dark:text-blue-300">
-                    {{ selectedSegmen.plotting.nama_kegiatan }}
-                  </p>
+                  <div class="flex items-start justify-between gap-2">
+                    <p class="font-semibold text-blue-700 dark:text-blue-300">
+                      {{ selectedSegmen.plotting.nama_kegiatan }}
+                    </p>
+                    <UBadge
+                      v-if="selectedSegmen.plotting.nomor_sk"
+                      :label="selectedSegmen.plotting.nomor_sk"
+                      size="xs"
+                      color="info"
+                      variant="subtle"
+                      class="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                    />
+                  </div>
                   <div class="flex justify-between text-[11px]">
                     <span class="text-gray-600 dark:text-gray-400">Target Pagu:</span>
                     <span class="tabular-nums font-medium text-gray-900 dark:text-white">
@@ -769,26 +1152,11 @@ const secondaryActionItems = computed(() => {
                     </span>
                   </div>
                 </div>
+                <div v-else-if="selectedSegmen.is_non_pagu" class="p-2.5 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-300/70 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-center text-[11px]">
+                  Inventarisasi Eksisting Non-Pagu (Tanpa SK / Anggaran Baru)
+                </div>
                 <div v-else class="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-dashed border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400 text-center">
                   Belum terikat ke alokasi plotting anggaran.
-                </div>
-              </div>
-
-              <!-- Foto Dokumentasi Lapangan -->
-              <div class="space-y-1.5">
-                <span class="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Foto Dokumentasi Lapangan
-                </span>
-                <div v-if="selectedSegmen.foto_url" class="rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
-                  <img
-                    :src="selectedSegmen.foto_url"
-                    alt="Foto Survei Segmen"
-                    class="w-full h-36 object-cover bg-gray-100"
-                  />
-                </div>
-                <div v-else class="p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-dashed border-gray-200 dark:border-gray-800 text-center text-gray-500 dark:text-gray-400">
-                  <UIcon name="i-lucide-camera" class="size-5 mx-auto mb-1 text-gray-500 dark:text-gray-400" />
-                  <p class="text-[11px]">Belum ada foto dokumentasi terlampir.</p>
                 </div>
               </div>
 
@@ -813,180 +1181,230 @@ const secondaryActionItems = computed(() => {
             <!-- TAB 2: EDIT FORMULIR -->
             <template v-else-if="activeTab === 'edit'">
               <div class="space-y-3">
-                <UFormField label="Nama Objek / Ruas" required size="sm">
-                  <UInput
-                    v-model="editForm.namobj"
-                    placeholder="Contoh: Jl. Poros Desa Mulyoagung"
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
+                <!-- Grup 1: Identitas & Referensi -->
+                <div class="p-2.5 rounded-xl bg-gray-50/70 dark:bg-gray-900/40 border border-gray-200/80 dark:border-gray-800 space-y-2.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                      Identitas & Referensi
+                    </span>
+                  </div>
 
-                <UFormField label="Tipe Infrastruktur" required size="sm">
-                  <USelectMenu
-                    v-model="editForm.tipe_kode"
-                    :items="tipeItems"
-                    value-key="value"
-                    label-key="label"
-                    placeholder="Pilih tipe..."
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
-
-                <UFormField
-                  label="Referensi Jalan Poros Desa"
-                  hint="Opsional. Mengikat segmen pada koridor ruas jalan poros desa."
-                  size="sm"
-                >
-                  <USelectMenu
-                    v-model="editForm.parent_id"
-                    :items="jalanPorosItems"
-                    :loading="isLoadingJalanPoros"
-                    value-key="value"
-                    label-key="label"
-                    placeholder="Cari atau pilih ruas jalan poros..."
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <UFormField
-                    label="Panjang Isian (m)"
-                    :error="editNumericErrors.panjang || undefined"
-                    size="sm"
-                  >
-                    <NumericTextInput
-                      ref="editPanjangRef"
-                      v-model="editForm.panjang"
-                      field-label="Panjang isian"
-                      :allow-decimal="true"
-                      :min="0"
-                      placeholder="Contoh: 120.5"
-                      size="sm"
-                      @update:error="editNumericErrors.panjang = $event"
-                    />
-                  </UFormField>
-
-                  <UFormField
-                    label="Panjang GIS (m)"
-                    size="sm"
-                  >
+                  <UFormField label="Nama Objek / Ruas" required size="sm">
                     <UInput
-                      :model-value="panjangGisDisplay"
-                      disabled
-                      readonly
+                      v-model="editForm.namobj"
+                      placeholder="Contoh: Jl. Poros Desa Mulyoagung"
                       size="sm"
-                      aria-label="Panjang GIS dalam meter (otomatis dari geometri, nonaktif)"
                       class="w-full"
-                      :ui="{ base: 'tabular-nums bg-gray-100/80 dark:bg-gray-900/60 text-gray-600 dark:text-gray-400' }"
                     />
                   </UFormField>
-                </div>
 
-                <div class="grid grid-cols-2 gap-2">
-                  <UFormField
-                    label="Lebar (m)"
-                    :error="editNumericErrors.lebar || undefined"
-                    size="sm"
-                  >
-                    <NumericTextInput
-                      ref="editLebarRef"
-                      v-model="editForm.lebar"
-                      field-label="Lebar"
-                      :allow-decimal="true"
-                      :min="0"
-                      placeholder="Contoh: 3.5"
+                  <UFormField label="Tipe Infrastruktur" required size="sm">
+                    <USelectMenu
+                      v-model="editForm.tipe_kode"
+                      :items="tipeItems"
+                      value-key="value"
+                      label-key="label"
+                      placeholder="Pilih tipe..."
                       size="sm"
-                      @update:error="editNumericErrors.lebar = $event"
+                      class="w-full"
                     />
                   </UFormField>
 
                   <UFormField
-                    label="Tahun Bangun"
-                    :error="editNumericErrors.tahun_pembangunan || undefined"
+                    label="Referensi Jalan Poros Desa"
+                    hint="Opsional, mengikat segmen ke koridor poros."
                     size="sm"
                   >
-                    <NumericTextInput
-                      ref="editTahunRef"
-                      v-model="editForm.tahun_pembangunan"
-                      field-label="Tahun bangun"
-                      :allow-decimal="false"
-                      :min="1900"
-                      :max="maxBuildYear"
-                      :max-digits="4"
-                      placeholder="Contoh: 2024"
-                      size="sm"
-                      @update:error="editNumericErrors.tahun_pembangunan = $event"
-                    />
-                  </UFormField>
-                </div>
-
-                <UFormField label="Kondisi Fisik" size="sm">
-                  <USelectMenu
-                    v-model="editForm.kondisi"
-                    :items="kondisiItems"
-                    value-key="value"
-                    label-key="label"
-                    :search-input="false"
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <UFormField label="Jenis Perkerasan" size="sm">
                     <USelectMenu
-                      v-model="editForm.jenis_perkerasan"
-                      :items="perkerasanItems"
+                      v-model="editForm.parent_id"
+                      :items="jalanPorosItems"
+                      :loading="isLoadingJalanPoros"
                       value-key="value"
                       label-key="label"
-                      :search-input="false"
-                      placeholder="Pilih perkerasan..."
-                      size="sm"
-                      class="w-full"
-                    />
-                  </UFormField>
-
-                  <UFormField label="Status Jalan" size="sm">
-                    <USelectMenu
-                      v-model="editForm.status_jalan"
-                      :items="statusJalanItems"
-                      value-key="value"
-                      label-key="label"
-                      :search-input="false"
-                      placeholder="Pilih status..."
+                      placeholder="Pilih ruas jalan poros..."
                       size="sm"
                       class="w-full"
                     />
                   </UFormField>
                 </div>
 
-                <UFormField label="Plotting Anggaran Terkait" size="sm">
-                  <USelectMenu
-                    v-model="editForm.plotting_id"
-                    :items="plottingItems"
-                    value-key="value"
-                    label-key="label"
-                    placeholder="Pilih plotting..."
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
+                <!-- Grup 2: Dimensi & Kondisi Fisik -->
+                <div class="p-2.5 rounded-xl bg-gray-50/70 dark:bg-gray-900/40 border border-gray-200/80 dark:border-gray-800 space-y-2.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                      Dimensi & Kondisi Fisik
+                    </span>
+                    <button
+                      v-if="panjangGisNumeric !== null && Number(editForm.panjang ?? 0) !== panjangGisNumeric"
+                      type="button"
+                      class="text-[10px] font-semibold text-blue-700 dark:text-blue-300 hover:underline cursor-pointer"
+                      title="Samakan panjang isian dengan hasil pengukuran GIS"
+                      @click="syncPanjangFromGis"
+                    >
+                      Samakan GIS ({{ panjangGisDisplay }} m)
+                    </button>
+                    <span
+                      v-else-if="panjangGisNumeric !== null"
+                      class="text-[10px] font-mono text-gray-600 dark:text-gray-400 tabular-nums"
+                    >
+                      GIS: {{ panjangGisDisplay }} m
+                    </span>
+                  </div>
 
-                <div class="grid grid-cols-2 gap-2">
-                  <UFormField label="Sumber Dana" size="sm">
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <UFormField
+                      label="Panjang (m)"
+                      :error="editNumericErrors.panjang || undefined"
+                      size="sm"
+                    >
+                      <NumericTextInput
+                        ref="editPanjangRef"
+                        v-model="editForm.panjang"
+                        field-label="Panjang isian"
+                        :allow-decimal="true"
+                        :min="0"
+                        placeholder="Contoh: 120.5"
+                        size="sm"
+                        @update:error="editNumericErrors.panjang = $event"
+                      />
+                    </UFormField>
+
+                    <UFormField
+                      label="Lebar (m)"
+                      :error="editNumericErrors.lebar || undefined"
+                      size="sm"
+                    >
+                      <NumericTextInput
+                        ref="editLebarRef"
+                        v-model="editForm.lebar"
+                        field-label="Lebar"
+                        :allow-decimal="true"
+                        :min="0"
+                        placeholder="Contoh: 3.5"
+                        size="sm"
+                        @update:error="editNumericErrors.lebar = $event"
+                      />
+                    </UFormField>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <span class="block text-xs font-medium text-gray-700 dark:text-gray-200">
+                      Kondisi Fisik
+                    </span>
+                    <div
+                      role="radiogroup"
+                      aria-label="Kondisi fisik segmen"
+                      class="grid grid-cols-2 gap-1.5"
+                    >
+                      <button
+                        v-for="k in editKondisiButtons"
+                        :key="k.value"
+                        type="button"
+                        role="radio"
+                        :aria-checked="editForm.kondisi === k.value"
+                        class="flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-blue-600"
+                        :class="
+                          editForm.kondisi === k.value
+                            ? `${k.activeClass} font-semibold`
+                            : 'bg-white dark:bg-[#0b0f19] border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900'
+                        "
+                        @click="editForm.kondisi = k.value"
+                      >
+                        <span class="size-2 rounded-full shrink-0" :class="k.dotClass" aria-hidden="true" />
+                        <span class="truncate">{{ k.label }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <UFormField label="Jenis Perkerasan" size="sm">
+                      <USelectMenu
+                        v-model="editForm.jenis_perkerasan"
+                        :items="perkerasanItems"
+                        value-key="value"
+                        label-key="label"
+                        :search-input="false"
+                        placeholder="Pilih..."
+                        size="sm"
+                        class="w-full"
+                      />
+                    </UFormField>
+
+                    <UFormField label="Status Jalan" size="sm">
+                      <USelectMenu
+                        v-model="editForm.status_jalan"
+                        :items="statusJalanItems"
+                        value-key="value"
+                        label-key="label"
+                        :search-input="false"
+                        placeholder="Pilih..."
+                        size="sm"
+                        class="w-full"
+                      />
+                    </UFormField>
+                  </div>
+                </div>
+
+                <!-- Grup 3: Pendanaan, Tahun Anggaran & Aset -->
+                <div class="p-2.5 rounded-xl bg-gray-50/70 dark:bg-gray-900/40 border border-gray-200/80 dark:border-gray-800 space-y-2.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                      Pendanaan & Tahun Anggaran
+                    </span>
+                    <span
+                      v-if="editForm.plotting_id"
+                      class="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700/80 text-[10px] font-semibold text-emerald-900 dark:text-emerald-200"
+                    >
+                      Mengikuti Pagu
+                    </span>
+                  </div>
+
+                  <UFormField label="Plotting Anggaran Terkait" size="sm">
                     <USelectMenu
-                      v-model="editForm.sumber_dana"
-                      :items="sumberDanaItems"
+                      v-model="editForm.plotting_id"
+                      :items="plottingItems"
                       value-key="value"
                       label-key="label"
-                      placeholder="Pilih sumber..."
+                      placeholder="Pilih plotting..."
                       size="sm"
                       class="w-full"
                     />
                   </UFormField>
+
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <UFormField
+                      label="Tahun Anggaran"
+                      :error="editNumericErrors.tahun_pembangunan || undefined"
+                      size="sm"
+                    >
+                      <NumericTextInput
+                        ref="editTahunRef"
+                        v-model="editForm.tahun_pembangunan"
+                        field-label="Tahun anggaran"
+                        :allow-decimal="false"
+                        :min="1900"
+                        :max="maxBuildYear"
+                        :max-digits="4"
+                        :disabled="Boolean(editForm.plotting_id)"
+                        placeholder="Contoh: 2026"
+                        size="sm"
+                        @update:error="editNumericErrors.tahun_pembangunan = $event"
+                      />
+                    </UFormField>
+
+                    <UFormField label="Sumber Dana" size="sm">
+                      <USelectMenu
+                        v-model="editForm.sumber_dana"
+                        :items="sumberDanaItems"
+                        value-key="value"
+                        label-key="label"
+                        :disabled="Boolean(editForm.plotting_id)"
+                        placeholder="Pilih sumber..."
+                        size="sm"
+                        class="w-full"
+                      />
+                    </UFormField>
+                  </div>
 
                   <UFormField label="Status Aset" size="sm">
                     <USelectMenu
@@ -995,24 +1413,202 @@ const secondaryActionItems = computed(() => {
                       value-key="value"
                       label-key="label"
                       :search-input="false"
-                      placeholder="Pilih aset..."
+                      placeholder="Pilih status aset..."
+                      size="sm"
+                      class="w-full"
+                    />
+                  </UFormField>
+
+                  <UFormField label="Keterangan Tambahan" size="sm">
+                    <UTextarea
+                      v-model="editForm.keterangan"
+                      :rows="2"
+                      placeholder="Catatan kondisi atau spesifikasi lapangan..."
                       size="sm"
                       class="w-full"
                     />
                   </UFormField>
                 </div>
-
-                <UFormField label="Keterangan Tambahan" size="sm">
-                  <UTextarea
-                    v-model="editForm.keterangan"
-                    :rows="2"
-                    placeholder="Catatan kondisi atau spesifikasi..."
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
               </div>
             </template>
+
+            <!-- Foto Dokumentasi Lapangan (Tersedia di Detail Data & Form Edit) -->
+            <div
+              class="space-y-2"
+              :class="activeTab === 'edit' ? 'pt-3 border-t border-gray-200 dark:border-gray-800' : ''"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[10px] font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                  Foto Dokumentasi Lapangan
+                </span>
+                <span
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold tabular-nums"
+                  :class="
+                    attachedFotos.length >= IDEAL_MIN_SEGMEN_FOTOS
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700/80'
+                      : attachedFotos.length > 0
+                        ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700/80'
+                        : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                  "
+                >
+                  {{ attachedFotos.length }}/{{ MAX_SEGMEN_FOTOS }}
+                  {{ attachedFotos.length >= IDEAL_MIN_SEGMEN_FOTOS ? 'Ideal' : '' }}
+                </span>
+              </div>
+
+              <div
+                v-if="fotoFeedback"
+                role="status"
+                :class="[
+                  'px-2.5 py-1.5 rounded-lg border text-[11px] font-medium flex items-center justify-between gap-2',
+                  fotoFeedback.type === 'success'
+                    ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-100'
+                    : 'bg-red-50/90 dark:bg-red-950/40 border-red-200 dark:border-red-800/80 text-red-900 dark:text-red-100',
+                ]"
+              >
+                <span>{{ fotoFeedback.message }}</span>
+                <button
+                  type="button"
+                  aria-label="Tutup pesan foto"
+                  class="p-0.5 rounded opacity-75 hover:opacity-100 cursor-pointer"
+                  @click="fotoFeedback = null"
+                >
+                  <UIcon name="i-lucide-x" class="size-3" aria-hidden="true" />
+                </button>
+              </div>
+
+              <!-- Grid Foto Privat Terlampir -->
+              <div v-if="attachedFotos.length > 0" class="grid grid-cols-2 gap-2">
+                <div
+                  v-for="foto in attachedFotos"
+                  :key="foto.id"
+                  class="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#0e1424] overflow-hidden flex flex-col"
+                >
+                  <button
+                    type="button"
+                    :aria-label="`Perbesar foto ${foto.tahap_label}`"
+                    class="relative w-full aspect-[4/3] bg-gray-100 dark:bg-gray-900 overflow-hidden cursor-pointer group focus-visible:outline-2 focus-visible:outline-blue-600"
+                    @click="previewFoto = foto"
+                  >
+                    <img
+                      v-if="fotoBlobUrls[foto.id]"
+                      :src="fotoBlobUrls[foto.id]"
+                      :alt="`${foto.tahap_label}${foto.keterangan ? `: ${foto.keterangan}` : ''}`"
+                      class="w-full h-full object-cover"
+                    >
+                    <div
+                      v-else
+                      class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
+                    >
+                      <UIcon name="i-lucide-image" class="size-5 animate-pulse" aria-hidden="true" />
+                    </div>
+                    <span
+                      class="absolute inset-x-0 bottom-0 px-1.5 py-0.5 bg-slate-950/75 text-white text-[10px] font-medium truncate text-left"
+                    >
+                      {{ foto.tahap_label }}
+                    </span>
+                  </button>
+
+                  <div class="p-1.5 space-y-1 text-[10px] text-gray-600 dark:text-gray-400">
+                    <p v-if="foto.keterangan" class="text-gray-800 dark:text-gray-200 line-clamp-1 font-medium">
+                      {{ foto.keterangan }}
+                    </p>
+                    <div class="flex items-center justify-between gap-1">
+                      <span class="tabular-nums truncate">
+                        {{ formatBytes(foto.ukuran_byte) }}
+                      </span>
+
+                      <template v-if="canEdit">
+                        <div v-if="confirmDeleteFotoId === foto.id" class="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            class="text-rose-700 dark:text-rose-300 font-semibold hover:underline cursor-pointer"
+                            :disabled="deletingFotoId === foto.id"
+                            @click="handleConfirmDeleteFoto(foto.id)"
+                          >
+                            Ya
+                          </button>
+                          <button
+                            type="button"
+                            class="text-gray-600 dark:text-gray-400 hover:underline cursor-pointer"
+                            :disabled="deletingFotoId === foto.id"
+                            @click="confirmDeleteFotoId = null"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                        <button
+                          v-else
+                          type="button"
+                          :aria-label="`Hapus foto ${foto.tahap_label}`"
+                          class="text-rose-700 dark:text-rose-300 hover:underline cursor-pointer shrink-0 font-medium"
+                          @click="confirmDeleteFotoId = foto.id"
+                        >
+                          Hapus
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-else
+                class="p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-dashed border-gray-300 dark:border-gray-700 text-center text-gray-600 dark:text-gray-400 space-y-1"
+              >
+                <UIcon name="i-lucide-camera" class="size-5 mx-auto text-gray-500 dark:text-gray-400" aria-hidden="true" />
+                <p class="text-[11px] font-medium">Belum ada foto dokumentasi lapangan.</p>
+                <p class="text-[10px]">Idealnya 3 sampai 4 foto (Titik Awal 0%, Tengah 50%, Akhir 100%).</p>
+              </div>
+
+              <!-- Upload Form Terintegrasi (Saat User Boleh Edit & Kuota < 4) -->
+              <div
+                v-if="canEdit && attachedFotos.length < MAX_SEGMEN_FOTOS"
+                class="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 space-y-2"
+              >
+                <input
+                  ref="fotoInputRef"
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  class="hidden"
+                  @change="handleFotoFileSelected"
+                >
+                <div class="grid grid-cols-1 gap-1.5">
+                  <USelectMenu
+                    v-model="selectedTahapFoto"
+                    :items="FOTO_TAHAP_OPTIONS"
+                    value-key="value"
+                    label-key="label"
+                    :search-input="false"
+                    size="xs"
+                    aria-label="Tahap posisi foto dokumentasi"
+                    class="w-full"
+                  />
+                  <UInput
+                    v-model="keteranganFoto"
+                    placeholder="Keterangan lokasi foto (opsional)"
+                    size="xs"
+                    maxlength="200"
+                    class="w-full"
+                  />
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">
+                    JPG/PNG/WebP maks 5 MB (privasi EXIF dihapus otomatis).
+                  </span>
+                  <UButton
+                    icon="i-lucide-upload"
+                    label="Unggah Foto"
+                    size="xs"
+                    color="primary"
+                    variant="subtle"
+                    :loading="uploadingFoto"
+                    class="cursor-pointer shrink-0"
+                    @click="triggerSelectFoto"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Sticky Action Footer untuk Edit Formulir -->
@@ -1041,6 +1637,14 @@ const secondaryActionItems = computed(() => {
                   @click="confirmDiscardToInspector"
                 />
               </div>
+            </div>
+
+            <div
+              v-if="isEditDirty && !showUnsavedGuard"
+              class="text-[11px] font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1.5"
+            >
+              <span class="size-1.5 rounded-full bg-amber-500 shrink-0" aria-hidden="true" />
+              <span>Ada perubahan atribut yang belum disimpan</span>
             </div>
 
             <div class="flex items-center gap-2">
@@ -1101,5 +1705,40 @@ const secondaryActionItems = computed(() => {
         </div>
       </div>
     </Transition>
+
+    <!-- Lightbox Pratinjau Foto Privat -->
+    <UModal
+      :open="Boolean(previewFoto)"
+      :title="previewFoto?.tahap_label || 'Pratinjau Foto Dokumentasi'"
+      :description="previewFoto?.keterangan || 'Dokumentasi lapangan segmen infrastruktur'"
+      :ui="{ content: 'sm:max-w-2xl bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-2xl' }"
+      @update:open="(v) => { if (!v) previewFoto = null; }"
+    >
+      <template #body>
+        <div v-if="previewFoto" class="space-y-2.5 text-xs">
+          <div class="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center max-h-[65vh]">
+            <img
+              v-if="fotoBlobUrls[previewFoto.id]"
+              :src="fotoBlobUrls[previewFoto.id]"
+              :alt="previewFoto.tahap_label"
+              class="max-h-[65vh] w-auto object-contain"
+            >
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-600 dark:text-gray-400 tabular-nums">
+            <span>
+              {{ previewFoto.lebar_px || '?' }} x {{ previewFoto.tinggi_px || '?' }} px · {{ formatBytes(previewFoto.ukuran_byte) }}
+            </span>
+            <span v-if="previewFoto.uploader?.name">
+              Diunggah oleh: {{ previewFoto.uploader.name }}
+            </span>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end w-full">
+          <UButton label="Tutup" color="neutral" variant="outline" @click="previewFoto = null" />
+        </div>
+      </template>
+    </UModal>
   </component>
 </template>

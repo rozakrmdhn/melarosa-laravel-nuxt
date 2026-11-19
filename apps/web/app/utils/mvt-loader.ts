@@ -23,6 +23,7 @@ const TILE_STATE = {
 const KNOWN_BOJONEGORO_MVT_SOURCES = new Set([
   "infrastruktur_segmen",
   "jalan_porosdesa",
+  "jalan_kabupaten_luarkota",
   "bataswilayah_kabupaten",
 ]);
 

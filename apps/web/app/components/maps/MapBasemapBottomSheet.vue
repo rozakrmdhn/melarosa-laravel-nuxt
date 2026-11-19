@@ -9,6 +9,9 @@
 // - Accessible keyboard controls (Escape to close, radiogroup navigation)
 
 import type { BasemapKey } from "~/types/map-layers";
+import type { BasemapItem } from "~/types/basemap";
+import BasemapThumbnail from "~/components/common/BasemapThumbnail.vue";
+import { useBasemapStore } from "~/stores/basemap";
 
 export interface BasemapDef {
   key: BasemapKey;
@@ -16,6 +19,7 @@ export interface BasemapDef {
   tagline: string;
   provider: string;
   type: "vector" | "raster";
+  item?: BasemapItem;
 }
 
 const props = withDefaults(
@@ -36,43 +40,52 @@ const emit = defineEmits<{
   (e: "after-close"): void;
 }>();
 
-const basemapList: BasemapDef[] = [
-  {
-    key: "esri",
-    name: "Esri World Topo",
-    tagline: "Topografi, elevasi & kontur muka bumi",
-    provider: "Esri / ArcGIS",
+const basemapStore = useBasemapStore();
+
+const basemapList = computed<BasemapDef[]>(() => {
+  const dynamicItems = basemapStore.listForEngine("openlayers").map((item) => ({
+    key: item.kode as BasemapKey,
+    name: item.nama,
+    tagline: item.tagline || item.provider || "Peta dasar dinamis",
+    provider: item.provider || "Custom Tile",
+    type: (item.tipe === "vector" ? "vector" : "raster") as "vector" | "raster",
+    item,
+  }));
+
+  dynamicItems.push({
+    key: "none",
+    name: "Kanvas Kosong",
+    tagline: "Tanpa peta dasar untuk fokus analisis layer",
+    provider: "Internal",
     type: "raster",
-  },
-  {
-    key: "rbi",
-    name: "Rupabumi Indonesia",
-    tagline: "Peta toponimi resmi standar nasional BIG",
-    provider: "Badan Informasi Geospasial",
-    type: "raster",
-  },
-  {
-    key: "osm",
-    name: "OpenStreetMap",
-    tagline: "Peta jalan komunitas global detail",
-    provider: "OSM Community",
-    type: "vector",
-  },
-  {
-    key: "satellite",
-    name: "Citra Satelit",
-    tagline: "Citra satelit resolusi tinggi permukaan bumi",
-    provider: "World Imagery",
-    type: "raster",
-  },
-  {
-    key: "aerial",
-    name: "Foto Udara",
-    tagline: "Ortofoto udara resolusi tinggi Bojonegoro",
-    provider: "Pemkab Bojonegoro",
-    type: "raster",
-  },
-];
+    item: {
+      id: "none",
+      kode: "none",
+      nama: "Kanvas Kosong",
+      label_singkat: "Kanvas",
+      tagline: "Tanpa peta dasar",
+      provider: "Internal",
+      tipe: "raster",
+      url_template: "",
+      fallback_url_template: null,
+      tile_urls: null,
+      attribution: null,
+      thumbnail_url: null,
+      preview_style: "none",
+      min_zoom: 0,
+      max_zoom: 22,
+      tile_size: 256,
+      cross_origin: "anonymous",
+      supports_openlayers: true,
+      supports_maplibre: true,
+      is_default: false,
+      is_active: true,
+      sort_order: 999,
+    },
+  });
+
+  return dynamicItems;
+});
 
 // ─── Snap Constants & Dimensions ─────────────────────────────────────────────
 const HALF_RATIO = 0.54; // Separuh layar (~54% viewport)
@@ -402,6 +415,7 @@ function handleDocumentClick(e: PointerEvent) {
 }
 
 onMounted(() => {
+  void basemapStore.ensureLoaded();
   if (typeof window !== "undefined") {
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", updateViewportH, { passive: true });
@@ -537,100 +551,12 @@ onUnmounted(() => {
             >
               <!-- Card Thumbnail Visual Preview -->
               <div class="relative w-full aspect-16/10 rounded-xl overflow-hidden border border-slate-200/60 dark:border-white/10 mb-2 shadow-xs">
-                <!-- Esri World Topo Preview -->
-                <svg
-                  v-if="item.key === 'esri'"
-                  class="w-full h-full object-cover"
-                  viewBox="0 0 64 64"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect width="64" height="64" fill="#E8ECE4" />
-                  <path d="M0 20C15 15 35 25 50 18C58 14 62 16 64 15V64H0V20Z" fill="#DCE5D8" />
-                  <path d="M0 38C18 32 32 44 48 36C56 32 60 35 64 33V64H0V38Z" fill="#CBDBC5" />
-                  <path d="M0 48C12 45 24 55 40 50C52 46 58 52 64 48V64H0V48Z" fill="#B7D2AE" />
-                  <line x1="0" y1="28" x2="64" y2="28" stroke="#FFFFFF" stroke-width="2.5" />
-                  <line x1="0" y1="28" x2="64" y2="28" stroke="#E28935" stroke-width="1.2" />
-                  <line x1="36" y1="0" x2="36" y2="64" stroke="#FFFFFF" stroke-width="2" />
-                  <line x1="36" y1="0" x2="36" y2="64" stroke="#E28935" stroke-width="0.8" />
-                </svg>
-
-                <!-- RBI Preview -->
-                <svg
-                  v-else-if="item.key === 'rbi'"
-                  class="w-full h-full object-cover"
-                  viewBox="0 0 64 64"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect width="64" height="64" fill="#F4F6F0" />
-                  <path d="M0 0H36L28 28H0V0Z" fill="#DDECD2" />
-                  <path d="M32 36H64V64H24L32 36Z" fill="#CEE3C3" />
-                  <path d="M0 44C18 42 28 50 44 42C52 38 58 40 64 38V48C56 50 48 58 36 54C24 50 14 56 0 54V44Z" fill="#85C1E9" />
-                  <line x1="0" y1="22" x2="64" y2="22" stroke="#FFFFFF" stroke-width="3" />
-                  <line x1="0" y1="22" x2="64" y2="22" stroke="#E74C3C" stroke-width="1.8" />
-                  <line x1="26" y1="0" x2="26" y2="64" stroke="#FFFFFF" stroke-width="3" />
-                  <line x1="26" y1="0" x2="26" y2="64" stroke="#D35400" stroke-width="1.5" />
-                  <circle cx="26" cy="22" r="3.5" fill="#C0392B" stroke="#FFFFFF" stroke-width="1" />
-                </svg>
-
-                <!-- OSM Preview -->
-                <svg
-                  v-else-if="item.key === 'osm'"
-                  class="w-full h-full object-cover"
-                  viewBox="0 0 64 64"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect width="64" height="64" fill="#E8ECE9" />
-                  <path d="M0 0H28L22 32H0V0Z" fill="#C8E6C9" />
-                  <path d="M40 40H64V64H32L40 40Z" fill="#DCEDC8" />
-                  <path d="M64 12C52 14 44 26 36 34C28 42 16 46 0 48V56C20 54 32 50 42 40C50 32 56 22 64 20V12Z" fill="#90CAF9" />
-                  <line x1="0" y1="28" x2="64" y2="28" stroke="#FFFFFF" stroke-width="4" />
-                  <line x1="0" y1="28" x2="64" y2="28" stroke="#FFE082" stroke-width="2.5" />
-                  <line x1="30" y1="0" x2="30" y2="64" stroke="#FFFFFF" stroke-width="4" />
-                  <line x1="30" y1="0" x2="30" y2="64" stroke="#FFCC80" stroke-width="2" />
-                </svg>
-
-                <!-- Satellite Preview -->
-                <svg
-                  v-else-if="item.key === 'satellite'"
-                  class="w-full h-full object-cover"
-                  viewBox="0 0 64 64"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect width="64" height="64" fill="#1C3120" />
-                  <rect x="2" y="2" width="24" height="20" fill="#2E4A28" opacity="0.9" />
-                  <rect x="28" y="2" width="22" height="26" fill="#3D5A34" opacity="0.85" />
-                  <rect x="52" y="2" width="10" height="18" fill="#1E3722" opacity="0.9" />
-                  <rect x="2" y="24" width="20" height="26" fill="#4B6338" opacity="0.8" />
-                  <rect x="24" y="30" width="26" height="20" fill="#2D4629" opacity="0.9" />
-                  <rect x="52" y="22" width="10" height="26" fill="#385430" opacity="0.8" />
-                  <path d="M0 52C16 50 28 56 42 48C50 44 56 46 64 44V64H0V52Z" fill="#1A3344" />
-                  <path d="M0 26H64M26 0V64" stroke="#7A8B7B" stroke-width="1" stroke-dasharray="3 1" opacity="0.6" />
-                </svg>
-
-                <!-- Aerial Preview -->
-                <svg
-                  v-else-if="item.key === 'aerial'"
-                  class="w-full h-full object-cover"
-                  viewBox="0 0 64 64"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect width="64" height="64" fill="#1C3822" />
-                  <polygon points="0,0 34,0 26,34 0,28" fill="#365C2E" />
-                  <polygon points="34,0 64,0 64,30 26,34" fill="#4A753D" />
-                  <polygon points="0,28 26,34 22,64 0,64" fill="#2E5026" />
-                  <polygon points="26,34 64,30 64,64 22,64" fill="#3D6433" />
-                  <rect x="8" y="10" width="10" height="8" rx="1" fill="#C2593F" />
-                  <rect x="42" y="14" width="12" height="10" rx="1" fill="#D97757" />
-                  <rect x="36" y="44" width="14" height="10" rx="1" fill="#B34B32" />
-                  <path d="M0 40Q24 36 28 32T64 26" stroke="#CBD5E1" stroke-width="2.5" fill="none" opacity="0.8" />
-                  <circle cx="32" cy="32" r="10" stroke="#38BDF8" stroke-width="1.2" stroke-dasharray="2 2" fill="none" opacity="0.85" />
-                  <circle cx="32" cy="32" r="2.5" fill="#38BDF8" opacity="0.9" />
-                </svg>
+                <BasemapThumbnail
+                  :preview-style="item.item?.preview_style || item.key"
+                  :thumbnail-url="item.item?.thumbnail_url"
+                  :alt="item.name"
+                  class="w-full h-full"
+                />
 
                 <!-- Top Badges Overlay -->
                 <div class="absolute top-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none">

@@ -70,6 +70,8 @@ async function onSubmit(): Promise<void> {
   formError.value = null;
 
   try {
+    await auth.fetchCsrf();
+
     const res = await $http<{ ok?: boolean; message?: string }>("login", {
       method: "POST",
       body: {

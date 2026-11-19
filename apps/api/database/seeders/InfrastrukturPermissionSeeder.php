@@ -38,6 +38,7 @@ class InfrastrukturPermissionSeeder extends Seeder
             'infrastruktur-segmen-create',
             'infrastruktur-segmen-update',
             'infrastruktur-segmen-delete',
+            'infrastruktur-segmen-manage',
 
             // State Machine Verifikasi
             'infrastruktur-segmen-verify-kecamatan',
@@ -84,6 +85,7 @@ class InfrastrukturPermissionSeeder extends Seeder
             'infrastruktur-segmen-create',
             'infrastruktur-segmen-update',
             'infrastruktur-segmen-delete',
+            'infrastruktur-segmen-manage',
             'infrastruktur-segmen-verify-bappeda',
             'monitoring-realisasi-view',
             'monitoring-realisasi-manage',

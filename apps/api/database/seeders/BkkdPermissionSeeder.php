@@ -24,6 +24,8 @@ class BkkdPermissionSeeder extends Seeder
             'bkkd-verifikasi-view',
             'bkkd-verifikasi-manage',
             'bkkd-riwayat-view',
+            'jaringan-jalan-view',
+            'jaringan-jalan-manage',
         ];
 
         foreach ($permissions as $perm) {

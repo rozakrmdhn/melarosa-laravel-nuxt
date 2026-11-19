@@ -9,10 +9,26 @@ export default defineNuxtPlugin((nuxtApp) => {
   const xsrf = useCookie('XSRF-TOKEN');
   const auth = useAuthStore();
 
-  function buildHeaders(headers: any): Headers {
-    let authHeaders = {};
+  function readLiveXsrfToken(): string | undefined {
+    if (import.meta.client && typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+      if (match?.[1]) {
+        try {
+          return decodeURIComponent(match[1]);
+        } catch {
+          return match[1];
+        }
+      }
+    }
+    return xsrf.value ?? undefined;
+  }
 
-    authHeaders['X-XSRF-TOKEN'] = xsrf.value;
+  function buildHeaders(headers: any): Headers {
+    const authHeaders: Record<string, string> = {};
+    const liveToken = readLiveXsrfToken();
+    if (liveToken) {
+      authHeaders['X-XSRF-TOKEN'] = liveToken;
+    }
 
     return {
       Accept: 'application/json',
@@ -120,7 +136,11 @@ export default defineNuxtPlugin((nuxtApp) => {
       if (context.response.status === 401) {
         const auth = useAuthStore();
         auth.reset();
-      } else if (context.response.status !== 422 && import.meta.client) {
+      } else if (
+        context.response.status !== 422
+        && !(context.response.status === 419 && !(context.options as any)?._csrfRetried)
+        && import.meta.client
+      ) {
         const data = context.response._data;
         let message = '';
 
@@ -162,9 +182,44 @@ export default defineNuxtPlugin((nuxtApp) => {
     },
   });
 
+  const httpWithCsrfRetry = Object.assign(
+    async function wrappedHttp<T = unknown>(
+      request: NitroFetchRequest,
+      opts?: HttpFetchOptions & { _csrfRetried?: boolean },
+    ): Promise<T> {
+      try {
+        return await (http as any)(request, opts);
+      } catch (err: any) {
+        const status = err?.response?.status ?? err?.statusCode;
+        const reqStr = typeof request === 'string' ? request : String(request);
+        const alreadyRetried = Boolean(opts?._csrfRetried);
+
+        if (
+          import.meta.client
+          && status === 419
+          && !alreadyRetried
+          && !reqStr.includes('sanctum/csrf-cookie')
+        ) {
+          await (http as any)('/sanctum/csrf-cookie');
+          const refreshed = readLiveXsrfToken();
+          if (refreshed) {
+            xsrf.value = refreshed;
+          }
+          return await (http as any)(request, {
+            ...opts,
+            _csrfRetried: true,
+          });
+        }
+
+        throw err;
+      }
+    },
+    http,
+  );
+
   return {
     provide: {
-      http
+      http: httpWithCsrfRetry as typeof http,
     }
   }
 })

@@ -32,7 +32,12 @@ import { buildMaplibreBasemapSpec } from '~/utils/maplibre-basemaps';
 import { loadImageDimensionsFromBlob, rasterizePdfPageToPng } from '~/utils/pdf-rasterizer';
 
 definePageMeta({
-  middleware: ['auth'],
+  middleware: ['auth', 'permission'],
+  permission: [
+    'publikasi-peta-view',
+    'publikasi-peta-update',
+    'publikasi-peta-manage',
+  ],
   fullBleed: true,
 });
 
@@ -42,7 +47,7 @@ const basemapStore = useBasemapStore();
 const { can, isAdmin } = usePermission();
 
 const canManage = computed(
-  () => isAdmin() || can('layers-manage') || can('batas-desa-manage') || can('settings-manage'),
+  () => isAdmin() || can('publikasi-peta-update') || can('publikasi-peta-manage'),
 );
 
 const itemId = computed(() => String(route.params.id || ''));

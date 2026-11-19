@@ -34,6 +34,7 @@ class JalanPorosDesa extends Model
 
     public const SUMBER_SK_PEMDA = 'sk_pemda';
     public const SUMBER_PROMOSI_PROPOSAL = 'promosi_proposal';
+    public const SUMBER_RTRW_ORDE = 'rtrw_orde';
 
     protected $fillable = [
         'id',
@@ -48,6 +49,8 @@ class JalanPorosDesa extends Model
         'status_awal',
         'status_eksisting',
         'sumber_data',
+        'tahun_survey',
+        'rtrw_source_id',
         'hierarki_jalan',
         'sumber_proposal_id',
         'sumber_lokasi_id',
@@ -59,14 +62,16 @@ class JalanPorosDesa extends Model
     ];
 
     protected $casts = [
-        'kode_ruas'    => 'integer',
-        'panjang'      => 'float',
-        'lebar'        => 'float',
-        'id_desa'      => 'integer',
-        'id_kecamatan' => 'integer',
-        'validated_at' => 'datetime',
-        'created_at'   => 'datetime',
-        'updated_at'   => 'datetime',
+        'kode_ruas'      => 'integer',
+        'panjang'        => 'float',
+        'lebar'          => 'float',
+        'tahun_survey'   => 'integer',
+        'rtrw_source_id' => 'integer',
+        'id_desa'        => 'integer',
+        'id_kecamatan'   => 'integer',
+        'validated_at'   => 'datetime',
+        'created_at'     => 'datetime',
+        'updated_at'     => 'datetime',
     ];
 
     protected static function booted()

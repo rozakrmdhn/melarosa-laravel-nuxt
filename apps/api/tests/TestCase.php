@@ -75,6 +75,8 @@ abstract class TestCase extends BaseTestCase
                     $table->string('status_awal')->nullable();
                     $table->string('status_eksisting')->nullable();
                     $table->string('sumber_data')->nullable();
+                    $table->smallInteger('tahun_survey')->nullable();
+                    $table->unsignedBigInteger('rtrw_source_id')->nullable();
                     $table->string('hierarki_jalan', 40)->default('poros_desa');
                     $table->uuid('sumber_proposal_id')->nullable();
                     $table->uuid('sumber_lokasi_id')->nullable();

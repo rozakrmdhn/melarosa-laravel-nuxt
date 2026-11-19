@@ -89,16 +89,16 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::delete('basemaps/{id}', [BasemapController::class, 'destroy'])->middleware('permission:layers-manage|settings-manage')->name('admin.basemaps.destroy');
 
             // Publikasi Peta Digital (Admin CRUD + Upload PDF Aman + Georeferencing MapLibre)
-            Route::get('publikasi-peta', [PublikasiPetaDigitalController::class, 'index'])->middleware('permission:layers-view|layers-manage|batas-desa-view|batas-desa-manage|settings-view|settings-manage')->name('admin.publikasi-peta.index');
-            Route::post('publikasi-peta', [PublikasiPetaDigitalController::class, 'store'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.store');
-            Route::get('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'show'])->middleware('permission:layers-view|layers-manage|batas-desa-view|batas-desa-manage|settings-view|settings-manage')->name('admin.publikasi-peta.show');
-            Route::put('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'update'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.update');
-            Route::post('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'update'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.update-post');
-            Route::get('publikasi-peta/{id}/wilayah-boundary', [PublikasiPetaDigitalController::class, 'wilayahBoundary'])->middleware('permission:layers-view|layers-manage|batas-desa-view|batas-desa-manage|settings-view|settings-manage')->name('admin.publikasi-peta.wilayah-boundary');
-            Route::post('publikasi-peta/{id}/georeference', [PublikasiPetaDigitalController::class, 'saveGeoreference'])->middleware(['permission:layers-manage|batas-desa-manage|settings-manage', 'throttle:uploads'])->name('admin.publikasi-peta.georeference.save');
-            Route::delete('publikasi-peta/{id}/georeference', [PublikasiPetaDigitalController::class, 'clearGeoreference'])->middleware('permission:layers-manage|batas-desa-manage|settings-manage')->name('admin.publikasi-peta.georeference.clear');
-            Route::patch('publikasi-peta/{id}/toggle-publish', [PublikasiPetaDigitalController::class, 'togglePublish'])->middleware('permission:layers-manage|batas-desa-manage|settings-manage')->name('admin.publikasi-peta.toggle-publish');
-            Route::delete('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'destroy'])->middleware('permission:layers-manage|batas-desa-manage|settings-manage')->name('admin.publikasi-peta.destroy');
+            Route::get('publikasi-peta', [PublikasiPetaDigitalController::class, 'index'])->middleware('permission:publikasi-peta-view|publikasi-peta-create|publikasi-peta-update|publikasi-peta-delete|publikasi-peta-manage')->name('admin.publikasi-peta.index');
+            Route::post('publikasi-peta', [PublikasiPetaDigitalController::class, 'store'])->middleware(['permission:publikasi-peta-create|publikasi-peta-manage', 'throttle:uploads'])->name('admin.publikasi-peta.store');
+            Route::get('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'show'])->middleware('permission:publikasi-peta-view|publikasi-peta-update|publikasi-peta-manage')->name('admin.publikasi-peta.show');
+            Route::put('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'update'])->middleware(['permission:publikasi-peta-update|publikasi-peta-manage', 'throttle:uploads'])->name('admin.publikasi-peta.update');
+            Route::post('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'update'])->middleware(['permission:publikasi-peta-update|publikasi-peta-manage', 'throttle:uploads'])->name('admin.publikasi-peta.update-post');
+            Route::get('publikasi-peta/{id}/wilayah-boundary', [PublikasiPetaDigitalController::class, 'wilayahBoundary'])->middleware('permission:publikasi-peta-view|publikasi-peta-update|publikasi-peta-manage')->name('admin.publikasi-peta.wilayah-boundary');
+            Route::post('publikasi-peta/{id}/georeference', [PublikasiPetaDigitalController::class, 'saveGeoreference'])->middleware(['permission:publikasi-peta-update|publikasi-peta-manage', 'throttle:uploads'])->name('admin.publikasi-peta.georeference.save');
+            Route::delete('publikasi-peta/{id}/georeference', [PublikasiPetaDigitalController::class, 'clearGeoreference'])->middleware('permission:publikasi-peta-delete|publikasi-peta-update|publikasi-peta-manage')->name('admin.publikasi-peta.georeference.clear');
+            Route::patch('publikasi-peta/{id}/toggle-publish', [PublikasiPetaDigitalController::class, 'togglePublish'])->middleware('permission:publikasi-peta-update|publikasi-peta-manage')->name('admin.publikasi-peta.toggle-publish');
+            Route::delete('publikasi-peta/{id}', [PublikasiPetaDigitalController::class, 'destroy'])->middleware('permission:publikasi-peta-delete|publikasi-peta-manage')->name('admin.publikasi-peta.destroy');
             Route::get('roles/{role}', [RoleController::class, 'show'])->middleware('permission:roles-view')->name('admin.roles.show');
             Route::post('roles', [RoleController::class, 'store'])->middleware('permission:roles-manage|roles-create')->name('admin.roles.store');
             Route::put('roles/{role}', [RoleController::class, 'update'])->middleware('permission:roles-manage|roles-update')->name('admin.roles.update');
@@ -262,12 +262,23 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::post('bkkd/proposal/{id}/konfirmasi-desa', [BkkdProposalLokasiController::class, 'simpanKonfirmasiDesa'])->middleware('permission:bkkd-proposal-update')->name('admin.bkkd.proposal.konfirmasi-desa');
 
             // Modul Standalone Master Jaringan Jalan Kabupaten Bojonegoro
-            Route::get('jaringan-jalan', [JaringanJalanRuasController::class, 'index'])->middleware('permission:bkkd-proposal-view|jalan-poros-desa-view')->name('admin.jaringan-jalan.index');
-            Route::get('jaringan-jalan/kandidat', [JaringanJalanRuasController::class, 'kandidat'])->middleware('permission:bkkd-proposal-view|jalan-poros-desa-view')->name('admin.jaringan-jalan.kandidat');
-            Route::put('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'update'])->middleware('permission:bkkd-proposal-update|jalan-poros-desa-manage')->name('admin.jaringan-jalan.update');
-            Route::delete('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'destroy'])->middleware('permission:bkkd-proposal-update|jalan-poros-desa-manage')->name('admin.jaringan-jalan.destroy');
-            Route::post('jaringan-jalan/promosi/{id}/lokasi/{lokasiId}/ajukan', [JaringanJalanRuasController::class, 'ajukan'])->middleware('permission:bkkd-proposal-update')->name('admin.jaringan-jalan.promosi.ajukan');
-            Route::post('jaringan-jalan/promosi/{id}/lokasi/{lokasiId}/validasi', [JaringanJalanRuasController::class, 'validasi'])->middleware('permission:bkkd-proposal-update')->name('admin.jaringan-jalan.promosi.validasi');
+            Route::get('jaringan-jalan', [JaringanJalanRuasController::class, 'index'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.index');
+            Route::get('jaringan-jalan/analisa-spasial', [JaringanJalanRuasController::class, 'analisaSpasial'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.analisa-spasial');
+            Route::get('jaringan-jalan/analisa-spasial/summary', [JaringanJalanRuasController::class, 'analisaSpasialSummary'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.analisa-spasial.summary');
+            Route::get('jaringan-jalan/analisa-spasial/map-index', [JaringanJalanRuasController::class, 'analisaSpasialMapIndex'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.analisa-spasial.map-index');
+            Route::get('jaringan-jalan/analisa-spasial/{rtrwId}', [JaringanJalanRuasController::class, 'analisaSpasialDetail'])->whereNumber('rtrwId')->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.analisa-spasial.detail');
+            Route::post('jaringan-jalan/analisa-spasial/run', [JaringanJalanRuasController::class, 'runAnalisaSpasial'])->middleware('permission:jaringan-jalan-manage')->name('admin.jaringan-jalan.analisa-spasial.run');
+            Route::get('jaringan-jalan/kabupaten', [JaringanJalanRuasController::class, 'kabupaten'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.kabupaten');
+            Route::get('jaringan-jalan/kabupaten/{kabId}', [JaringanJalanRuasController::class, 'kabupatenDetail'])->whereNumber('kabId')->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.kabupaten.detail');
+            Route::get('jaringan-jalan/kandidat', [JaringanJalanRuasController::class, 'kandidat'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.kandidat');
+            Route::get('jaringan-jalan/cakupan-desa', [JaringanJalanRuasController::class, 'cakupanDesa'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.cakupan-desa');
+            Route::get('jaringan-jalan/rtrw', [JaringanJalanRuasController::class, 'rtrwSegments'])->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.rtrw');
+            Route::post('jaringan-jalan/rtrw/adopsi', [JaringanJalanRuasController::class, 'adopsiRtrw'])->middleware('permission:jaringan-jalan-manage')->name('admin.jaringan-jalan.rtrw.adopsi');
+            Route::get('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'show'])->whereUuid('ruasId')->middleware('permission:jaringan-jalan-view|jaringan-jalan-manage')->name('admin.jaringan-jalan.show');
+            Route::put('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'update'])->middleware('permission:jaringan-jalan-manage')->name('admin.jaringan-jalan.update');
+            Route::delete('jaringan-jalan/{ruasId}', [JaringanJalanRuasController::class, 'destroy'])->middleware('permission:jaringan-jalan-manage')->name('admin.jaringan-jalan.destroy');
+            Route::post('jaringan-jalan/promosi/{id}/lokasi/{lokasiId}/ajukan', [JaringanJalanRuasController::class, 'ajukan'])->middleware('permission:jaringan-jalan-manage|bkkd-proposal-update')->name('admin.jaringan-jalan.promosi.ajukan');
+            Route::post('jaringan-jalan/promosi/{id}/lokasi/{lokasiId}/validasi', [JaringanJalanRuasController::class, 'validasi'])->middleware('permission:jaringan-jalan-manage')->name('admin.jaringan-jalan.promosi.validasi');
 
             // Alias BKKD untuk Master Jaringan Jalan
             Route::get('bkkd/jaringan-jalan', [JaringanJalanRuasController::class, 'index'])->middleware('permission:bkkd-proposal-view')->name('admin.bkkd.jaringan-jalan.index');

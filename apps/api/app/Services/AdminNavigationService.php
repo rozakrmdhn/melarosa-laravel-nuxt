@@ -184,9 +184,8 @@ class AdminNavigationService
                 'icon' => 'i-lucide-network',
                 'to' => '/admin/jaringan-jalan',
                 'permission' => [
-                    'bkkd-proposal-view',
-                    'jalan-poros-desa-view',
-                    'jalan-poros-desa-manage',
+                    'jaringan-jalan-view',
+                    'jaringan-jalan-manage',
                 ],
             ],
             [
@@ -205,7 +204,13 @@ class AdminNavigationService
                 'label' => 'Publikasi',
                 'icon' => 'i-lucide-file-down',
                 'to' => '/admin/publikasi-peta',
-                'permission' => ['layers-view', 'layers-manage', 'batas-desa-view', 'batas-desa-manage', 'settings-view', 'settings-manage'],
+                'permission' => [
+                    'publikasi-peta-view',
+                    'publikasi-peta-create',
+                    'publikasi-peta-update',
+                    'publikasi-peta-delete',
+                    'publikasi-peta-manage',
+                ],
             ],
             [
                 'label' => 'Audit Log',

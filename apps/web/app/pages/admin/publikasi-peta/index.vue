@@ -13,7 +13,14 @@ import {
 } from "~/types/publikasi-peta";
 
 definePageMeta({
-  middleware: ["auth"],
+  middleware: ["auth", "permission"],
+  permission: [
+    "publikasi-peta-view",
+    "publikasi-peta-create",
+    "publikasi-peta-update",
+    "publikasi-peta-delete",
+    "publikasi-peta-manage",
+  ],
 });
 
 useSeoMeta({
@@ -24,8 +31,11 @@ const api = usePublikasiPetaApi();
 const { can, isAdmin } = usePermission();
 
 const canManage = computed(
-  () => isAdmin() || can("layers-manage") || can("batas-desa-manage") || can("settings-manage"),
+  () => isAdmin() || can("publikasi-peta-manage"),
 );
+const canCreate = computed(() => canManage.value || can("publikasi-peta-create"));
+const canUpdate = computed(() => canManage.value || can("publikasi-peta-update"));
+const canDelete = computed(() => canManage.value || can("publikasi-peta-delete"));
 
 const loading = ref(false);
 const items = ref<PublikasiPetaDigitalItem[]>([]);
@@ -328,7 +338,7 @@ function handleFormKecamatanChange(val: number | null) {
 }
 
 async function handleSave() {
-  if (!canManage.value || saving.value) return;
+  if ((isEditing.value ? !canUpdate.value : !canCreate.value) || saving.value) return;
   modalFeedback.value = null;
 
   if (!formState.judul.trim()) {
@@ -398,7 +408,7 @@ async function handleSave() {
 }
 
 async function handleTogglePublish(item: PublikasiPetaDigitalItem) {
-  if (!canManage.value) return;
+  if (!canUpdate.value) return;
   try {
     const res = await api.togglePublish(item.id);
     pageFeedback.value = { type: "success", message: res?.message || "Status publikasi diperbarui." };
@@ -520,7 +530,7 @@ onMounted(async () => {
           />
         </NuxtLink>
         <UButton
-          v-if="canManage"
+          v-if="canCreate"
           icon="i-heroicons-plus"
           label="Tambah Terbitan"
           aria-label="Tambah terbitan peta digital baru"
@@ -675,7 +685,7 @@ onMounted(async () => {
             @click="resetFilters"
           />
           <UButton
-            v-if="canManage"
+            v-if="canCreate"
             label="Tambah Terbitan"
             icon="i-heroicons-plus"
             size="sm"
@@ -707,7 +717,7 @@ onMounted(async () => {
             </div>
             <button
               type="button"
-              :disabled="!canManage"
+              :disabled="!canUpdate"
               class="shrink-0 cursor-pointer disabled:cursor-default"
               @click="handleTogglePublish(item)"
             >
@@ -745,7 +755,7 @@ onMounted(async () => {
 
           <div class="flex flex-wrap items-center gap-2 pt-1">
             <NuxtLink
-              v-if="canManage"
+              v-if="canUpdate"
               :to="`/admin/publikasi-peta/${item.id}`"
               class="flex-1 min-w-[140px]"
             >
@@ -778,7 +788,7 @@ onMounted(async () => {
               @click="openItemDownload(item)"
             />
             <UButton
-              v-if="canManage"
+              v-if="canUpdate"
               icon="i-lucide-pencil"
               size="xs"
               color="neutral"
@@ -788,7 +798,7 @@ onMounted(async () => {
               @click="openEditModal(item)"
             />
             <UButton
-              v-if="canManage"
+              v-if="canDelete"
               icon="i-lucide-trash-2"
               size="xs"
               color="error"
@@ -873,7 +883,7 @@ onMounted(async () => {
               <td class="py-3 px-3 text-center">
                 <button
                   type="button"
-                  :disabled="!canManage"
+                  :disabled="!canUpdate"
                   class="cursor-pointer disabled:cursor-default"
                   @click="handleTogglePublish(item)"
                 >
@@ -884,7 +894,7 @@ onMounted(async () => {
               </td>
               <td class="py-3 px-4 text-right">
                 <div class="inline-flex items-center gap-1">
-                  <NuxtLink v-if="canManage" :to="`/admin/publikasi-peta/${item.id}`">
+                  <NuxtLink v-if="canUpdate" :to="`/admin/publikasi-peta/${item.id}`">
                     <UButton
                       icon="i-lucide-crosshair"
                       size="xs"
@@ -916,7 +926,7 @@ onMounted(async () => {
                     @click="openItemDownload(item)"
                   />
                   <UButton
-                    v-if="canManage"
+                    v-if="canUpdate"
                     icon="i-lucide-pencil"
                     size="xs"
                     color="neutral"
@@ -926,7 +936,7 @@ onMounted(async () => {
                     @click="openEditModal(item)"
                   />
                   <UButton
-                    v-if="canManage"
+                    v-if="canDelete"
                     icon="i-lucide-trash-2"
                     size="xs"
                     color="error"

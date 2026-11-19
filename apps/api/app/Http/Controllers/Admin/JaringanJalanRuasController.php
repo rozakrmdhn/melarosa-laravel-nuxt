@@ -10,6 +10,7 @@ use App\Models\InfrastrukturSegmen;
 use App\Models\JalanPorosDesa;
 use App\Services\BkkdRiwayatService;
 use App\Services\BkkdSpatialAnalysisService;
+use App\Services\RtrwJaringanJalanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,15 +22,43 @@ class JaringanJalanRuasController extends Controller
 {
     public function __construct(
         protected BkkdSpatialAnalysisService $spatialService,
-        protected BkkdRiwayatService $riwayatService
+        protected BkkdRiwayatService $riwayatService,
+        protected RtrwJaringanJalanService $rtrwService
     ) {}
+
+    private function authorizeViewJaringanJalan(Request $request): void
+    {
+        $user = $request->user();
+        if ($user && (
+            $user->hasRole('admin')
+            || $user->can('jaringan-jalan-view')
+            || $user->can('jaringan-jalan-manage')
+            || $user->can('jalan-poros-desa-view')
+            || Gate::allows('viewAny', BkkdProposal::class)
+        )) {
+            return;
+        }
+
+        abort(403, 'Anda tidak memiliki izin untuk melihat data Jaringan Jalan.');
+    }
+
+    private function canManageJaringanJalan(?object $user): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        return $user->hasRole('admin')
+            || $user->hasRole('verifierBappeda')
+            || $user->can('jaringan-jalan-manage');
+    }
 
     /**
      * Daftar Master Jalan Poros & Desa terpadu beserta GeoJSON.
      */
     public function index(Request $request): JsonResponse
     {
-        Gate::authorize('viewAny', BkkdProposal::class);
+        $this->authorizeViewJaringanJalan($request);
 
         $user = $request->user();
         $query = JalanPorosDesa::withGeoJson()
@@ -55,6 +84,9 @@ class JaringanJalanRuasController extends Controller
         }
         if ($request->filled('sumber_data')) {
             $query->where('sumber_data', (string) $request->input('sumber_data'));
+        }
+        if ($request->filled('tahun_survey') && Schema::hasColumn('jalan_porosdesa', 'tahun_survey')) {
+            $query->where('tahun_survey', (int) $request->input('tahun_survey'));
         }
         if ($request->filled('id_kecamatan')) {
             $query->where('id_kecamatan', (int) $request->input('id_kecamatan'));
@@ -127,7 +159,7 @@ class JaringanJalanRuasController extends Controller
      */
     public function kandidat(Request $request): JsonResponse
     {
-        Gate::authorize('viewAny', BkkdProposal::class);
+        $this->authorizeViewJaringanJalan($request);
 
         $user = $request->user();
         $statusFilter = trim((string) $request->input('status_promosi', ''));
@@ -299,7 +331,7 @@ class JaringanJalanRuasController extends Controller
     public function validasi(Request $request, string $id, string $lokasiId): JsonResponse
     {
         $user = $request->user();
-        if (!$user || (!$user->hasRole('admin') && !$user->hasRole('verifierBappeda'))) {
+        if (!$this->canManageJaringanJalan($user)) {
             return response()->json([
                 'ok' => false,
                 'message' => 'Hanya Admin atau Verifikator Bappeda yang berwenang memvalidasi penambahan Master Jaringan Jalan.',
@@ -369,7 +401,7 @@ class JaringanJalanRuasController extends Controller
     public function update(Request $request, string $ruasId): JsonResponse
     {
         $user = $request->user();
-        if (!$user || (!$user->hasRole('admin') && !$user->hasRole('verifierBappeda'))) {
+        if (!$this->canManageJaringanJalan($user)) {
             return response()->json([
                 'ok' => false,
                 'message' => 'Hanya Admin atau Verifikator Bappeda yang dapat mengubah Master Jaringan Jalan.',
@@ -405,6 +437,8 @@ class JaringanJalanRuasController extends Controller
             ->with(['kecamatanModel:id,nama_kecamatan', 'desaModel:id,nama_desa', 'sumberProposal:id,nomor_registrasi,tahun_anggaran,judul_kegiatan'])
             ->findOrFail($ruas->id);
 
+        $this->rtrwService->refreshSpatialAnalysisAroundPoros($fresh);
+
         return response()->json([
             'ok' => true,
             'message' => 'Data Master Jalan Poros & Desa berhasil diperbarui.',
@@ -418,7 +452,7 @@ class JaringanJalanRuasController extends Controller
     public function destroy(Request $request, string $ruasId): JsonResponse
     {
         $user = $request->user();
-        if (!$user || (!$user->hasRole('admin') && !$user->hasRole('verifierBappeda'))) {
+        if (!$this->canManageJaringanJalan($user)) {
             return response()->json([
                 'ok' => false,
                 'message' => 'Hanya Admin atau Verifikator Bappeda yang dapat menghapus ruas Master Jaringan Jalan.',
@@ -434,6 +468,8 @@ class JaringanJalanRuasController extends Controller
             ], 422);
         }
 
+        $ruasSnapshot = clone $ruas;
+
         DB::transaction(function () use ($ruas) {
             BkkdProposalLokasi::where(function ($q) use ($ruas) {
                 $q->where('id_jaringan_ruas', $ruas->id)
@@ -446,9 +482,226 @@ class JaringanJalanRuasController extends Controller
             $ruas->delete();
         });
 
+        $this->rtrwService->refreshSpatialAnalysisAroundPoros($ruasSnapshot);
+
         return response()->json([
             'ok' => true,
             'message' => 'Ruas berhasil dihapus dari Master Jalan Poros & Desa.',
+        ]);
+    }
+
+    /**
+     * Ringkasan analisa spasial rtrw_jaringan_transportasi_ln vs jalan_porosdesa & jalan_kabupaten_luarkota.
+     */
+    public function analisaSpasialSummary(Request $request): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $res = $this->rtrwService->getSpatialAnalysisSummary(
+            $request->only(['id_kecamatan', 'id_desa', 'orde02', 'only_unadopted', 'only_missing_desa', 'search']),
+            $request->user()
+        );
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Daftar hasil analisa spasial rtrw_jaringan_transportasi_ln terhadap jalan_porosdesa & jalan_kabupaten_luarkota.
+     */
+    public function analisaSpasial(Request $request): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $res = $this->rtrwService->listSpatialAnalysisSegments(
+            $request->only(['id_kecamatan', 'id_desa', 'orde02', 'status_analisa', 'only_unadopted', 'only_missing_desa', 'search', 'sort_by', 'page', 'per_page']),
+            $request->user()
+        );
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Indeks ringkas status segmen RTRW untuk pewarnaan vector tile MapLibre GL JS (Martin).
+     */
+    public function analisaSpasialMapIndex(Request $request): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $res = $this->rtrwService->getSpatialAnalysisMapIndex(
+            $request->only(['id_kecamatan', 'id_desa', 'orde02', 'status_analisa', 'only_unadopted', 'only_missing_desa', 'search']),
+            $request->user()
+        );
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Detail analisa spasial satu segmen RTRW beserta seluruh ruas jalan_porosdesa dan jalan_kabupaten_luarkota terkait.
+     */
+    public function analisaSpasialDetail(Request $request, int $rtrwId): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        try {
+            $res = $this->rtrwService->getSpatialAnalysisSegmentDetail($rtrwId, $request->user());
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => $e->getMessage(),
+            ], 404);
+        }
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Hitung ulang analisa spasial RTRW vs jalan_porosdesa & jalan_kabupaten_luarkota.
+     */
+    public function runAnalisaSpasial(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$this->canManageJaringanJalan($user)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hanya Admin atau Verifikator Bappeda yang berwenang menjalankan ulang analisa spasial.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'id_kecamatan' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $res = $this->rtrwService->runSpatialAnalysis([
+            'id_kecamatan' => $validated['id_kecamatan'] ?? null,
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'message' => sprintf('Analisa spasial selesai memproses %d segmen RTRW dalam %.2f detik.', $res['processed_count'], $res['duration_seconds']),
+            'data' => $res,
+        ]);
+    }
+
+    /**
+     * Daftar ruas Jalan Kabupaten Luarkota (jalan_kabupaten_luarkota) sebagai data referensi & overlay.
+     */
+    public function kabupaten(Request $request): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $res = $this->rtrwService->listJalanKabupaten(
+            $request->only(['id_kecamatan', 'id_desa', 'klas_ruas', 'search', 'page', 'per_page']),
+            $request->user()
+        );
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Detail satu ruas Jalan Kabupaten Luarkota berdasarkan ID (untuk klik peta Martin).
+     */
+    public function kabupatenDetail(Request $request, int $kabId): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        try {
+            $item = $this->rtrwService->getJalanKabupatenDetail($kabId);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['ok' => false, 'message' => $e->getMessage()], 404);
+        }
+
+        return response()->json(['ok' => true, 'data' => $item]);
+    }
+
+    /**
+     * Detail satu ruas Master jalan_porosdesa berdasarkan ID (untuk klik peta Martin).
+     */
+    public function show(Request $request, string $ruasId): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $ruas = JalanPorosDesa::withGeoJson()
+            ->with(['kecamatanModel:id,nama_kecamatan', 'desaModel:id,nama_desa', 'sumberProposal:id,nomor_registrasi,tahun_anggaran,judul_kegiatan'])
+            ->forUser($request->user())
+            ->findOrFail($ruasId);
+
+        return response()->json([
+            'ok' => true,
+            'data' => $this->toMasterFeature($ruas),
+        ]);
+    }
+
+    /**
+     * Cakupan desa pada Master jalan_porosdesa & ketersediaan segmen RTRW Orde 1-4.
+     */
+    public function cakupanDesa(Request $request): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $res = $this->rtrwService->getCakupanDesa(
+            $request->only(['id_kecamatan', 'id_desa', 'status_cakupan', 'search', 'page', 'per_page']),
+            $request->user()
+        );
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Daftar segmen rtrw_jaringan_transportasi_ln (Orde 1-4) untuk sinkronisasi pemutakhiran data jalan desa.
+     */
+    public function rtrwSegments(Request $request): JsonResponse
+    {
+        $this->authorizeViewJaringanJalan($request);
+
+        $res = $this->rtrwService->listRtrwSegments(
+            $request->only(['id_kecamatan', 'id_desa', 'orde02', 'search', 'only_unadopted', 'only_missing_desa', 'page', 'per_page']),
+            $request->user()
+        );
+
+        return response()->json(array_merge(['ok' => true], $res));
+    }
+
+    /**
+     * Adopsi segmen RTRW (single/multi ID atau batch per desa kosong) ke Master jalan_porosdesa.
+     */
+    public function adopsiRtrw(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$this->canManageJaringanJalan($user)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hanya Admin atau Verifikator Bappeda yang berwenang memutakhirkan Master Jaringan Jalan dari data RTRW.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'rtrw_ids' => ['nullable', 'array', 'max:300'],
+            'rtrw_ids.*' => ['integer', 'min:1'],
+            'id_desa' => ['nullable', 'integer', 'min:1'],
+            'orde02' => ['nullable', 'string', 'max:120'],
+            'hierarki_jalan' => ['nullable', 'string', 'in:kabupaten,kabupaten_usulan,poros_desa,lingkungan,usaha_tani'],
+            'nama_ruas' => ['nullable', 'string', 'max:255'],
+            'tahun_survey' => ['nullable', 'integer', 'min:2000', 'max:2100'],
+            'skip_spatial_duplicate' => ['nullable', 'boolean'],
+        ]);
+
+        try {
+            $result = $this->rtrwService->adoptRtrwSegments($user, $validated);
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'message' => sprintf(
+                'Berhasil mengadopsi %d segmen RTRW ke Master jalan_porosdesa (%d dilewati karena duplikat/sudah terdata).',
+                $result['adopted_count'],
+                $result['skipped_count']
+            ),
+            'data' => $result,
         ]);
     }
 
@@ -469,6 +722,8 @@ class JaringanJalanRuasController extends Controller
             'panjang_m' => round((float) ($ruas->panjang_meter ?? $ruas->panjang ?? 0), 2),
             'lebar_m' => $ruas->lebar !== null ? (float) $ruas->lebar : null,
             'sumber_data' => $ruas->sumber_data ?? JalanPorosDesa::SUMBER_SK_PEMDA,
+            'tahun_survey' => $ruas->tahun_survey ? (int) $ruas->tahun_survey : null,
+            'rtrw_source_id' => $ruas->rtrw_source_id ? (int) $ruas->rtrw_source_id : null,
             'status_validasi' => 'terverifikasi',
             'sumber_proposal' => $ruas->relationLoaded('sumberProposal') && $ruas->sumberProposal ? [
                 'id' => $ruas->sumberProposal->id,

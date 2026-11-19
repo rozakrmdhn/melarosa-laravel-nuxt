@@ -36,6 +36,8 @@ class BkkdJaringanJalanPromotionTest extends TestCase
             'bkkd-proposal-update',
             'bkkd-proposal-delete',
             'bkkd-riwayat-view',
+            'jaringan-jalan-view',
+            'jaringan-jalan-manage',
         ];
 
         foreach ($permissions as $perm) {

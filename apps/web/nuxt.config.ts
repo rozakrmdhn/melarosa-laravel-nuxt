@@ -85,6 +85,8 @@ export default defineNuxtConfig({
     '/admin/dataset/**': { ssr: false },
     '/admin/infrastruktur-segmen': { ssr: false },
     '/admin/infrastruktur-segmen/**': { ssr: false },
+    '/admin/jaringan-jalan': { ssr: false },
+    '/admin/jaringan-jalan/**': { ssr: false },
     '/admin/rekap-jalan': { ssr: false },
     '/admin/rekap-jalan/**': { ssr: false },
     '/maps': { ssr: false },

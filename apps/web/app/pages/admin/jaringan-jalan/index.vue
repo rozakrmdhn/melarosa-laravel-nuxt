@@ -1,363 +1,502 @@
 <script setup lang="ts">
+import type { SplitterItem } from '@nuxt/ui';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import MobileBottomSheet from '~/components/dataset/infrastruktur-segmen/MobileBottomSheet.vue';
 import WilayahSelector from '~/components/common/WilayahSelector.vue';
-import BasemapSwitcher from '~/components/common/BasemapSwitcher.vue';
-import { useBasemapStore } from '~/stores/basemap';
-import { createOpenLayersBasemapSource } from '~/utils/basemap-sources';
-import type { JaringanJalanKandidatItem } from '~/composables/useJaringanJalanApi';
+import JaringanJalanBottomPanel from '~/components/jaringan-jalan/JaringanJalanBottomPanel.vue';
+import JaringanJalanFilterContent from '~/components/jaringan-jalan/JaringanJalanFilterContent.vue';
+import JaringanJalanFilterModal from '~/components/jaringan-jalan/JaringanJalanFilterModal.vue';
+import JaringanJalanInspectorCard from '~/components/jaringan-jalan/JaringanJalanInspectorCard.vue';
+import JaringanJalanLeftPanel from '~/components/jaringan-jalan/JaringanJalanLeftPanel.vue';
+import JaringanJalanMaplibre from '~/components/jaringan-jalan/JaringanJalanMaplibre.vue';
+import JaringanJalanRightPanel from '~/components/jaringan-jalan/JaringanJalanRightPanel.vue';
+import { useJaringanJalanApi } from '~/composables/useJaringanJalanApi';
+import { usePermission } from '~/composables/usePermission';
 import { useAuthStore } from '~/stores/auth';
+import {
+  computeGeometryBbox,
+  formatAngka,
+  formatPanjangKm,
+} from '~/utils/jaringan-jalan-format';
 import type {
-  HierarkiJalanBkkd,
+  CakupanDesaItem,
+  CakupanDesaSummary,
+  HierarkiJalan,
+  JalanKabupatenItem,
+  JaringanConsoleEntry,
   JaringanJalanRuasFeature,
-  StatusPromosiMasterBkkd,
-} from '~/types/bkkd';
+  JaringanLayerKey,
+  JaringanMapLayersState,
+  JaringanMapOpacityState,
+  JaringanMapSelection,
+  JaringanMobileDockTab,
+  JaringanWorkspaceTab,
+  RtrwAnalisaDetail,
+  RtrwAnalisaItem,
+  RtrwAnalisaMapIndex,
+  RtrwAnalisaSummary,
+  RtrwColorMode,
+  StatusAnalisaRtrw,
+} from '~/types/jaringan-jalan';
 
 definePageMeta({
-  middleware: ['auth'],
+  middleware: ['auth', 'permission'],
+  permission: ['jaringan-jalan-view', 'jaringan-jalan-manage'],
+  fullBleed: true,
 });
 
 useHead({
-  title: 'Jaringan Jalan Kabupaten Bojonegoro | WebGIS Bojonegoro',
+  title: 'Analisa Spasial Jaringan Jalan | WebGIS Bojonegoro',
 });
 
 const toast = useToast();
 const auth = useAuthStore();
-const bkkdApi = useBkkdApi();
+const { can } = usePermission();
 const jaringanApi = useJaringanJalanApi();
 
-const isBappedaOrAdmin = computed(() => {
-  return auth.hasRole('admin') || auth.hasRole('verifierBappeda');
+const canManage = computed(() =>
+  auth.hasRole('admin') || auth.hasRole('verifierBappeda') || can('jaringan-jalan-manage'),
+);
+
+// ─── Responsive Breakpoint ────────────────────────────────────────────────────
+const windowWidth = ref(import.meta.client ? window.innerWidth : 1280);
+const isDesktop = computed(() => windowWidth.value >= 1024);
+
+function handleWindowResize() {
+  windowWidth.value = window.innerWidth;
+}
+
+// ─── Splitter & Workbench Panel Configuration ─────────────────────────────────
+const LEFT_PANEL_WIDTH = 300;
+const RIGHT_PANEL_WIDTH = 360;
+const BOTTOM_PANEL_HEIGHT = 280;
+
+const horizontalSplitterItems = ref<SplitterItem[]>([
+  {
+    id: 'left-panel',
+    slot: 'left',
+    sizeUnit: 'px',
+    defaultSize: LEFT_PANEL_WIDTH,
+    minSize: 250,
+    maxSize: 420,
+    collapsible: true,
+    collapsedSize: 42,
+    class: 'h-full',
+  },
+  {
+    id: 'map-canvas',
+    slot: 'map',
+    minSize: 30,
+    class: 'flex flex-1 w-full h-full relative overflow-hidden',
+  },
+  {
+    id: 'right-panel',
+    slot: 'right',
+    sizeUnit: 'px',
+    defaultSize: 42,
+    minSize: 280,
+    maxSize: 480,
+    collapsible: true,
+    collapsedSize: 42,
+    class: 'h-full',
+  },
+]);
+
+const verticalSplitterItems = ref<SplitterItem[]>([
+  {
+    id: 'main-workspace',
+    slot: 'workspace',
+    minSize: 32,
+    class: 'flex flex-1 w-full h-full overflow-hidden',
+  },
+  {
+    id: 'bottom-panel',
+    slot: 'bottom',
+    sizeUnit: 'px',
+    defaultSize: 40,
+    minSize: 180,
+    maxSize: 520,
+    collapsible: true,
+    collapsedSize: 40,
+    class: 'flex flex-col h-full',
+  },
+]);
+
+interface SplitterSlotActions {
+  collapsed: boolean;
+  collapse: () => void;
+  expand: () => void;
+  resize: (s: number) => void;
+}
+
+const isDraggingHorizontal = ref(false);
+const isDraggingVertical = ref(false);
+const leftPanelCollapsed = ref(false);
+const rightPanelCollapsed = ref(true);
+const bottomPanelCollapsed = ref(true);
+let leftSlotCtrl: SplitterSlotActions | null = null;
+let rightSlotCtrl: SplitterSlotActions | null = null;
+let bottomSlotCtrl: SplitterSlotActions | null = null;
+const leftPanelContainerEl = ref<HTMLElement | null>(null);
+const leftPanelActualWidth = ref(LEFT_PANEL_WIDTH);
+let leftWidthObserver: ResizeObserver | null = null;
+
+function syncLeftSlot(
+  collapsed: boolean,
+  collapse: () => void,
+  expand: () => void,
+  resize: (size: number) => void,
+) {
+  leftSlotCtrl = { collapsed, collapse, expand, resize };
+  if (leftPanelCollapsed.value !== collapsed) {
+    queueMicrotask(() => {
+      leftPanelCollapsed.value = collapsed;
+    });
+  }
+  return '';
+}
+
+function syncRightSlot(
+  collapsed: boolean,
+  collapse: () => void,
+  expand: () => void,
+  resize: (size: number) => void,
+) {
+  rightSlotCtrl = { collapsed, collapse, expand, resize };
+  if (rightPanelCollapsed.value !== collapsed) {
+    queueMicrotask(() => {
+      rightPanelCollapsed.value = collapsed;
+    });
+  }
+  return '';
+}
+
+function syncBottomSlot(
+  collapsed: boolean,
+  collapse: () => void,
+  expand: () => void,
+  resize: (size: number) => void,
+) {
+  bottomSlotCtrl = { collapsed, collapse, expand, resize };
+  if (bottomPanelCollapsed.value !== collapsed) {
+    queueMicrotask(() => {
+      bottomPanelCollapsed.value = collapsed;
+    });
+  }
+  return '';
+}
+
+const allPanelsCollapsed = computed(() => {
+  return Boolean(
+    leftPanelCollapsed.value && rightPanelCollapsed.value && bottomPanelCollapsed.value,
+  );
 });
 
-const activeTab = ref<'kandidat' | 'master'>('kandidat');
-const loadingKandidat = ref(false);
+function expandRightPanel() {
+  if (!isDesktop.value || !rightSlotCtrl) return;
+  if (rightSlotCtrl.collapsed) {
+    rightSlotCtrl.resize(RIGHT_PANEL_WIDTH);
+  }
+}
+
+function expandBottomPanel() {
+  if (!isDesktop.value || !bottomSlotCtrl) return;
+  if (bottomSlotCtrl.collapsed) {
+    bottomSlotCtrl.resize(BOTTOM_PANEL_HEIGHT);
+  }
+}
+
+function toggleAllPanels() {
+  if (!isDesktop.value) return;
+  if (allPanelsCollapsed.value) {
+    leftSlotCtrl?.resize(LEFT_PANEL_WIDTH);
+    bottomSlotCtrl?.resize(BOTTOM_PANEL_HEIGHT);
+    if (mapSelection.value) {
+      rightSlotCtrl?.resize(RIGHT_PANEL_WIDTH);
+    }
+  } else {
+    leftSlotCtrl?.collapse();
+    rightSlotCtrl?.collapse();
+    bottomSlotCtrl?.collapse();
+  }
+  nextTick(() => {
+    setTimeout(() => mapRef.value?.resizeMap(), 240);
+  });
+}
+
+// ─── Mobile Sheet & Dock State ────────────────────────────────────────────────
+const mobileSheetOpen = ref(false);
+const mobileSheetSnap = ref<'peek' | 'full'>('peek');
+const mobileActiveDock = ref<JaringanMobileDockTab>('layers');
+
+const mobileSheetTitle = computed(() => {
+  switch (mobileActiveDock.value) {
+    case 'layers':
+      return 'Daftar Layer & Legenda Peta';
+    case 'table':
+      return 'Tabel Atribut & Cakupan';
+    case 'rekap':
+      return 'Rekap Analisa & Log';
+    case 'detail':
+      return 'Inspektor Ruas & Adopsi';
+    case 'filter':
+      return 'Filter Analisa Spasial';
+  }
+});
+
+const mobileSheetIcon = computed(() => {
+  switch (mobileActiveDock.value) {
+    case 'layers':
+      return 'i-lucide-layers';
+    case 'table':
+      return 'i-lucide-table-2';
+    case 'rekap':
+      return 'i-lucide-bar-chart-3';
+    case 'detail':
+      return 'i-lucide-info';
+    case 'filter':
+      return 'i-lucide-sliders-horizontal';
+  }
+});
+
+const mobileRekapTab = ref<'breakdown' | 'console'>('breakdown');
+
+function openMobileDock(tab: JaringanMobileDockTab, snap: 'peek' | 'full' = 'peek') {
+  mobileActiveDock.value = tab;
+  mobileSheetSnap.value = snap;
+  mobileSheetOpen.value = true;
+}
+
+// ─── Workbench & API Data States ──────────────────────────────────────────────
+const activeTab = ref<JaringanWorkspaceTab>('analisa');
+const perPage = ref(25);
+const filterModalOpen = ref(false);
+
+const loadingSummary = ref(false);
+const loadingAnalisa = ref(false);
+const loadingMapIndex = ref(false);
+const loadingDetail = ref(false);
+const loadingCakupan = ref(false);
 const loadingMaster = ref(false);
-const errorState = ref<string | null>(null);
+const loadingKabupaten = ref(false);
+const runningAnalysis = ref(false);
+const adoptingRtrw = ref(false);
+const savingPoros = ref(false);
+const deletingPoros = ref(false);
 
-const kandidatList = ref<JaringanJalanKandidatItem[]>([]);
-const kandidatMeta = ref({ current_page: 1, last_page: 1, per_page: 20, total: 0 });
-const masterFeatures = ref<JaringanJalanRuasFeature[]>([]);
-const masterMeta = ref({ current_page: 1, last_page: 1, per_page: 20, total: 0 });
-const masterSummary = ref({
-  total_ruas: 0,
-  total_panjang_m: 0,
-  jumlah_poros_desa: 0,
-  jumlah_lingkungan: 0,
-  jumlah_usaha_tani: 0,
-  jumlah_kabupaten: 0,
+const summaryData = ref<RtrwAnalisaSummary | null>(null);
+const mapIndex = ref<RtrwAnalisaMapIndex | null>(null);
+
+const analisaList = ref<RtrwAnalisaItem[]>([]);
+const analisaMeta = ref({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
+const selectedRtrwIds = ref<number[]>([]);
+
+const cakupanList = ref<CakupanDesaItem[]>([]);
+const cakupanMeta = ref({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
+const cakupanSummary = ref<CakupanDesaSummary>({
+  total_desa: 0,
+  desa_terdata: 0,
+  desa_belum_terdata: 0,
 });
+const cakupanStatusFilter = ref<'belum_terdata' | 'sudah_terdata' | 'semua'>('belum_terdata');
 
+const masterList = ref<JaringanJalanRuasFeature[]>([]);
+const masterMeta = ref({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
+
+const kabupatenList = ref<JalanKabupatenItem[]>([]);
+const kabupatenMeta = ref({ current_page: 1, last_page: 1, per_page: 25, total: 0 });
+
+const inspectorMode = ref<'rtrw' | 'poros' | 'kabupaten' | null>(null);
+const selectedRtrwDetail = ref<RtrwAnalisaDetail | null>(null);
+const selectedPoros = ref<JaringanJalanRuasFeature | null>(null);
+const selectedKabupaten = ref<JalanKabupatenItem | null>(null);
+const mapSelection = ref<JaringanMapSelection | null>(null);
+
+const mapLayers = ref<JaringanMapLayersState>({
+  rtrw: true,
+  poros: true,
+  kabupaten: true,
+  kecamatan: true,
+  desa: false,
+});
+const layersOpacity = ref<JaringanMapOpacityState>({
+  rtrw: 0.92,
+  poros: 0.88,
+  kabupaten: 0.95,
+  kecamatan: 0.72,
+  desa: 0.48,
+});
+const rtrwColorMode = ref<RtrwColorMode>('status');
+const mapRef = ref<InstanceType<typeof JaringanJalanMaplibre> | null>(null);
+
+// ─── Console Telemetry Logs ───────────────────────────────────────────────────
+const consoleLogs = ref<JaringanConsoleEntry[]>([]);
+let lastMartinStateOk: boolean | null = null;
+
+function pushConsoleLog(level: JaringanConsoleEntry['level'], message: string) {
+  const now = new Date().toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  consoleLogs.value.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: now,
+    level,
+    message,
+  });
+  if (consoleLogs.value.length > 80) {
+    consoleLogs.value.pop();
+  }
+}
+
+function handleMartinStatus(payload: { ok: boolean; errorCount: number; message?: string }) {
+  if (lastMartinStateOk === payload.ok) return;
+  lastMartinStateOk = payload.ok;
+  if (payload.ok) {
+    pushConsoleLog('success', 'Vector tile Martin aktif untuk seluruh layer jaringan jalan.');
+  } else {
+    pushConsoleLog('warn', payload.message || 'Sebagian tile vektor Martin tidak merespons.');
+  }
+}
+
+// ─── Confirm Delete Modal ─────────────────────────────────────────────────────
+const confirmDeleteTarget = ref<JaringanJalanRuasFeature | null>(null);
+const deleteCancelBtnRef = ref<HTMLButtonElement | null>(null);
+let lastFocusedBeforeModal: HTMLElement | null = null;
+
+// ─── Filter State ─────────────────────────────────────────────────────────────
 const filters = reactive({
-  status_promosi: '' as '' | StatusPromosiMasterBkkd | 'semua',
-  hierarki_jalan: '' as '' | HierarkiJalanBkkd,
+  status_analisa: '' as '' | StatusAnalisaRtrw,
+  orde02: '',
+  only_unadopted: false,
+  only_missing_desa: false,
+  sort_by: 'uncovered_desc',
+  hierarki_jalan: '' as '' | HierarkiJalan,
+  klas_ruas: '',
   id_kecamatan: null as number | null,
   id_desa: null as number | null,
   search: '',
-  kandidatPage: 1,
+  analisaPage: 1,
+  cakupanPage: 1,
   masterPage: 1,
+  kabupatenPage: 1,
 });
 
-const selectedCandidate = ref<JaringanJalanKandidatItem | null>(null);
-const selectedMaster = ref<JaringanJalanRuasFeature | null>(null);
-
-const validatingId = ref<string | null>(null);
-const savingMasterId = ref<string | null>(null);
-const deletingMasterId = ref<string | null>(null);
-
-const decisionForm = reactive({
-  keputusan: 'setujui_baru' as 'setujui_baru' | 'ekstensi_potong_unik' | 'tolak',
-  nama_ruas: '',
-  kode_ruas: '',
-  hierarki_jalan: 'lingkungan' as HierarkiJalanBkkd,
-  perkerasan: '',
-  kondisi: '',
-  catatan: '',
+const isKecamatanLocked = computed(() => {
+  if (auth.hasRole('admin') || auth.hasRole('verifierBappeda')) return false;
+  return Boolean(auth.user?.id_kecamatan);
 });
 
-const masterEditForm = reactive({
-  kode_ruas: '',
-  nama_ruas: '',
-  hierarki_jalan: 'lingkungan' as HierarkiJalanBkkd,
-  lebar_m: null as number | null,
-  perkerasan: '',
-  kondisi: '',
-  catatan_validasi: '',
+const isDesaLocked = computed(() => {
+  if (auth.hasRole('admin') || auth.hasRole('verifierBappeda')) return false;
+  return Boolean(auth.user?.id_desa);
 });
 
-const basemapStore = useBasemapStore();
-const mapContainerRef = ref<HTMLElement | null>(null);
-const basemap = ref<string>('osm');
-let mapInstance: any = null;
-let baseTileLayer: any = null;
-let olModules: any = null;
-let porosLayerSource: any = null;
-let masterLayerSource: any = null;
-let highlightSource: any = null;
+const activeFilterCount = computed(() => {
+  let c = 0;
+  if (filters.status_analisa) c++;
+  if (filters.orde02) c++;
+  if (filters.only_unadopted) c++;
+  if (filters.only_missing_desa) c++;
+  if (filters.hierarki_jalan) c++;
+  if (filters.klas_ruas.trim()) c++;
+  if (!isKecamatanLocked.value && filters.id_kecamatan !== null) c++;
+  if (!isDesaLocked.value && filters.id_desa !== null) c++;
+  if (filters.search.trim()) c++;
+  return c;
+});
 
-function formatNumber(val?: number | null, maxDecimals = 1): string {
-  if (val === null || val === undefined || Number.isNaN(Number(val))) return '0';
-  return new Intl.NumberFormat('id-ID', { maximumFractionDigits: maxDecimals }).format(Number(val));
+const hasActiveFilters = computed(() => activeFilterCount.value > 0);
+
+function buildCommonQuery(includeStatus = false) {
+  const query: Record<string, any> = {};
+  if (filters.id_kecamatan) query.id_kecamatan = filters.id_kecamatan;
+  if (filters.id_desa) query.id_desa = filters.id_desa;
+  if (filters.orde02) query.orde02 = filters.orde02;
+  if (filters.only_unadopted) query.only_unadopted = 1;
+  if (filters.only_missing_desa) query.only_missing_desa = 1;
+  if (filters.search.trim()) query.search = filters.search.trim();
+  if (includeStatus && filters.status_analisa) query.status_analisa = filters.status_analisa;
+  return query;
 }
 
-function getHierarkiLabel(h?: string | null): string {
-  switch (h) {
-    case 'kabupaten':
-      return 'Jalan Kabupaten';
-    case 'poros_desa':
-      return 'Jalan Poros Desa';
-    case 'usaha_tani':
-      return 'Jalan Usaha Tani';
-    default:
-      return 'Jalan Lingkungan';
-  }
-}
-
-function getPromosiStatusBadge(status?: StatusPromosiMasterBkkd | string) {
-  switch (status) {
-    case 'disetujui':
-      return {
-        label: 'Tervalidasi di Master',
-        cls: 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700',
-      };
-    case 'diajukan':
-      return {
-        label: 'Menunggu Validasi',
-        cls: 'bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-700',
-      };
-    case 'kandidat':
-      return {
-        label: 'Kandidat Siap Diajukan',
-        cls: 'bg-sky-50 text-sky-900 border-sky-300 dark:bg-sky-950/70 dark:text-sky-200 dark:border-sky-700',
-      };
-    case 'ditolak':
-      return {
-        label: 'Ditolak',
-        cls: 'bg-rose-50 text-rose-900 border-rose-300 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-700',
-      };
-    default:
-      return {
-        label: 'Tidak Perlu / Belum Memenuhi',
-        cls: 'bg-slate-100 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600',
-      };
-  }
-}
-
-async function initMap() {
-  if (!import.meta.client || !mapContainerRef.value || mapInstance) return;
-
-  const [
-    { default: Map },
-    { default: View },
-    { default: TileLayer },
-    { default: VectorLayer },
-    { default: XYZ },
-    { default: VectorSource },
-    { default: GeoJSON },
-    { Style, Stroke, Fill, Text },
-    { fromLonLat },
-  ] = await Promise.all([
-    import('ol/Map'),
-    import('ol/View'),
-    import('ol/layer/Tile'),
-    import('ol/layer/Vector'),
-    import('ol/source/XYZ'),
-    import('ol/source/Vector'),
-    import('ol/format/GeoJSON'),
-    import('ol/style'),
-    import('ol/proj'),
-  ]);
-
-  olModules = { GeoJSON, Style, Stroke, Fill, Text, fromLonLat, XYZ };
-
-  const initialBasemapItem = basemapStore.getByCode(basemap.value, 'openlayers');
-  baseTileLayer = new TileLayer({
-    visible: true,
-    source: createOpenLayersBasemapSource(initialBasemapItem ?? basemap.value, { XYZ }) ?? undefined,
-  });
-
-  porosLayerSource = new VectorSource();
-  masterLayerSource = new VectorSource();
-  highlightSource = new VectorSource();
-
-  const porosLayer = new VectorLayer({
-    source: porosLayerSource,
-    zIndex: 10,
-    style: new Style({
-      stroke: new Stroke({ color: '#6366f1', width: 3, lineDash: [7, 5] }),
-    }),
-  });
-
-  const masterLayer = new VectorLayer({
-    source: masterLayerSource,
-    zIndex: 18,
-    style: (feat: any) =>
-      new Style({
-        stroke: new Stroke({ color: '#0d9488', width: 4 }),
-        text: feat.get('nama_ruas')
-          ? new Text({
-              text: String(feat.get('nama_ruas')),
-              font: '600 10px Inter, sans-serif',
-              placement: 'line',
-              overflow: true,
-              fill: new Fill({ color: '#134e4a' }),
-              stroke: new Stroke({ color: '#ffffff', width: 3 }),
-            })
-          : undefined,
-      }),
-  });
-
-  const highlightLayer = new VectorLayer({
-    source: highlightSource,
-    zIndex: 30,
-    style: [
-      new Style({ stroke: new Stroke({ color: '#ffffff', width: 9 }) }),
-      new Style({ stroke: new Stroke({ color: '#d97706', width: 5 }) }),
-    ],
-  });
-
-  mapInstance = new Map({
-    target: mapContainerRef.value,
-    layers: [baseTileLayer, porosLayer, masterLayer, highlightLayer],
-    view: new View({
-      center: fromLonLat([111.88, -7.15]),
-      zoom: 12,
-      minZoom: 9,
-      maxZoom: 19,
-    }),
-  });
-}
-
-function switchBasemap(mode: string) {
-  basemap.value = mode;
-  if (!baseTileLayer || !olModules) return;
-  const item = basemapStore.getByCode(mode, 'openlayers');
-  const source = createOpenLayersBasemapSource(item ?? mode, olModules);
-  baseTileLayer.setSource(source);
-  baseTileLayer.setVisible(Boolean(source));
-}
-
-watch(
-  () => basemapStore.items,
-  () => {
-    if (baseTileLayer && olModules) {
-      switchBasemap(basemap.value);
+// ─── API Fetchers ─────────────────────────────────────────────────────────────
+async function loadSummary() {
+  loadingSummary.value = true;
+  try {
+    const res = await jaringanApi.fetchAnalisaSummary(buildCommonQuery(false));
+    summaryData.value = res;
+    if (res.desa_coverage) {
+      cakupanSummary.value = res.desa_coverage;
     }
-  },
-);
-
-async function focusFeatureOnMap(geojson: any, idDesa?: number | null) {
-  await initMap();
-  if (!mapInstance || !olModules || !highlightSource) return;
-
-  highlightSource.clear();
-  porosLayerSource?.clear();
-
-  const format = new olModules.GeoJSON({
-    dataProjection: 'EPSG:4326',
-    featureProjection: 'EPSG:3857',
-  });
-
-  if (idDesa) {
-    try {
-      const ctx = await bkkdApi.fetchRefJalanPoros(idDesa);
-      if (ctx.layers?.jalan_poros_desa?.features?.length) {
-        porosLayerSource.addFeatures(format.readFeatures(ctx.layers.jalan_poros_desa));
-      }
-      if (ctx.layers?.jaringan_jalan_ruas?.features?.length) {
-        masterLayerSource.clear();
-        masterLayerSource.addFeatures(format.readFeatures(ctx.layers.jaringan_jalan_ruas));
-      }
-    } catch {
-      // Ignore context overlay failures
-    }
-  }
-
-  if (geojson) {
-    try {
-      const geomObj = typeof geojson === 'string' ? JSON.parse(geojson) : geojson;
-      const feat = format.readFeature({
-        type: 'Feature',
-        geometry: geomObj.geometry || geomObj,
-      });
-      highlightSource.addFeature(feat);
-      const ext = highlightSource.getExtent();
-      if (ext && Number.isFinite(ext[0])) {
-        await nextTick();
-        mapInstance.updateSize();
-        mapInstance.getView().fit(ext, { padding: [44, 44, 44, 44], maxZoom: 17, duration: 280 });
-      }
-    } catch {
-      // Ignore invalid geometry
-    }
+  } catch (err: any) {
+    pushConsoleLog('error', err?.data?.message || 'Gagal memuat ringkasan analisa spasial.');
+  } finally {
+    loadingSummary.value = false;
   }
 }
 
-async function selectCandidate(item: JaringanJalanKandidatItem) {
-  selectedCandidate.value = item;
-  selectedMaster.value = null;
-
-  decisionForm.nama_ruas = item.nama_ruas_usulan || item.nama_lokasi;
-  decisionForm.kode_ruas = item.jaringan_ruas?.kode_ruas != null ? String(item.jaringan_ruas.kode_ruas) : '';
-  decisionForm.hierarki_jalan = (item.hierarki_jalan_usulan as HierarkiJalanBkkd) || 'lingkungan';
-  decisionForm.keputusan =
-    item.validasi_promosi_spasial?.rekomendasi_aksi === 'ekstensi_ruas'
-      ? 'ekstensi_potong_unik'
-      : 'setujui_baru';
-  decisionForm.catatan = item.catatan_promosi_master || '';
-
-  await focusFeatureOnMap(item.geojson, item.proposal?.id_desa);
+async function loadMapIndex() {
+  loadingMapIndex.value = true;
+  try {
+    const res = await jaringanApi.fetchAnalisaMapIndex(buildCommonQuery(true));
+    mapIndex.value = res;
+  } catch {
+    // Biarkan vector tile Martin tergambar meskipun index filter gagal
+  } finally {
+    loadingMapIndex.value = false;
+  }
 }
 
-async function selectMasterRuas(feat: JaringanJalanRuasFeature) {
-  selectedMaster.value = feat;
-  selectedCandidate.value = null;
-
-  masterEditForm.kode_ruas = feat.properties.kode_ruas != null ? String(feat.properties.kode_ruas) : '';
-  masterEditForm.nama_ruas = feat.properties.nama_ruas;
-  masterEditForm.hierarki_jalan = feat.properties.hierarki_jalan;
-  masterEditForm.lebar_m = feat.properties.lebar_m ?? null;
-  masterEditForm.perkerasan = feat.properties.perkerasan || '';
-  masterEditForm.kondisi = feat.properties.kondisi || '';
-  masterEditForm.catatan_validasi = '';
-
-  await focusFeatureOnMap(feat.geometry, feat.properties.id_desa);
+async function loadAnalisaList() {
+  loadingAnalisa.value = true;
+  try {
+    const res = await jaringanApi.fetchAnalisaList({
+      ...buildCommonQuery(true),
+      sort_by: filters.sort_by,
+      page: filters.analisaPage,
+      per_page: perPage.value,
+    });
+    analisaList.value = res.data || [];
+    selectedRtrwIds.value = [];
+    if (res.meta) analisaMeta.value = res.meta;
+  } catch (err: any) {
+    pushConsoleLog('error', err?.data?.message || 'Gagal memuat daftar analisa RTRW.');
+  } finally {
+    loadingAnalisa.value = false;
+  }
 }
 
-async function loadKandidatList() {
-  loadingKandidat.value = true;
-  errorState.value = null;
+async function loadCakupanDesa() {
+  loadingCakupan.value = true;
   try {
     const query: Record<string, any> = {
-      page: filters.kandidatPage,
-      per_page: 20,
+      status_cakupan: cakupanStatusFilter.value,
+      page: filters.cakupanPage,
+      per_page: perPage.value,
     };
-    if (filters.status_promosi) query.status_promosi = filters.status_promosi;
     if (filters.id_kecamatan) query.id_kecamatan = filters.id_kecamatan;
     if (filters.id_desa) query.id_desa = filters.id_desa;
     if (filters.search.trim()) query.search = filters.search.trim();
 
-    const res = await jaringanApi.fetchKandidatList(query);
-    kandidatList.value = res.data || [];
-    if (res.meta) kandidatMeta.value = res.meta;
-
-    if (kandidatList.value.length > 0 && activeTab.value === 'kandidat') {
-      const current = kandidatList.value.find((k) => k.id === selectedCandidate.value?.id) || kandidatList.value[0];
-      if (current) await selectCandidate(current);
-    }
+    const res = await jaringanApi.fetchCakupanDesa(query);
+    cakupanList.value = res.data || [];
+    if (res.summary) cakupanSummary.value = res.summary;
+    if (res.meta) cakupanMeta.value = res.meta;
   } catch (err: any) {
-    errorState.value = err?.data?.message || 'Gagal memuat antrean kandidat ruas jalan.';
+    pushConsoleLog('error', err?.data?.message || 'Gagal memuat daftar cakupan desa.');
   } finally {
-    loadingKandidat.value = false;
+    loadingCakupan.value = false;
   }
 }
 
 async function loadMasterList() {
   loadingMaster.value = true;
-  errorState.value = null;
   try {
     const query: Record<string, any> = {
       page: filters.masterPage,
-      per_page: 20,
+      per_page: perPage.value,
     };
     if (filters.hierarki_jalan) query.hierarki_jalan = filters.hierarki_jalan;
     if (filters.id_kecamatan) query.id_kecamatan = filters.id_kecamatan;
@@ -365,744 +504,1194 @@ async function loadMasterList() {
     if (filters.search.trim()) query.search = filters.search.trim();
 
     const res = await jaringanApi.fetchRuasList(query);
-    masterFeatures.value = res.data || [];
+    masterList.value = res.data || [];
     if (res.meta) masterMeta.value = res.meta;
-    if (res.summary) masterSummary.value = res.summary;
-
-    await initMap();
-    if (masterLayerSource && olModules && res.geojson?.features?.length) {
-      const format = new olModules.GeoJSON({ dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' });
-      masterLayerSource.clear();
-      masterLayerSource.addFeatures(format.readFeatures(res.geojson));
-      if (activeTab.value === 'master') {
-        const ext = masterLayerSource.getExtent();
-        if (ext && Number.isFinite(ext[0])) {
-          mapInstance?.getView().fit(ext, { padding: [40, 40, 40, 40], maxZoom: 15, duration: 280 });
-        }
-      }
-    }
   } catch (err: any) {
-    errorState.value = err?.data?.message || 'Gagal memuat master jaringan jalan.';
+    pushConsoleLog('error', err?.data?.message || 'Gagal memuat daftar Master Jalan Poros Desa.');
   } finally {
     loadingMaster.value = false;
   }
 }
 
-function handleWilayahChange(val: { id_kecamatan: number | null; id_desa: number | null }) {
-  filters.id_kecamatan = val.id_kecamatan;
-  filters.id_desa = val.id_desa;
-  filters.kandidatPage = 1;
-  filters.masterPage = 1;
-  loadKandidatList();
-  loadMasterList();
-}
-
-let searchTimer: ReturnType<typeof setTimeout> | null = null;
-function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    filters.kandidatPage = 1;
-    filters.masterPage = 1;
-    loadKandidatList();
-    loadMasterList();
-  }, 300);
-}
-
-watch(
-  () => [filters.status_promosi, filters.hierarki_jalan],
-  () => {
-    filters.kandidatPage = 1;
-    filters.masterPage = 1;
-    loadKandidatList();
-    loadMasterList();
-  }
-);
-
-watch(activeTab, async (tab) => {
-  if (tab === 'master' && masterFeatures.value.length > 0 && !selectedMaster.value) {
-    await selectMasterRuas(masterFeatures.value[0]!);
-  } else if (tab === 'kandidat' && kandidatList.value.length > 0 && !selectedCandidate.value) {
-    await selectCandidate(kandidatList.value[0]!);
-  }
-});
-
-async function submitBappedaDecision() {
-  const item = selectedCandidate.value;
-  if (!item || !item.proposal) return;
-  validatingId.value = item.id;
+async function loadKabupatenList() {
+  loadingKabupaten.value = true;
   try {
-    const rawDecisionKode = String(decisionForm.kode_ruas ?? '').trim();
-    const res = await jaringanApi.validasiPromosi(item.proposal.id, item.id, {
-      keputusan: decisionForm.keputusan,
-      nama_ruas: decisionForm.nama_ruas.trim() || undefined,
-      kode_ruas: rawDecisionKode !== '' ? rawDecisionKode : undefined,
-      hierarki_jalan: decisionForm.hierarki_jalan,
-      perkerasan: decisionForm.perkerasan.trim() || undefined,
-      kondisi: decisionForm.kondisi.trim() || undefined,
-      catatan: decisionForm.catatan.trim() || undefined,
-    });
-    toast.add({
-      title: 'Validasi Ruas Disimpan',
-      description: res.message || 'Status promosi ruas berhasil diperbarui.',
-      color: 'success',
-    });
-    await Promise.all([loadKandidatList(), loadMasterList()]);
+    const query: Record<string, any> = {
+      page: filters.kabupatenPage,
+      per_page: perPage.value,
+    };
+    if (filters.id_kecamatan) query.id_kecamatan = filters.id_kecamatan;
+    if (filters.id_desa) query.id_desa = filters.id_desa;
+    if (filters.klas_ruas.trim()) query.klas_ruas = filters.klas_ruas.trim();
+    if (filters.search.trim()) query.search = filters.search.trim();
+
+    const res = await jaringanApi.fetchKabupatenList(query);
+    kabupatenList.value = res.data || [];
+    if (res.meta) kabupatenMeta.value = res.meta;
+  } catch (err: any) {
+    pushConsoleLog('error', err?.data?.message || 'Gagal memuat daftar Jalan Kabupaten.');
+  } finally {
+    loadingKabupaten.value = false;
+  }
+}
+
+async function refreshAllData() {
+  await Promise.all([
+    loadSummary(),
+    loadMapIndex(),
+    loadAnalisaList(),
+    loadCakupanDesa(),
+    loadMasterList(),
+    loadKabupatenList(),
+  ]);
+}
+
+// ─── Map & Inspector Actions ──────────────────────────────────────────────────
+async function inspectRtrwSegment(rtrwId: number, focusUi = true) {
+  inspectorMode.value = 'rtrw';
+  selectedPoros.value = null;
+  selectedKabupaten.value = null;
+  loadingDetail.value = true;
+
+  if (focusUi && isDesktop.value) {
+    expandRightPanel();
+  }
+
+  try {
+    const res = await jaringanApi.fetchAnalisaDetail(rtrwId);
+    selectedRtrwDetail.value = res;
+    mapSelection.value = {
+      kind: 'rtrw',
+      id: res.segment.id,
+      title: res.segment.display_name,
+      subtitle: `${res.segment.orde02 || 'RTRW'} · ${res.segment.nama_desa ? `Desa ${res.segment.nama_desa}` : res.segment.nama_kecamatan || 'Bojonegoro'}`,
+      badge: `${formatAngka(res.segment.combined_overlap_pct, 0)}% Tercover`,
+      bbox: res.segment.bbox,
+      geojson: res.segment.geojson,
+      matchedPorosGeojson: res.matched_poros.map((m) => m.geojson).filter(Boolean),
+      matchedKabupatenGeojson: res.matched_kabupaten.map((m) => m.geojson).filter(Boolean),
+    };
+    pushConsoleLog('info', `Inspeksi segmen RTRW #${res.segment.id}: ${res.segment.display_name}.`);
   } catch (err: any) {
     toast.add({
-      title: 'Validasi Gagal',
-      description: err?.data?.message || 'Lokasi tidak memenuhi syarat validasi spasial.',
+      title: 'Gagal Memuat Detail Segmen',
+      description: err?.data?.message || 'Tidak dapat memuat detail irisan spasial segmen RTRW.',
       color: 'error',
     });
   } finally {
-    validatingId.value = null;
+    loadingDetail.value = false;
   }
 }
 
-async function saveMasterRuasChanges() {
-  const feat = selectedMaster.value;
-  if (!feat) return;
-  savingMasterId.value = feat.properties.id;
+async function inspectPorosFeature(featOrId: JaringanJalanRuasFeature | string, focusUi = true) {
+  inspectorMode.value = 'poros';
+  selectedRtrwDetail.value = null;
+  selectedKabupaten.value = null;
+
+  if (focusUi && isDesktop.value) {
+    expandRightPanel();
+  }
+
   try {
-    const rawEditKode = String(masterEditForm.kode_ruas ?? '').trim();
-    const res = await jaringanApi.updateRuas(feat.properties.id, {
-      kode_ruas: rawEditKode !== '' ? rawEditKode : null,
-      nama_ruas: masterEditForm.nama_ruas.trim(),
-      hierarki_jalan: masterEditForm.hierarki_jalan,
-      lebar_m: masterEditForm.lebar_m,
-      perkerasan: masterEditForm.perkerasan.trim() || null,
-      kondisi: masterEditForm.kondisi.trim() || null,
-      catatan_validasi: masterEditForm.catatan_validasi.trim() || null,
-    });
-    toast.add({
-      title: 'Ruas Diperbarui',
-      description: res.message || 'Data master jalan poros & desa berhasil diperbarui.',
-      color: 'success',
-    });
-    await loadMasterList();
-    if (res.data) {
-      await selectMasterRuas(res.data);
+    let feat: JaringanJalanRuasFeature;
+    if (typeof featOrId === 'string') {
+      const res = await jaringanApi.fetchRuasDetail(featOrId);
+      feat = res.data;
+    } else {
+      feat = featOrId;
     }
+    selectedPoros.value = feat;
+    mapSelection.value = {
+      kind: 'poros',
+      id: feat.id,
+      title: feat.properties.nama_ruas,
+      subtitle: `${feat.properties.nama_desa ? `Desa ${feat.properties.nama_desa}` : '-'} · ${formatAngka(feat.properties.panjang_m, 0)} m`,
+      badge: 'Master Poros',
+      bbox: computeGeometryBbox(feat.geometry),
+      geojson: feat.geometry,
+    };
+    pushConsoleLog('info', `Inspeksi Master Poros: ${feat.properties.nama_ruas}.`);
   } catch (err: any) {
     toast.add({
-      title: 'Gagal Memperbarui Ruas',
-      description: err?.data?.message || 'Terjadi kesalahan saat menyimpan perubahan ruas.',
+      title: 'Gagal Memuat Detail Ruas Poros',
+      description: err?.data?.message || 'Detail ruas jalan poros tidak tersedia.',
       color: 'error',
     });
-  } finally {
-    savingMasterId.value = null;
   }
 }
 
-async function archiveMasterRuas(feat: JaringanJalanRuasFeature) {
-  deletingMasterId.value = feat.properties.id;
+async function inspectKabupatenFeature(itemOrId: JalanKabupatenItem | number, focusUi = true) {
+  inspectorMode.value = 'kabupaten';
+  selectedRtrwDetail.value = null;
+  selectedPoros.value = null;
+
+  if (focusUi && isDesktop.value) {
+    expandRightPanel();
+  }
+
   try {
-    const res = await jaringanApi.deleteRuas(feat.properties.id);
+    let item: JalanKabupatenItem;
+    if (typeof itemOrId === 'number') {
+      const res = await jaringanApi.fetchKabupatenDetail(itemOrId);
+      item = res.data;
+    } else {
+      item = itemOrId;
+    }
+    selectedKabupaten.value = item;
+    mapSelection.value = {
+      kind: 'kabupaten',
+      id: item.id,
+      title: item.nama_ruas,
+      subtitle: `No. Ruas ${item.no_ruas || '-'} · ${formatAngka(item.panjang_m, 0)} m`,
+      badge: item.klas_ruas || 'Kabupaten',
+      bbox: item.bbox || computeGeometryBbox(item.geometry),
+      geojson: item.geometry,
+    };
+    pushConsoleLog('info', `Inspeksi Jalan Kabupaten: ${item.nama_ruas}.`);
+  } catch (err: any) {
+    toast.add({
+      title: 'Gagal Memuat Detail Jalan Kabupaten',
+      description: err?.data?.message || 'Detail ruas kabupaten tidak tersedia.',
+      color: 'error',
+    });
+  }
+}
+
+function clearSelection() {
+  inspectorMode.value = null;
+  selectedRtrwDetail.value = null;
+  selectedPoros.value = null;
+  selectedKabupaten.value = null;
+  mapSelection.value = null;
+  if (isDesktop.value && rightSlotCtrl && !rightSlotCtrl.collapsed) {
+    rightSlotCtrl.collapse();
+  }
+}
+
+function zoomToBbox(bbox: [number, number, number, number] | null | undefined) {
+  if (!bbox) return;
+  mapRef.value?.fitToBbox(bbox, 16.5);
+  if (!isDesktop.value) {
+    mobileSheetOpen.value = false;
+  }
+}
+
+function handleZoomToLayer(key: JaringanLayerKey) {
+  if (key === 'rtrw' && mapIndex.value?.bounds) {
+    mapRef.value?.fitToBbox(mapIndex.value.bounds, 15.5);
+  } else {
+    mapRef.value?.fitToBojonegoro();
+  }
+  if (!isDesktop.value) {
+    mobileSheetOpen.value = false;
+  }
+}
+
+// ─── Spatial Actions & CRUD Handlers ──────────────────────────────────────────
+async function handleRunFullAnalysis() {
+  runningAnalysis.value = true;
+  pushConsoleLog('info', 'Menjalankan perhitungan ulang irisan spasial di PostGIS...');
+  try {
+    const res = await jaringanApi.runAnalisaSpasial({
+      id_kecamatan: filters.id_kecamatan,
+    });
+    const proc = res.data?.processed_count ?? 0;
+    const dur = res.data?.duration_seconds ?? 0;
+    toast.add({
+      title: 'Analisa Spasial Selesai',
+      description: res.message || `Diproses ${proc} segmen dalam ${dur} detik.`,
+      color: 'success',
+    });
+    pushConsoleLog('success', `Analisa spasial selesai: ${proc} segmen diproses (${dur} dtk).`);
+    await refreshAllData();
+  } catch (err: any) {
+    const msg = err?.data?.message || 'Gagal menghitung ulang analisa spasial.';
+    toast.add({ title: 'Analisa Spasial Gagal', description: msg, color: 'error' });
+    pushConsoleLog('error', msg);
+  } finally {
+    runningAnalysis.value = false;
+  }
+}
+
+async function handleAdoptFromInspector(payload: {
+  id: number;
+  nama_ruas: string;
+  hierarki_jalan: HierarkiJalan;
+  tahun_survey: number;
+  skip_spatial_duplicate: boolean;
+}) {
+  adoptingRtrw.value = true;
+  try {
+    const res = await jaringanApi.adopsiRtrw({
+      rtrw_ids: [payload.id],
+      nama_ruas: payload.nama_ruas.trim() || undefined,
+      hierarki_jalan: payload.hierarki_jalan,
+      tahun_survey: payload.tahun_survey,
+      skip_spatial_duplicate: payload.skip_spatial_duplicate,
+    });
+    toast.add({
+      title: 'Segmen RTRW Diadopsi',
+      description: res.message || 'Segmen berhasil ditambahkan ke Master Jalan Poros Desa.',
+      color: 'success',
+    });
+    pushConsoleLog('success', `Adopsi segmen RTRW #${payload.id} berhasil ke Master Poros.`);
+    await Promise.all([refreshAllData(), inspectRtrwSegment(payload.id, false)]);
+  } catch (err: any) {
+    const msg = err?.data?.message || 'Tidak dapat mengadopsi segmen RTRW.';
+    toast.add({ title: 'Gagal Adopsi Segmen', description: msg, color: 'error' });
+    pushConsoleLog('error', msg);
+  } finally {
+    adoptingRtrw.value = false;
+  }
+}
+
+async function handleBulkAdoptSelected() {
+  if (selectedRtrwIds.value.length === 0) return;
+  adoptingRtrw.value = true;
+  try {
+    const res = await jaringanApi.adopsiRtrw({
+      rtrw_ids: selectedRtrwIds.value,
+      tahun_survey: new Date().getFullYear(),
+      skip_spatial_duplicate: true,
+    });
+    toast.add({
+      title: 'Adopsi Terpilih Selesai',
+      description: res.message || 'Segmen terpilih berhasil masuk ke Master Jalan Poros Desa.',
+      color: 'success',
+    });
+    pushConsoleLog('success', `Adopsi massal selesai (${selectedRtrwIds.value.length} segmen diproses).`);
+    selectedRtrwIds.value = [];
+    await refreshAllData();
+  } catch (err: any) {
+    const msg = err?.data?.message || 'Gagal menjalankan adopsi massal segmen terpilih.';
+    toast.add({ title: 'Gagal Adopsi Massal', description: msg, color: 'error' });
+    pushConsoleLog('error', msg);
+  } finally {
+    adoptingRtrw.value = false;
+  }
+}
+
+async function handleBatchAdoptVillage(desa: CakupanDesaItem) {
+  adoptingRtrw.value = true;
+  try {
+    const res = await jaringanApi.adopsiRtrw({
+      id_desa: desa.id,
+      tahun_survey: new Date().getFullYear(),
+      skip_spatial_duplicate: true,
+    });
+    toast.add({
+      title: `Adopsi Desa ${desa.nama_desa} Selesai`,
+      description: res.message || `Berhasil memproses rencana jalan untuk Desa ${desa.nama_desa}.`,
+      color: 'success',
+    });
+    pushConsoleLog('success', `Adopsi segmen RTRW untuk Desa ${desa.nama_desa} selesai.`);
+    await refreshAllData();
+  } catch (err: any) {
+    const msg = err?.data?.message || `Gagal adopsi RTRW Desa ${desa.nama_desa}.`;
+    toast.add({ title: 'Gagal Adopsi Desa', description: msg, color: 'error' });
+    pushConsoleLog('error', msg);
+  } finally {
+    adoptingRtrw.value = false;
+  }
+}
+
+async function handleSavePoros(payload: {
+  id: string;
+  kode_ruas?: string | null;
+  nama_ruas: string;
+  hierarki_jalan: HierarkiJalan;
+  lebar_m?: number | null;
+  perkerasan?: string | null;
+  kondisi?: string | null;
+  catatan_validasi?: string | null;
+}) {
+  savingPoros.value = true;
+  try {
+    const res = await jaringanApi.updateRuas(payload.id, payload);
+    selectedPoros.value = res.data;
+    toast.add({
+      title: 'Master Poros Diperbarui',
+      description: res.message || 'Atribut ruas berhasil disimpan.',
+      color: 'success',
+    });
+    pushConsoleLog('success', `Pembaruan atribut ruas ${payload.nama_ruas} berhasil.`);
+    await Promise.all([loadMasterList(), loadSummary(), loadCakupanDesa()]);
+  } catch (err: any) {
+    const msg = err?.data?.message || 'Gagal memperbarui atribut ruas jalan.';
+    toast.add({ title: 'Gagal Menyimpan', description: msg, color: 'error' });
+    pushConsoleLog('error', msg);
+  } finally {
+    savingPoros.value = false;
+  }
+}
+
+function openDeleteDialog(feature: JaringanJalanRuasFeature) {
+  lastFocusedBeforeModal = (document.activeElement as HTMLElement) || null;
+  confirmDeleteTarget.value = feature;
+  nextTick(() => {
+    deleteCancelBtnRef.value?.focus();
+  });
+}
+
+function closeDeleteDialog() {
+  confirmDeleteTarget.value = null;
+  nextTick(() => {
+    lastFocusedBeforeModal?.focus();
+    lastFocusedBeforeModal = null;
+  });
+}
+
+async function confirmDeletePoros() {
+  if (!confirmDeleteTarget.value) return;
+  const target = confirmDeleteTarget.value;
+  deletingPoros.value = true;
+  try {
+    const res = await jaringanApi.deleteRuas(target.id);
     toast.add({
       title: 'Ruas Dihapus',
-      description: res.message || 'Ruas telah dihapus dari master jalan poros & desa.',
+      description: res.message || `Ruas ${target.properties.nama_ruas} dihapus dari Master Poros Desa.`,
       color: 'success',
     });
-    selectedMaster.value = null;
-    await Promise.all([loadMasterList(), loadKandidatList()]);
+    pushConsoleLog('warn', `Ruas Master Poros "${target.properties.nama_ruas}" dihapus.`);
+    closeDeleteDialog();
+    clearSelection();
+    await refreshAllData();
   } catch (err: any) {
-    toast.add({
-      title: 'Gagal Mengarsipkan Ruas',
-      description: err?.data?.message || 'Tidak dapat mengarsipkan ruas.',
-      color: 'error',
-    });
+    const msg = err?.data?.message || 'Gagal menghapus ruas.';
+    toast.add({ title: 'Gagal Menghapus', description: msg, color: 'error' });
   } finally {
-    deletingMasterId.value = null;
+    deletingPoros.value = false;
   }
 }
 
-onMounted(async () => {
-  await initMap();
-  await Promise.all([loadMasterList(), loadKandidatList()]);
+// ─── Filter Mutators & Synchronization ────────────────────────────────────────
+function applyFilterPatch(patch: Partial<typeof filters>) {
+  Object.assign(filters, patch);
+  filters.analisaPage = 1;
+  filters.cakupanPage = 1;
+  filters.masterPage = 1;
+  filters.kabupatenPage = 1;
+  refreshAllData();
+}
+
+function resetFilters() {
+  if (!isKecamatanLocked.value) filters.id_kecamatan = null;
+  if (!isDesaLocked.value) filters.id_desa = null;
+  filters.status_analisa = '';
+  filters.orde02 = '';
+  filters.only_unadopted = false;
+  filters.only_missing_desa = false;
+  filters.hierarki_jalan = '';
+  filters.klas_ruas = '';
+  filters.search = '';
+  filters.analisaPage = 1;
+  filters.cakupanPage = 1;
+  filters.masterPage = 1;
+  filters.kabupatenPage = 1;
+  refreshAllData();
+}
+
+function toggleStatusFilter(status: '' | StatusAnalisaRtrw) {
+  filters.status_analisa = filters.status_analisa === status ? '' : status;
+  filters.analisaPage = 1;
+  Promise.all([loadAnalisaList(), loadMapIndex()]);
+}
+
+function toggleOrdeFilter(orde02: string) {
+  filters.orde02 = filters.orde02 === orde02 ? '' : orde02;
+  filters.analisaPage = 1;
+  if (isDesktop.value && orde02) expandBottomPanel();
+  refreshAllData();
+}
+
+function handlePageChange(payload: { tab: JaringanWorkspaceTab; page: number }) {
+  if (payload.tab === 'analisa') {
+    filters.analisaPage = payload.page;
+    loadAnalisaList();
+  } else if (payload.tab === 'cakupan') {
+    filters.cakupanPage = payload.page;
+    loadCakupanDesa();
+  } else if (payload.tab === 'master') {
+    filters.masterPage = payload.page;
+    loadMasterList();
+  } else if (payload.tab === 'kabupaten') {
+    filters.kabupatenPage = payload.page;
+    loadKabupatenList();
+  }
+}
+
+let searchTimer: any = null;
+function handleSearchUpdate(val: string) {
+  filters.search = val;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    filters.analisaPage = 1;
+    filters.cakupanPage = 1;
+    filters.masterPage = 1;
+    filters.kabupatenPage = 1;
+    refreshAllData();
+  }, 320);
+}
+
+watch(perPage, () => {
+  filters.analisaPage = 1;
+  filters.cakupanPage = 1;
+  filters.masterPage = 1;
+  filters.kabupatenPage = 1;
+  refreshAllData();
+});
+
+watch(cakupanStatusFilter, () => {
+  filters.cakupanPage = 1;
+  loadCakupanDesa();
+});
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && confirmDeleteTarget.value) {
+    e.preventDefault();
+    closeDeleteDialog();
+  }
+}
+
+onMounted(() => {
+  if (import.meta.client) {
+    window.addEventListener('resize', handleWindowResize);
+    window.addEventListener('keydown', handleGlobalKeydown);
+  }
+
+  if (isKecamatanLocked.value && auth.user?.id_kecamatan) {
+    filters.id_kecamatan = Number(auth.user.id_kecamatan);
+  }
+  if (isDesaLocked.value && auth.user?.id_desa) {
+    filters.id_desa = Number(auth.user.id_desa);
+  }
+
+  nextTick(() => {
+    if (leftPanelContainerEl.value && typeof ResizeObserver !== 'undefined') {
+      leftWidthObserver = new ResizeObserver((entries) => {
+        const w = entries[0]?.contentRect?.width;
+        if (typeof w === 'number' && w > 0) {
+          leftPanelActualWidth.value = Math.round(w);
+        }
+      });
+      leftWidthObserver.observe(leftPanelContainerEl.value);
+    }
+  });
+
+  pushConsoleLog('info', 'Workbench GIS Jaringan Jalan siap. Memuat ringkasan & indeks vektor...');
+  refreshAllData();
 });
 
 onBeforeUnmount(() => {
-  if (searchTimer) clearTimeout(searchTimer);
-  if (mapInstance) {
-    mapInstance.setTarget(undefined);
-    mapInstance = null;
+  clearTimeout(searchTimer);
+  leftWidthObserver?.disconnect();
+  leftWidthObserver = null;
+  if (import.meta.client) {
+    window.removeEventListener('resize', handleWindowResize);
+    window.removeEventListener('keydown', handleGlobalKeydown);
   }
 });
 </script>
 
 <template>
-  <div class="w-full space-y-4">
-    <header class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-      <div>
-        <h1 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-          Jaringan Jalan Kabupaten Bojonegoro
-        </h1>
-        <p class="mt-1 text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-[72ch]">
-          Inventaris master ruas jalan terpadu (jalan poros & desa) yang diperkaya dan divalidasi secara spasial dari usulan proposal.
-        </p>
-      </div>
-
-      <!-- Summary Counters & Cross-Module Link -->
-      <div class="flex flex-wrap items-center gap-2.5 shrink-0">
-        <div class="grid grid-cols-3 gap-3 rounded-xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 tabular-nums">
-          <div>
-            <span class="block text-[11px] text-slate-600 dark:text-slate-300">Ruas Master</span>
-            <strong class="text-base font-bold text-slate-900 dark:text-slate-100">
-              {{ formatNumber(masterSummary.total_ruas, 0) }}
-            </strong>
-          </div>
-          <div>
-            <span class="block text-[11px] text-slate-600 dark:text-slate-300">Total Panjang</span>
-            <strong class="text-base font-bold text-emerald-700 dark:text-emerald-300">
-              {{ formatNumber(masterSummary.total_panjang_m, 0) }} m
-            </strong>
-          </div>
-          <div>
-            <span class="block text-[11px] text-slate-600 dark:text-slate-300">Kandidat</span>
-            <strong class="text-base font-bold text-sky-700 dark:text-sky-300">
-              {{ formatNumber(kandidatMeta.total, 0) }}
-            </strong>
-          </div>
+  <div class="flex flex-col w-full h-[calc(100dvh-3.5rem)] overflow-hidden bg-gray-100 text-gray-900 dark:bg-[#060913] dark:text-gray-100">
+    <!-- ═══ TOP WORKBENCH HEADER BAR ════════════════════════════════════════════ -->
+    <header class="flex items-center justify-between min-h-[48px] lg:min-h-0 lg:h-11 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-[#0b0f19] shrink-0 z-30">
+      <!-- Left Title Group (Desktop aligned dynamically with LeftPanel width) -->
+      <div class="flex items-center h-full min-w-0">
+        <div
+          class="flex items-center gap-2 px-3 shrink-0 transition-[width] duration-200"
+          :style="isDesktop && leftPanelActualWidth > 0 ? { width: `${leftPanelActualWidth}px` } : undefined"
+        >
+          <UIcon name="i-lucide-route" class="size-4 text-[#176B4D] dark:text-emerald-400 shrink-0" />
+          <h1 class="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white truncate">
+            Analisa Spasial Jaringan Jalan
+          </h1>
         </div>
 
-        <NuxtLink
-          to="/admin/dataset/jalan-poros-desa"
-          class="inline-flex items-center gap-2 px-3.5 min-h-[44px] sm:min-h-[38px] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
-        >
-          <UIcon name="i-lucide-database" class="w-4 h-4" aria-hidden="true" />
-          <span>Dataset Jalan Poros</span>
-        </NuxtLink>
+        <div class="hidden lg:block h-5 w-px bg-gray-200 dark:bg-gray-800 shrink-0" />
 
-        <NuxtLink
-          to="/admin/bkkd/proposal"
-          class="inline-flex items-center gap-2 px-3.5 min-h-[44px] sm:min-h-[38px] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+        <!-- Desktop Quick Wilayah Selector -->
+        <div class="hidden lg:flex items-center gap-2 px-3 min-w-0">
+          <WilayahSelector
+            v-if="!isDesaLocked"
+            :model-kecamatan="filters.id_kecamatan"
+            :model-desa="filters.id_desa"
+            layout="inline"
+            size="xs"
+            :allow-all="true"
+            :show-labels="false"
+            :show-clear="false"
+            @update:model-kecamatan="(v) => applyFilterPatch({ id_kecamatan: v, id_desa: null })"
+            @update:model-desa="(v) => applyFilterPatch({ id_desa: v })"
+          />
+          <span
+            v-else
+            class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-[#0e1424] dark:text-gray-200"
+          >
+            <UIcon name="i-lucide-lock" class="size-3.5" />
+            Wilayah Desa Terkunci
+          </span>
+
+          <!-- Ringkasan Telemetri Singkat -->
+          <div class="hidden xl:flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-gray-800 text-xs tabular-nums text-gray-700 dark:text-gray-300">
+            <span>
+              <strong class="font-semibold text-gray-900 dark:text-white">{{ formatAngka(summaryData?.totals?.total_segmen ?? 0, 0) }}</strong> Segmen RTRW
+            </span>
+            <span class="text-gray-400">|</span>
+            <span>
+              Cakupan <strong class="font-semibold text-[#176B4D] dark:text-emerald-400">{{ formatAngka(summaryData?.totals?.avg_coverage_pct ?? 0, 1) }}%</strong>
+            </span>
+            <span class="text-gray-400">|</span>
+            <span>
+              <strong class="font-semibold text-gray-900 dark:text-white">{{ formatAngka(summaryData?.dataset_overview?.jalan_poros_ruas ?? 0, 0) }}</strong> Poros
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Action Controls -->
+      <div class="flex items-center gap-1.5 px-2 sm:px-3 shrink-0">
+        <!-- Tombol Filter (Desktop / Tablet Header) -->
+        <button
+          type="button"
+          :aria-label="hasActiveFilters ? `Filter aktif (${activeFilterCount}), klik untuk ubah` : 'Buka filter lanjutan'"
+          :class="[
+            'hidden sm:inline-flex items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+            isDesktop ? 'h-7' : 'min-h-[44px]',
+            hasActiveFilters
+              ? 'border-blue-400 bg-blue-50 text-blue-900 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/60 dark:text-blue-200'
+              : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-100 dark:border-gray-700 dark:bg-[#0e1424] dark:text-gray-200',
+          ]"
+          @click="isDesktop ? (filterModalOpen = true) : openMobileDock('filter', 'full')"
         >
-          <UIcon name="i-lucide-file-text" class="w-4 h-4" aria-hidden="true" />
-          <span>Proposal BKKD</span>
-        </NuxtLink>
+          <UIcon name="i-lucide-sliders-horizontal" class="size-3.5" />
+          <span>Filter</span>
+          <span
+            v-if="activeFilterCount > 0"
+            class="rounded-full bg-blue-700 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white tabular-nums"
+          >
+            {{ activeFilterCount }}
+          </span>
+        </button>
+
+        <!-- Hitung Ulang Spasial -->
+        <button
+          v-if="canManage"
+          type="button"
+          :disabled="runningAnalysis"
+          aria-label="Hitung ulang irisan spasial"
+          :class="[
+            'inline-flex items-center gap-1.5 rounded-md bg-[#176B4D] px-2.5 sm:px-3 text-xs font-semibold text-white hover:bg-[#12543c] disabled:opacity-60 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+            isDesktop ? 'h-7' : 'min-h-[44px] min-w-[44px]',
+          ]"
+          @click="handleRunFullAnalysis"
+        >
+          <UIcon
+            :name="runningAnalysis ? 'i-lucide-loader-2' : 'i-lucide-refresh-cw'"
+            :class="['size-3.5 shrink-0', runningAnalysis ? 'animate-spin' : '']"
+          />
+          <span class="hidden sm:inline">{{ runningAnalysis ? 'Menghitung...' : 'Hitung Ulang' }}</span>
+        </button>
+
+        <!-- Desktop Toggle Focus Map -->
+        <UTooltip v-if="isDesktop" :text="allPanelsCollapsed ? 'Tampilkan panel kerja' : 'Mode peta penuh'">
+          <button
+            type="button"
+            :aria-label="allPanelsCollapsed ? 'Tampilkan semua panel kerja' : 'Ciutkan semua panel untuk mode peta penuh'"
+            :aria-pressed="allPanelsCollapsed"
+            class="size-7 flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-[#0e1424] dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+            @click="toggleAllPanels"
+          >
+            <UIcon :name="allPanelsCollapsed ? 'i-lucide-panel-left-open' : 'i-lucide-panel-left-close'" class="size-3.5" />
+          </button>
+        </UTooltip>
       </div>
     </header>
 
-    <!-- Tab Switcher & Filters -->
-    <section class="p-3.5 rounded-xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div role="tablist" aria-label="Mode Pengelolaan Jaringan Jalan" class="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="activeTab === 'kandidat'"
-            class="px-3.5 min-h-[44px] sm:min-h-[34px] rounded-md text-xs font-semibold transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-700"
-            :class="
-              activeTab === 'kandidat'
-                ? 'bg-sky-700 text-white'
-                : 'text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700'
-            "
-            @click="activeTab = 'kandidat'"
-          >
-            Antrean Validasi Proposal ({{ kandidatMeta.total }})
-          </button>
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="activeTab === 'master'"
-            class="px-3.5 min-h-[44px] sm:min-h-[34px] rounded-md text-xs font-semibold transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-700"
-            :class="
-              activeTab === 'master'
-                ? 'bg-emerald-700 text-white'
-                : 'text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700'
-            "
-            @click="activeTab = 'master'"
-          >
-            Master Jalan Poros &amp; Desa ({{ masterSummary.total_ruas }})
-          </button>
-        </div>
+    <!-- ═══ MAIN GIS WORKBENCH AREA ═════════════════════════════════════════════ -->
+    <div class="relative flex flex-1 min-h-0 w-full overflow-hidden">
+      <!-- DESKTOP (>= 1024px): Two-Tier Resizable USplitter -->
+      <div v-if="isDesktop" class="flex flex-1 w-full h-full overflow-hidden">
+        <USplitter
+          :items="verticalSplitterItems"
+          orientation="vertical"
+          class="w-full h-full"
+          :ui="{
+            root: 'h-full w-full',
+            panel: isDraggingVertical ? '' : 'panel-smooth-transition',
+            handle: 'h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-row-resize',
+          }"
+          @dragging="(val: boolean) => { isDraggingVertical = val; if (!val) nextTick(() => mapRef?.resizeMap()); }"
+        >
+          <template #workspace>
+            <USplitter
+              :items="horizontalSplitterItems"
+              orientation="horizontal"
+              class="w-full h-full"
+              :ui="{
+                root: 'h-full w-full',
+                panel: isDraggingHorizontal ? '' : 'panel-smooth-transition',
+                handle: 'w-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-col-resize',
+              }"
+              @dragging="(val: boolean) => { isDraggingHorizontal = val; if (!val) nextTick(() => mapRef?.resizeMap()); }"
+            >
+              <!-- LEFT PANEL -->
+              <template #left="{ collapsed, collapse, expand, resize }">
+                <div ref="leftPanelContainerEl" class="w-full h-full flex flex-col overflow-hidden">
+                  <span :class="syncLeftSlot(collapsed, collapse, expand, resize)" class="hidden" />
+                  <JaringanJalanLeftPanel
+                    :collapsed="collapsed"
+                    :is-mobile-drawer="false"
+                    :layers="mapLayers"
+                    :layers-opacity="layersOpacity"
+                    :color-mode-type="rtrwColorMode"
+                    :summary-data="summaryData"
+                    :status-filter="filters.status_analisa"
+                    :orde-filter="filters.orde02"
+                    :active-filter-count="activeFilterCount"
+                    :id-kecamatan="filters.id_kecamatan"
+                    :id-desa="filters.id_desa"
+                    :is-kecamatan-locked="isKecamatanLocked"
+                    :is-desa-locked="isDesaLocked"
+                    @update:collapsed="(c) => { c ? collapse() : resize(LEFT_PANEL_WIDTH); nextTick(() => setTimeout(() => mapRef?.resizeMap(), 220)); }"
+                    @update:layers="(v) => (mapLayers = v)"
+                    @update:layers-opacity="(v) => (layersOpacity = v)"
+                    @update:color-mode-type="(v) => (rtrwColorMode = v)"
+                    @update:id-kecamatan="(v) => applyFilterPatch({ id_kecamatan: v, id_desa: null })"
+                    @update:id-desa="(v) => applyFilterPatch({ id_desa: v })"
+                    @toggle-status-filter="(st) => toggleStatusFilter(st)"
+                    @toggle-orde-filter="(o) => toggleOrdeFilter(o)"
+                    @zoom-to-layer="handleZoomToLayer"
+                    @open-filter-modal="filterModalOpen = true"
+                    @focus-workspace-tab="(t) => { activeTab = t; expandBottomPanel(); }"
+                  />
+                </div>
+              </template>
 
-        <div class="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
-          <span>Lingkungan: <strong>{{ masterSummary.jumlah_lingkungan }}</strong></span>
-          <span>Poros Desa: <strong>{{ masterSummary.jumlah_poros_desa }}</strong></span>
-          <span>Usaha Tani: <strong>{{ masterSummary.jumlah_usaha_tani }}</strong></span>
-          <span>Kabupaten: <strong>{{ masterSummary.jumlah_kabupaten }}</strong></span>
-        </div>
+              <!-- CENTER MAP CANVAS -->
+              <template #map>
+                <div class="relative w-full h-full overflow-hidden">
+                  <JaringanJalanMaplibre
+                    ref="mapRef"
+                    :map-index="mapIndex"
+                    :selection="mapSelection"
+                    :layers="mapLayers"
+                    :layers-opacity="layersOpacity"
+                    :color-mode-type="rtrwColorMode"
+                    :active-bounds="mapIndex?.bounds ?? null"
+                    :loading-index="loadingMapIndex"
+                    :full-bleed-canvas="true"
+                    @update:layers="(v) => (mapLayers = v)"
+                    @update:color-mode-type="(v) => (rtrwColorMode = v)"
+                    @select-rtrw="(id) => inspectRtrwSegment(id, true)"
+                    @select-poros="(id) => inspectPorosFeature(id, true)"
+                    @select-kabupaten="(id) => inspectKabupatenFeature(id, true)"
+                    @clear-selection="clearSelection"
+                    @martin-status="handleMartinStatus"
+                  />
+
+                  <!-- Floating Reopen Right Panel Button when collapsed with active selection -->
+                  <button
+                    v-if="mapSelection && rightPanelCollapsed"
+                    type="button"
+                    class="absolute bottom-3 right-3 z-20 inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-white/95 px-3 py-1.5 text-xs font-semibold text-blue-900 shadow-lg backdrop-blur-md hover:bg-blue-50 dark:border-blue-700 dark:bg-[#0e1424]/95 dark:text-blue-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+                    @click="expandRightPanel"
+                  >
+                    <UIcon name="i-lucide-panel-right-open" class="size-4 text-blue-600 dark:text-blue-400" />
+                    <span>Buka Detail Ruas</span>
+                  </button>
+                </div>
+              </template>
+
+              <!-- RIGHT INSPECTOR PANEL -->
+              <template #right="{ collapsed, collapse, expand, resize }">
+                <span :class="syncRightSlot(collapsed, collapse, expand, resize)" class="hidden" />
+                <JaringanJalanRightPanel
+                  :collapsed="collapsed"
+                  :active-mode="inspectorMode"
+                  :rtrw-detail="selectedRtrwDetail"
+                  :loading-rtrw-detail="loadingDetail"
+                  :selected-poros="selectedPoros"
+                  :selected-kabupaten="selectedKabupaten"
+                  :can-manage="canManage"
+                  :adopting-rtrw="adoptingRtrw"
+                  :saving-poros="savingPoros"
+                  :deleting-poros="deletingPoros"
+                  @update:collapsed="(c) => { c ? collapse() : resize(RIGHT_PANEL_WIDTH); nextTick(() => setTimeout(() => mapRef?.resizeMap(), 220)); }"
+                  @adopt-rtrw="handleAdoptFromInspector"
+                  @save-poros="handleSavePoros"
+                  @request-delete-poros="openDeleteDialog"
+                  @clear-selection="clearSelection"
+                  @zoom-to-bbox="zoomToBbox"
+                />
+              </template>
+            </USplitter>
+          </template>
+
+          <!-- BOTTOM ATTRIBUTE & ANALYTICS DRAWER -->
+          <template #bottom="{ collapsed, collapse, expand, resize }">
+            <span :class="syncBottomSlot(collapsed, collapse, expand, resize)" class="hidden" />
+            <JaringanJalanBottomPanel
+              :collapsed="collapsed"
+              :is-mobile-drawer="false"
+              :active-tab="activeTab"
+              :per-page="perPage"
+              :search-query="filters.search"
+              :can-manage="canManage"
+              :has-active-filters="hasActiveFilters"
+              :active-filter-count="activeFilterCount"
+              :status-filter="filters.status_analisa"
+              :orde-filter="filters.orde02"
+              :selection="mapSelection"
+              :summary-data="summaryData"
+              :analisa-list="analisaList"
+              :analisa-meta="analisaMeta"
+              :loading-analisa="loadingAnalisa"
+              :selected-rtrw-ids="selectedRtrwIds"
+              :adopting-rtrw="adoptingRtrw"
+              :cakupan-list="cakupanList"
+              :cakupan-meta="cakupanMeta"
+              :cakupan-summary="cakupanSummary"
+              :cakupan-status-filter="cakupanStatusFilter"
+              :loading-cakupan="loadingCakupan"
+              :master-list="masterList"
+              :master-meta="masterMeta"
+              :loading-master="loadingMaster"
+              :kabupaten-list="kabupatenList"
+              :kabupaten-meta="kabupatenMeta"
+              :loading-kabupaten="loadingKabupaten"
+              :console-logs="consoleLogs"
+              @update:collapsed="(c) => { c ? collapse() : resize(BOTTOM_PANEL_HEIGHT); nextTick(() => setTimeout(() => mapRef?.resizeMap(), 220)); }"
+              @update:active-tab="(t) => (activeTab = t)"
+              @update:per-page="(p) => (perPage = p)"
+              @update:search-query="handleSearchUpdate"
+              @update:selected-rtrw-ids="(ids) => (selectedRtrwIds = ids)"
+              @update:cakupan-status-filter="(st) => (cakupanStatusFilter = st)"
+              @change-page="handlePageChange"
+              @inspect-rtrw="(item) => inspectRtrwSegment(item.id, true)"
+              @zoom-rtrw="(item) => zoomToBbox(item.bbox)"
+              @bulk-adopt="handleBulkAdoptSelected"
+              @adopt-desa="handleBatchAdoptVillage"
+              @filter-desa="(d) => { applyFilterPatch({ id_desa: d.id, status_analisa: '' }); activeTab = 'analisa'; }"
+              @inspect-poros="(feat) => inspectPorosFeature(feat, true)"
+              @inspect-kabupaten="(kab) => inspectKabupatenFeature(kab, true)"
+              @filter-orde="(o) => toggleOrdeFilter(o)"
+              @filter-wilayah="(id) => { if (summaryData?.wilayah_level === 'desa') applyFilterPatch({ id_desa: id }); else applyFilterPatch({ id_kecamatan: id, id_desa: null }); activeTab = 'analisa'; }"
+              @toggle-status="(st) => { filters.status_analisa = st; filters.analisaPage = 1; Promise.all([loadAnalisaList(), loadMapIndex()]); }"
+              @reset-filters="resetFilters"
+              @open-filter-modal="filterModalOpen = true"
+              @clear-console="consoleLogs = []"
+            />
+          </template>
+        </USplitter>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-center">
-        <div class="lg:col-span-4 relative">
-          <UIcon name="i-lucide-search" class="w-4 h-4 text-slate-600 dark:text-slate-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
-          <input
-            v-model="filters.search"
-            type="text"
-            aria-label="Cari nama ruas, kode ruas, atau proposal"
-            placeholder="Cari nama ruas, kode, nomor proposal..."
-            class="w-full min-h-[44px] sm:min-h-[36px] pl-9 pr-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-600 dark:placeholder:text-slate-300 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-700"
-            @input="onSearchInput"
-          />
-        </div>
+      <!-- MOBILE & TABLET (< 1024px): Full-Bleed Map + Floating Peek Card + Safe-Area Bottom Dock -->
+      <div v-else class="relative flex-1 w-full h-full overflow-hidden">
+        <JaringanJalanMaplibre
+          ref="mapRef"
+          :map-index="mapIndex"
+          :selection="mapSelection"
+          :layers="mapLayers"
+          :layers-opacity="layersOpacity"
+          :color-mode-type="rtrwColorMode"
+          :active-bounds="mapIndex?.bounds ?? null"
+          :loading-index="loadingMapIndex"
+          :full-bleed-canvas="true"
+          @update:layers="(v) => (mapLayers = v)"
+          @update:color-mode-type="(v) => (rtrwColorMode = v)"
+          @select-rtrw="(id) => { inspectRtrwSegment(id, false); openMobileDock('detail', 'peek'); }"
+          @select-poros="(id) => { inspectPorosFeature(id, false); openMobileDock('detail', 'peek'); }"
+          @select-kabupaten="(id) => { inspectKabupatenFeature(id, false); openMobileDock('detail', 'peek'); }"
+          @clear-selection="clearSelection"
+          @martin-status="handleMartinStatus"
+        />
 
-        <div class="lg:col-span-3">
-          <select
-            v-if="activeTab === 'kandidat'"
-            v-model="filters.status_promosi"
-            aria-label="Filter Status Promosi"
-            class="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs sm:text-sm text-slate-900 dark:text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-700"
-          >
-            <option value="">Antrean & Kandidat</option>
-            <option value="diajukan">Menunggu Validasi</option>
-            <option value="kandidat">Kandidat Otomatis</option>
-            <option value="disetujui">Sudah Terverifikasi</option>
-            <option value="ditolak">Ditolak</option>
-            <option value="semua">Semua Riwayat</option>
-          </select>
+        <!-- Floating Feature Peek Card di Atas Dock saat Sheet Tertutup -->
+        <div
+          v-if="mapSelection && !mobileSheetOpen"
+          class="absolute left-3 right-3 sm:left-auto sm:right-3 sm:w-96 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 rounded-xl border border-gray-200 bg-white/95 p-3 shadow-xl backdrop-blur-md dark:border-gray-700 dark:bg-[#0e1424]/95"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <span
+                v-if="mapSelection.badge"
+                class="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-800 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-200 dark:border-blue-800"
+              >
+                {{ mapSelection.badge }}
+              </span>
+              <p class="mt-1 text-sm font-bold text-gray-900 dark:text-white truncate">
+                {{ mapSelection.title }}
+              </p>
+              <p v-if="mapSelection.subtitle" class="text-xs text-gray-600 dark:text-gray-300 truncate">
+                {{ mapSelection.subtitle }}
+              </p>
+            </div>
 
-          <select
-            v-else
-            v-model="filters.hierarki_jalan"
-            aria-label="Filter Hierarki Jalan"
-            class="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs sm:text-sm text-slate-900 dark:text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-700"
-          >
-            <option value="">Semua Hierarki Jalan</option>
-            <option value="lingkungan">Jalan Lingkungan</option>
-            <option value="poros_desa">Jalan Poros Desa</option>
-            <option value="usaha_tani">Jalan Usaha Tani</option>
-            <option value="kabupaten">Jalan Kabupaten</option>
-          </select>
-        </div>
-
-        <div class="sm:col-span-2 lg:col-span-5">
-          <WilayahSelector
-            :model-kecamatan="filters.id_kecamatan"
-            :model-desa="filters.id_desa"
-            :show-labels="false"
-            :allow-all="true"
-            layout="row"
-            size="md"
-            @change="handleWilayahChange"
-          />
-        </div>
-      </div>
-    </section>
-
-    <div
-      v-if="errorState"
-      role="alert"
-      class="p-4 rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs flex items-center justify-between gap-3"
-    >
-      <span>{{ errorState }}</span>
-      <button
-        type="button"
-        class="px-3.5 min-h-[44px] sm:min-h-[36px] rounded-lg bg-rose-700 text-white font-semibold cursor-pointer"
-        @click="activeTab === 'kandidat' ? loadKandidatList() : loadMasterList()"
-      >
-        Muat Ulang
-      </button>
-    </div>
-
-    <!-- Split Workspace -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-      <!-- Left List -->
-      <section class="lg:col-span-6 rounded-xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-        <!-- Tab 1: Candidate Queue -->
-        <template v-if="activeTab === 'kandidat'">
-          <div v-if="loadingKandidat && kandidatList.length === 0" class="p-6 text-center text-xs text-slate-600 dark:text-slate-300">
-            Memuat kandidat ruas jalan dari proposal...
-          </div>
-          <div v-else-if="kandidatList.length === 0" class="p-10 text-center space-y-2 text-xs text-slate-600 dark:text-slate-300">
-            <p class="text-sm font-bold text-slate-900 dark:text-slate-100">Belum Ada Kandidat Ruas pada Filter Ini</p>
-            <p>Lokasi proposal di luar Jalan Poros Desa yang lolos cek geometri dan batas desa otomatis muncul di daftar ini.</p>
-          </div>
-          <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
-            <article
-              v-for="item in kandidatList"
-              :key="item.id"
-              class="p-3.5 space-y-2 transition-colors"
-              :class="selectedCandidate?.id === item.id ? 'bg-sky-50/80 dark:bg-sky-950/35' : ''"
+            <button
+              type="button"
+              aria-label="Hapus pilihan segmen"
+              class="size-11 flex items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="clearSelection"
             >
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <span
-                      class="px-2 py-0.5 rounded text-[11px] font-semibold border"
-                      :class="getPromosiStatusBadge(item.status_promosi_master).cls"
-                    >
-                      {{ getPromosiStatusBadge(item.status_promosi_master).label }}
-                    </span>
-                    <span
-                      v-if="item.proposal"
-                      class="text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums"
-                    >
-                      {{ item.proposal.tagging_usulan }} {{ item.proposal.tahun_anggaran }} · {{ item.proposal.nomor_registrasi }}
-                    </span>
-                  </div>
-                  <h2 class="mt-1 text-sm font-bold text-slate-900 dark:text-slate-100">
-                    {{ item.nama_ruas_usulan || item.nama_lokasi }}
-                  </h2>
-                  <p class="text-xs text-slate-600 dark:text-slate-300">
-                    {{ item.proposal?.judul_kegiatan || '-' }} · Desa {{ item.proposal?.nama_desa || '-' }} ({{ formatNumber(item.panjang_gis_m, 0) }} m)
-                  </p>
-                </div>
+              <UIcon name="i-lucide-x" class="size-4" />
+            </button>
+          </div>
 
-                <button
-                  type="button"
-                  :aria-pressed="selectedCandidate?.id === item.id"
-                  class="shrink-0 px-3 min-h-[44px] sm:min-h-[34px] rounded-lg border text-xs font-semibold cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
-                  :class="
-                    selectedCandidate?.id === item.id
-                      ? 'border-sky-700 bg-sky-700 text-white'
-                      : 'border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  "
-                  @click="selectCandidate(item)"
-                >
-                  Periksa
-                </button>
-              </div>
-            </article>
-          </div>
-        </template>
-
-        <!-- Tab 2: Master Road Network -->
-        <template v-else>
-          <div v-if="loadingMaster && masterFeatures.length === 0" class="p-6 text-center text-xs text-slate-600 dark:text-slate-300">
-            Memuat Master Jalan Poros &amp; Desa Bojonegoro...
-          </div>
-          <div v-else-if="masterFeatures.length === 0" class="p-10 text-center space-y-2 text-xs text-slate-600 dark:text-slate-300">
-            <p class="text-sm font-bold text-slate-900 dark:text-slate-100">Belum Ada Ruas Master</p>
-            <p>Validasi kandidat dari tab Antrean Validasi Proposal untuk menambahkan ruas baru langsung ke Master Jalan Poros &amp; Desa.</p>
-          </div>
-          <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
-            <article
-              v-for="feat in masterFeatures"
-              :key="feat.properties.id"
-              class="p-3.5 flex items-start justify-between gap-2 transition-colors"
-              :class="selectedMaster?.properties.id === feat.properties.id ? 'bg-emerald-50/80 dark:bg-emerald-950/35' : ''"
+          <div class="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              class="min-h-[44px] flex-1 rounded-lg bg-[#176B4D] px-3 text-xs font-semibold text-white hover:bg-[#12543c] cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="openMobileDock('detail', 'peek')"
             >
-              <div class="min-w-0 space-y-1">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700">
-                    {{ feat.properties.kode_ruas || 'NON-KODE' }}
-                  </span>
-                  <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                    {{ getHierarkiLabel(feat.properties.hierarki_jalan) }}
-                  </span>
-                </div>
-                <h2 class="text-sm font-bold text-slate-900 dark:text-slate-100">
-                  {{ feat.properties.nama_ruas }}
-                </h2>
-                <p class="text-xs text-slate-600 dark:text-slate-300 tabular-nums">
-                  Desa {{ feat.properties.nama_desa || '-' }}, Kec. {{ feat.properties.nama_kecamatan || '-' }} · {{ formatNumber(feat.properties.panjang_m, 0) }} m
-                </p>
-              </div>
-
-              <div class="flex items-center gap-1.5 shrink-0">
-                <NuxtLink
-                  v-if="feat.properties.sumber_proposal_id"
-                  :to="`/admin/bkkd/proposal/${feat.properties.sumber_proposal_id}`"
-                  class="px-2.5 min-h-[44px] sm:min-h-[34px] inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  Proposal
-                </NuxtLink>
-                <button
-                  type="button"
-                  :aria-pressed="selectedMaster?.properties.id === feat.properties.id"
-                  class="px-3 min-h-[44px] sm:min-h-[34px] rounded-lg border text-xs font-semibold cursor-pointer"
-                  :class="
-                    selectedMaster?.properties.id === feat.properties.id
-                      ? 'border-emerald-700 bg-emerald-700 text-white'
-                      : 'border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  "
-                  @click="selectMasterRuas(feat)"
-                >
-                  Kelola
-                </button>
-              </div>
-            </article>
+              Buka Detail & Aksi
+            </button>
+            <button
+              v-if="mapSelection.bbox"
+              type="button"
+              aria-label="Zoom ke segmen terpilih"
+              class="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-800 dark:border-gray-700 dark:bg-[#0b0f19] dark:text-gray-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="zoomToBbox(mapSelection.bbox)"
+            >
+              <UIcon name="i-lucide-locate-fixed" class="size-4" />
+            </button>
           </div>
-        </template>
-      </section>
+        </div>
 
-      <!-- Right Map & Validation / Master Editor -->
-      <aside class="lg:col-span-6 lg:sticky lg:top-4 space-y-3">
-        <div class="rounded-xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <div class="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-50 dark:bg-slate-950/60">
-            <span class="text-xs font-bold text-slate-900 dark:text-slate-100">
-              Peta Konteks Jaringan Jalan
+        <!-- Fixed Safe-Area Bottom Action Dock (5 Buttons >= 44px) -->
+        <nav
+          aria-label="Navigasi Panel Peta Seluler"
+          class="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 gap-1 border-t border-gray-200 bg-white/95 px-1.5 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] backdrop-blur-md shadow-lg dark:border-gray-800 dark:bg-[#0b0f19]/95"
+        >
+          <button
+            type="button"
+            :aria-pressed="mobileSheetOpen && mobileActiveDock === 'layers'"
+            :class="[
+              'min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+              mobileSheetOpen && mobileActiveDock === 'layers'
+                ? 'bg-emerald-50 text-[#176B4D] font-semibold dark:bg-emerald-950/60 dark:text-emerald-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+            ]"
+            @click="openMobileDock('layers', 'peek')"
+          >
+            <UIcon name="i-lucide-layers" class="size-4" />
+            <span>Layer</span>
+          </button>
+
+          <button
+            type="button"
+            :aria-pressed="mobileSheetOpen && mobileActiveDock === 'table'"
+            :class="[
+              'min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+              mobileSheetOpen && mobileActiveDock === 'table'
+                ? 'bg-emerald-50 text-[#176B4D] font-semibold dark:bg-emerald-950/60 dark:text-emerald-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+            ]"
+            @click="openMobileDock('table', 'full')"
+          >
+            <UIcon name="i-lucide-table-2" class="size-4" />
+            <span>Tabel</span>
+          </button>
+
+          <button
+            type="button"
+            :aria-pressed="mobileSheetOpen && mobileActiveDock === 'rekap'"
+            :class="[
+              'min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+              mobileSheetOpen && mobileActiveDock === 'rekap'
+                ? 'bg-emerald-50 text-[#176B4D] font-semibold dark:bg-emerald-950/60 dark:text-emerald-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+            ]"
+            @click="openMobileDock('rekap', 'full')"
+          >
+            <UIcon name="i-lucide-bar-chart-3" class="size-4" />
+            <span>Rekap</span>
+          </button>
+
+          <button
+            type="button"
+            :aria-pressed="mobileSheetOpen && mobileActiveDock === 'detail'"
+            :class="[
+              'relative min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+              mobileSheetOpen && mobileActiveDock === 'detail'
+                ? 'bg-blue-50 text-blue-800 font-semibold dark:bg-blue-950/60 dark:text-blue-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+            ]"
+            @click="openMobileDock('detail', 'peek')"
+          >
+            <UIcon name="i-lucide-info" class="size-4" />
+            <span>Detail</span>
+            <span
+              v-if="mapSelection"
+              class="absolute top-1.5 right-3 size-2 rounded-full bg-blue-600"
+            />
+          </button>
+
+          <button
+            type="button"
+            :aria-pressed="mobileSheetOpen && mobileActiveDock === 'filter'"
+            :class="[
+              'relative min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+              mobileSheetOpen && mobileActiveDock === 'filter'
+                ? 'bg-blue-50 text-blue-800 font-semibold dark:bg-blue-950/60 dark:text-blue-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+            ]"
+            @click="openMobileDock('filter', 'full')"
+          >
+            <UIcon name="i-lucide-sliders-horizontal" class="size-4" />
+            <span>Filter</span>
+            <span
+              v-if="activeFilterCount > 0"
+              class="absolute top-1 right-2.5 rounded-full bg-blue-700 px-1 text-[10px] font-bold text-white tabular-nums"
+            >
+              {{ activeFilterCount }}
             </span>
-            <BasemapSwitcher
-              :model-value="basemap"
-              variant="medium"
-              engine="openlayers"
-              placement="top-right"
-              @update:model-value="switchBasemap($event)"
+          </button>
+        </nav>
+
+        <!-- Unified Mobile Bottom Sheet -->
+        <MobileBottomSheet
+          v-model:open="mobileSheetOpen"
+          v-model:snap-level="mobileSheetSnap"
+          :title="mobileSheetTitle"
+          :icon="mobileSheetIcon"
+        >
+          <!-- Layer Drawer -->
+          <JaringanJalanLeftPanel
+            v-if="mobileActiveDock === 'layers'"
+            :collapsed="false"
+            :is-mobile-drawer="true"
+            :layers="mapLayers"
+            :layers-opacity="layersOpacity"
+            :color-mode-type="rtrwColorMode"
+            :summary-data="summaryData"
+            :status-filter="filters.status_analisa"
+            :orde-filter="filters.orde02"
+            :active-filter-count="activeFilterCount"
+            :id-kecamatan="filters.id_kecamatan"
+            :id-desa="filters.id_desa"
+            :is-kecamatan-locked="isKecamatanLocked"
+            :is-desa-locked="isDesaLocked"
+            @update:layers="(v) => (mapLayers = v)"
+            @update:layers-opacity="(v) => (layersOpacity = v)"
+            @update:color-mode-type="(v) => (rtrwColorMode = v)"
+            @update:id-kecamatan="(v) => applyFilterPatch({ id_kecamatan: v, id_desa: null })"
+            @update:id-desa="(v) => applyFilterPatch({ id_desa: v })"
+            @toggle-status-filter="(st) => toggleStatusFilter(st)"
+            @toggle-orde-filter="(o) => toggleOrdeFilter(o)"
+            @zoom-to-layer="handleZoomToLayer"
+            @open-filter-modal="openMobileDock('filter', 'full')"
+            @focus-workspace-tab="(t) => { activeTab = t; openMobileDock('table', 'full'); }"
+          />
+
+          <!-- Data Table & Cakupan Drawer -->
+          <JaringanJalanBottomPanel
+            v-else-if="mobileActiveDock === 'table'"
+            :collapsed="false"
+            :is-mobile-drawer="true"
+            :hide-console-tab="true"
+            :only-tabs="['analisa', 'cakupan', 'master', 'kabupaten']"
+            :active-tab="activeTab === 'breakdown' || activeTab === 'console' ? 'analisa' : activeTab"
+            :per-page="perPage"
+            :search-query="filters.search"
+            :can-manage="canManage"
+            :has-active-filters="hasActiveFilters"
+            :active-filter-count="activeFilterCount"
+            :status-filter="filters.status_analisa"
+            :orde-filter="filters.orde02"
+            :selection="mapSelection"
+            :summary-data="summaryData"
+            :analisa-list="analisaList"
+            :analisa-meta="analisaMeta"
+            :loading-analisa="loadingAnalisa"
+            :selected-rtrw-ids="selectedRtrwIds"
+            :adopting-rtrw="adoptingRtrw"
+            :cakupan-list="cakupanList"
+            :cakupan-meta="cakupanMeta"
+            :cakupan-summary="cakupanSummary"
+            :cakupan-status-filter="cakupanStatusFilter"
+            :loading-cakupan="loadingCakupan"
+            :master-list="masterList"
+            :master-meta="masterMeta"
+            :loading-master="loadingMaster"
+            :kabupaten-list="kabupatenList"
+            :kabupaten-meta="kabupatenMeta"
+            :loading-kabupaten="loadingKabupaten"
+            :console-logs="consoleLogs"
+            @update:active-tab="(t) => (activeTab = t)"
+            @update:search-query="handleSearchUpdate"
+            @update:selected-rtrw-ids="(ids) => (selectedRtrwIds = ids)"
+            @update:cakupan-status-filter="(st) => (cakupanStatusFilter = st)"
+            @change-page="handlePageChange"
+            @inspect-rtrw="(item) => { inspectRtrwSegment(item.id, false); openMobileDock('detail', 'peek'); }"
+            @zoom-rtrw="(item) => zoomToBbox(item.bbox)"
+            @bulk-adopt="handleBulkAdoptSelected"
+            @adopt-desa="handleBatchAdoptVillage"
+            @filter-desa="(d) => { applyFilterPatch({ id_desa: d.id, status_analisa: '' }); activeTab = 'analisa'; }"
+            @inspect-poros="(feat) => { inspectPorosFeature(feat, false); openMobileDock('detail', 'peek'); }"
+            @inspect-kabupaten="(kab) => { inspectKabupatenFeature(kab, false); openMobileDock('detail', 'peek'); }"
+            @filter-orde="(o) => toggleOrdeFilter(o)"
+            @filter-wilayah="(id) => { if (summaryData?.wilayah_level === 'desa') applyFilterPatch({ id_desa: id }); else applyFilterPatch({ id_kecamatan: id, id_desa: null }); }"
+            @toggle-status="(st) => { filters.status_analisa = st; filters.analisaPage = 1; Promise.all([loadAnalisaList(), loadMapIndex()]); }"
+            @reset-filters="resetFilters"
+            @open-filter-modal="openMobileDock('filter', 'full')"
+            @clear-console="consoleLogs = []"
+          />
+
+          <!-- Rekap Orde, Wilayah & Konsol Analis -->
+          <JaringanJalanBottomPanel
+            v-else-if="mobileActiveDock === 'rekap'"
+            :collapsed="false"
+            :is-mobile-drawer="true"
+            :hide-console-tab="false"
+            :only-tabs="['breakdown', 'console']"
+            :active-tab="mobileRekapTab"
+            :per-page="perPage"
+            :search-query="filters.search"
+            :can-manage="canManage"
+            :has-active-filters="hasActiveFilters"
+            :active-filter-count="activeFilterCount"
+            :status-filter="filters.status_analisa"
+            :orde-filter="filters.orde02"
+            :selection="mapSelection"
+            :summary-data="summaryData"
+            :analisa-list="analisaList"
+            :analisa-meta="analisaMeta"
+            :loading-analisa="loadingAnalisa"
+            :selected-rtrw-ids="selectedRtrwIds"
+            :adopting-rtrw="adoptingRtrw"
+            :cakupan-list="cakupanList"
+            :cakupan-meta="cakupanMeta"
+            :cakupan-summary="cakupanSummary"
+            :cakupan-status-filter="cakupanStatusFilter"
+            :loading-cakupan="loadingCakupan"
+            :master-list="masterList"
+            :master-meta="masterMeta"
+            :loading-master="loadingMaster"
+            :kabupaten-list="kabupatenList"
+            :kabupaten-meta="kabupatenMeta"
+            :loading-kabupaten="loadingKabupaten"
+            :console-logs="consoleLogs"
+            @update:active-tab="(t) => (mobileRekapTab = t === 'console' ? 'console' : 'breakdown')"
+            @filter-orde="(o) => { toggleOrdeFilter(o); openMobileDock('table', 'full'); }"
+            @filter-wilayah="(id) => { if (summaryData?.wilayah_level === 'desa') applyFilterPatch({ id_desa: id }); else applyFilterPatch({ id_kecamatan: id, id_desa: null }); activeTab = 'analisa'; openMobileDock('table', 'full'); }"
+            @clear-console="consoleLogs = []"
+          />
+
+          <!-- Detail & Aksi Inspektor -->
+          <div v-else-if="mobileActiveDock === 'detail'" class="p-3">
+            <h2 class="sr-only">Inspektor Ruas Terpilih</h2>
+            <JaringanJalanInspectorCard
+              :active-mode="inspectorMode"
+              :rtrw-detail="selectedRtrwDetail"
+              :loading-rtrw-detail="loadingDetail"
+              :selected-poros="selectedPoros"
+              :selected-kabupaten="selectedKabupaten"
+              :can-manage="canManage"
+              :adopting-rtrw="adoptingRtrw"
+              :saving-poros="savingPoros"
+              :deleting-poros="deletingPoros"
+              :is-mobile-drawer="true"
+              @adopt-rtrw="handleAdoptFromInspector"
+              @save-poros="handleSavePoros"
+              @request-delete-poros="openDeleteDialog"
+              @clear-selection="clearSelection"
+              @zoom-to-bbox="zoomToBbox"
             />
           </div>
 
-          <div ref="mapContainerRef" class="w-full h-[280px] sm:h-[320px] bg-slate-100 dark:bg-slate-800" />
-
-          <div class="px-3.5 py-2 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 text-[11px] text-slate-700 dark:text-slate-200">
-            <span class="inline-flex items-center gap-1.5">
-              <span class="w-3 h-1 rounded-full bg-amber-600 inline-block" aria-hidden="true" />
-              Kandidat / Ruas Dipilih
-            </span>
-            <span class="inline-flex items-center gap-1.5">
-              <span class="w-3 h-1 rounded-full bg-teal-600 inline-block" aria-hidden="true" />
-              Promosi Proposal Baru
-            </span>
-            <span class="inline-flex items-center gap-1.5">
-              <span class="w-3 h-1 rounded-full bg-indigo-500 inline-block" aria-hidden="true" />
-              Jalan Poros Eksisting
-            </span>
+          <!-- Filter Drawer -->
+          <div v-else-if="mobileActiveDock === 'filter'" class="p-3">
+            <h2 class="sr-only">Filter Analisa Spasial dan Wilayah</h2>
+            <JaringanJalanFilterContent
+              :filters="filters"
+              :orde-options="summaryData?.orde_options || []"
+              :is-kecamatan-locked="isKecamatanLocked"
+              :is-desa-locked="isDesaLocked"
+              :is-mobile-drawer="true"
+              @update-filter="applyFilterPatch"
+              @reset-filters="resetFilters"
+              @close="mobileSheetOpen = false"
+            />
           </div>
-        </div>
-
-        <!-- Candidate Spatial Validation Panel -->
-        <div
-          v-if="selectedCandidate"
-          class="rounded-xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3.5"
-        >
-          <div class="flex items-start justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">
-                Gerbang Validasi Spasial: {{ selectedCandidate.nama_ruas_usulan || selectedCandidate.nama_lokasi }}
-              </h3>
-              <p class="text-xs text-slate-600 dark:text-slate-300">
-                Rekomendasi sistem: <strong>{{ selectedCandidate.validasi_promosi_spasial?.rekomendasi_aksi || 'evaluasi' }}</strong>
-              </p>
-            </div>
-            <NuxtLink
-              v-if="selectedCandidate.proposal"
-              :to="`/admin/bkkd/proposal/${selectedCandidate.proposal.id}`"
-              class="text-xs font-semibold text-sky-700 dark:text-sky-300 hover:underline shrink-0"
-            >
-              Buka Proposal
-            </NuxtLink>
-          </div>
-
-          <div
-            v-if="selectedCandidate.validasi_promosi_spasial?.checks?.length"
-            class="grid grid-cols-1 sm:grid-cols-2 gap-2"
-          >
-            <div
-              v-for="chk in selectedCandidate.validasi_promosi_spasial.checks"
-              :key="chk.kode"
-              class="p-2.5 rounded-lg border text-xs space-y-0.5"
-              :class="
-                chk.lolos
-                  ? 'border-emerald-300 bg-emerald-50/70 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
-                  : 'border-rose-300 bg-rose-50/70 text-rose-950 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
-              "
-            >
-              <div class="font-bold flex items-center justify-between gap-1">
-                <span>{{ chk.label }}</span>
-                <span>{{ chk.lolos ? 'LOLOS' : 'GAGAL' }}</span>
-              </div>
-              <p class="text-[11px] opacity-90">{{ chk.detail }}</p>
-            </div>
-          </div>
-
-          <div
-            v-if="isBappedaOrAdmin && selectedCandidate.status_promosi_master !== 'disetujui'"
-            class="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5"
-          >
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Nama Ruas Resmi Master
-                </label>
-                <input
-                  v-model="decisionForm.nama_ruas"
-                  type="text"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Hierarki Jalan
-                </label>
-                <select
-                  v-model="decisionForm.hierarki_jalan"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                >
-                  <option value="lingkungan">Jalan Lingkungan</option>
-                  <option value="poros_desa">Jalan Poros Desa</option>
-                  <option value="usaha_tani">Jalan Usaha Tani</option>
-                  <option value="kabupaten">Jalan Kabupaten</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Keputusan Verifikator
-                </label>
-                <select
-                  v-model="decisionForm.keputusan"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                >
-                  <option value="setujui_baru">Setujui Sebagai Ruas Baru</option>
-                  <option value="ekstensi_potong_unik">Potong Irisan & Tambah Unik</option>
-                  <option value="tolak">Tolak Promosi</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Kode Ruas (Angka, Opsional)
-                </label>
-                <input
-                  v-model="decisionForm.kode_ruas"
-                  type="number"
-                  min="1"
-                  placeholder="Otomatis jika kosong"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Catatan Validasi
-                </label>
-                <input
-                  v-model="decisionForm.catatan"
-                  type="text"
-                  placeholder="Opsional"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-            </div>
-
-            <div class="flex justify-end">
-              <button
-                type="button"
-                :disabled="validatingId === selectedCandidate.id || (!selectedCandidate.validasi_promosi_spasial?.lolos_validasi && decisionForm.keputusan !== 'tolak')"
-                class="inline-flex items-center gap-2 px-4 min-h-[44px] sm:min-h-[38px] rounded-lg text-xs font-semibold text-white cursor-pointer disabled:opacity-50"
-                :class="decisionForm.keputusan === 'tolak' ? 'bg-rose-700 hover:bg-rose-800' : 'bg-emerald-700 hover:bg-emerald-800'"
-                @click="submitBappedaDecision"
-              >
-                <UIcon
-                  :name="validatingId === selectedCandidate.id ? 'i-lucide-loader-2' : 'i-lucide-shield-check'"
-                  class="w-4 h-4"
-                  :class="{ 'animate-spin': validatingId === selectedCandidate.id }"
-                  aria-hidden="true"
-                />
-                <span>
-                  {{
-                    decisionForm.keputusan === 'tolak'
-                      ? 'Tolak Masuk Master'
-                      : 'Validasi & Tambahkan ke Master Jalan Poros & Desa'
-                  }}
-                </span>
-              </button>
-            </div>
-          </div>
-
-          <div
-            v-else-if="selectedCandidate.jaringan_ruas"
-            class="p-3 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/50 text-xs text-emerald-900 dark:text-emerald-200"
-          >
-            Sudah terintegrasi di Master Jalan Poros &amp; Desa sebagai
-            <strong>{{ selectedCandidate.jaringan_ruas.kode_ruas }} · {{ selectedCandidate.jaringan_ruas.nama_ruas }}</strong>
-            ({{ getHierarkiLabel(selectedCandidate.jaringan_ruas.hierarki_jalan) }}).
-          </div>
-        </div>
-
-        <!-- Master Ruas Curation Form -->
-        <div
-          v-else-if="selectedMaster"
-          class="rounded-xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3"
-        >
-          <div class="flex items-start justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">
-                Detail Ruas Master: {{ selectedMaster.properties.nama_ruas }}
-              </h3>
-              <p class="text-xs text-slate-600 dark:text-slate-300 tabular-nums">
-                Kode: {{ selectedMaster.properties.kode_ruas || '-' }} · Panjang {{ formatNumber(selectedMaster.properties.panjang_m, 1) }} m
-              </p>
-            </div>
-          </div>
-
-          <div v-if="isBappedaOrAdmin" class="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Nama Ruas
-                </label>
-                <input
-                  v-model="masterEditForm.nama_ruas"
-                  type="text"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Hierarki Jalan
-                </label>
-                <select
-                  v-model="masterEditForm.hierarki_jalan"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                >
-                  <option value="lingkungan">Jalan Lingkungan</option>
-                  <option value="poros_desa">Jalan Poros Desa</option>
-                  <option value="usaha_tani">Jalan Usaha Tani</option>
-                  <option value="kabupaten">Jalan Kabupaten</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Kode Ruas (Angka)
-                </label>
-                <input
-                  v-model="masterEditForm.kode_ruas"
-                  type="number"
-                  min="1"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Perkerasan
-                </label>
-                <input
-                  v-model="masterEditForm.perkerasan"
-                  type="text"
-                  placeholder="Beton / Aspal / Paving"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-                  Kondisi
-                </label>
-                <input
-                  v-model="masterEditForm.kondisi"
-                  type="text"
-                  placeholder="Baik / Rusak Ringan / Berat"
-                  class="w-full min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-400 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100"
-                />
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <button
-                type="button"
-                :disabled="deletingMasterId === selectedMaster.properties.id"
-                class="px-3.5 min-h-[44px] sm:min-h-[36px] rounded-lg border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-xs font-semibold cursor-pointer disabled:opacity-50"
-                @click="archiveMasterRuas(selectedMaster)"
-              >
-                Arsipkan Ruas
-              </button>
-              <button
-                type="button"
-                :disabled="savingMasterId === selectedMaster.properties.id || !masterEditForm.nama_ruas.trim()"
-                class="px-4 min-h-[44px] sm:min-h-[36px] rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
-                @click="saveMasterRuasChanges"
-              >
-                Simpan Perubahan Ruas
-              </button>
-            </div>
-          </div>
-        </div>
-      </aside>
+        </MobileBottomSheet>
+      </div>
     </div>
+
+    <!-- Desktop Unified Filter Modal -->
+    <JaringanJalanFilterModal
+      v-model:open="filterModalOpen"
+      :filters="filters"
+      :orde-options="summaryData?.orde_options || []"
+      :is-kecamatan-locked="isKecamatanLocked"
+      :is-desa-locked="isDesaLocked"
+      @update-filter="applyFilterPatch"
+      @reset-filters="resetFilters"
+    />
+
+    <!-- Confirm Delete Master Poros Modal -->
+    <Teleport to="body">
+      <div
+        v-if="confirmDeleteTarget"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-2xs"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-poros-title"
+        @click.self="closeDeleteDialog"
+      >
+        <div class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-2xl space-y-4 dark:border-gray-800 dark:bg-[#0b0f19]">
+          <div class="flex items-start gap-3">
+            <div class="flex size-10 items-center justify-center rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 shrink-0">
+              <UIcon name="i-lucide-alert-triangle" class="size-5" />
+            </div>
+            <div class="space-y-1">
+              <h2 id="delete-poros-title" class="text-sm font-bold text-gray-900 dark:text-white">
+                Hapus Ruas Master Jalan Poros Desa?
+              </h2>
+              <p class="text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                Ruas <strong>{{ confirmDeleteTarget.properties.nama_ruas }}</strong> akan dihapus dari Master Jalan Poros Desa dan memengaruhi skor cakupan desa terkait.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button
+              ref="deleteCancelBtnRef"
+              type="button"
+              :disabled="deletingPoros"
+              class="min-h-[44px] lg:min-h-[36px] rounded-lg border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-800 hover:bg-gray-100 dark:border-gray-700 dark:bg-[#0e1424] dark:text-gray-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="closeDeleteDialog"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              :disabled="deletingPoros"
+              class="min-h-[44px] lg:min-h-[36px] inline-flex items-center gap-1.5 rounded-lg bg-rose-700 px-4 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-60 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="confirmDeletePoros"
+            >
+              <UIcon v-if="deletingPoros" name="i-lucide-loader-2" class="size-4 animate-spin" />
+              <span>{{ deletingPoros ? 'Menghapus...' : 'Hapus Permanen' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.panel-smooth-transition {
+  transition: flex-basis 200ms cubic-bezier(0.22, 1, 0.36, 1), width 200ms cubic-bezier(0.22, 1, 0.36, 1), height 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+</style>

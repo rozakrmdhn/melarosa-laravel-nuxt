@@ -26,18 +26,25 @@ class DatabaseSeeder extends Seeder
             'users-create',
             'users-update',
             'users-delete',
+            'users-manage',
             'roles-view',
             'roles-create',
             'roles-update',
             'roles-delete',
             'roles-manage',
             'permissions-view',
+            'permissions-create',
+            'permissions-update',
+            'permissions-delete',
             'permissions-manage',
             'settings-view',
             'settings-manage',
             'audit-logs-view',
+            'audit-logs-access',
+            'audit-logs-manage',
             'layers-view',
             'layers-create',
+            'layers-edit',
             'layers-update',
             'layers-delete',
             'layers-manage',
@@ -89,10 +96,15 @@ class DatabaseSeeder extends Seeder
             InfrastrukturPermissionSeeder::class,
             InfrastrukturMasterSeeder::class,
             BkkdPermissionSeeder::class,
+            PublikasiPetaPermissionSeeder::class,
             RefOpdSeeder::class,
             RefBkkdBidangSeeder::class,
             BackupScheduleSeeder::class,
             BasemapSeeder::class,
         ]);
+
+        // Pastikan role admin selalu memiliki seluruh permission termasuk yang ditambahkan oleh sub-seeder
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+        $adminRole->syncPermissions(Permission::all());
     }
 }

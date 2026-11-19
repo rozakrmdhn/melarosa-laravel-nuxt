@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import "ol/ol.css";
 import BasemapSwitcher from "~/components/common/BasemapSwitcher.vue";
-import { useBasemapStore } from "~/stores/basemap";
 import { createOpenLayersBasemapSource } from "~/utils/basemap-sources";
 
 definePageMeta({
@@ -247,9 +246,16 @@ let tileLayer: any = null;
 let tooltipOverlay: any = null;
 let olModules: any = null;
 
-const basemapStore = useBasemapStore();
 const mapLoaded = ref(false);
-const currentBasemap = ref<string>("osm");
+const {
+  basemapStore,
+  currentBasemap,
+  setBasemapChoice,
+} = useDefaultBasemap<string>("openlayers", (code) => {
+  if (tileLayer && olModules) {
+    tileLayer.setSource(getBasemapSource(code));
+  }
+});
 const hoveredFeature = ref<any>(null);
 const tooltipContent = ref<{ nama_kecamatan: string; luas_hektar: number; pimpinan: string; jumlah_desa: number } | null>(null);
 
@@ -260,10 +266,7 @@ function getBasemapSource(type: string) {
 }
 
 function switchBasemap(type: string) {
-  currentBasemap.value = type;
-  if (tileLayer && olModules) {
-    tileLayer.setSource(getBasemapSource(type));
-  }
+  setBasemapChoice(type);
 }
 
 watch(

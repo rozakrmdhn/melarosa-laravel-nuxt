@@ -111,6 +111,8 @@ class PublikasiPetaDigitalController extends Controller
     {
         $isAuthenticatedManager = $request->user() !== null && (
             $request->user()->hasRole('admin')
+            || $request->user()->can('publikasi-peta-view')
+            || $request->user()->can('publikasi-peta-manage')
             || $request->user()->can('layers-view')
             || $request->user()->can('batas-desa-view')
         );
@@ -175,6 +177,8 @@ class PublikasiPetaDigitalController extends Controller
     {
         $isAuthenticatedManager = $request->user() !== null && (
             $request->user()->hasRole('admin')
+            || $request->user()->can('publikasi-peta-view')
+            || $request->user()->can('publikasi-peta-manage')
             || $request->user()->can('layers-view')
             || $request->user()->can('batas-desa-view')
         );

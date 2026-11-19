@@ -142,7 +142,7 @@ const bottomActiveTab = ref<"table" | "console">("table");
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
 const mobileMapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
-const currentBasemap = ref<BasemapType>("osm");
+const { currentBasemap, setBasemapChoice } = useDefaultBasemap<BasemapType>("openlayers");
 
 function fitAllBounds() {
   mapCanvasRef.value?.fitBounds();
@@ -1756,7 +1756,8 @@ async function handleConfirmSplit() {
                     :perkerasan-filter="tablePerkerasan"
                     :kecamatan-options="kecamatanOptions"
                     :desa-options="desaOptions"
-                    v-model:basemap="currentBasemap"
+                    :basemap="currentBasemap"
+                    @update:basemap="setBasemapChoice($event)"
                     v-model:mouse-coords="mouseCoords"
                     @select="handleFeatureSelect"
                     @log="addLog"
@@ -1841,7 +1842,8 @@ async function handleConfirmSplit() {
           :perkerasan-filter="tablePerkerasan"
           :kecamatan-options="kecamatanOptions"
           :desa-options="desaOptions"
-          v-model:basemap="currentBasemap"
+          :basemap="currentBasemap"
+          @update:basemap="setBasemapChoice($event)"
           v-model:mouse-coords="mouseCoords"
           @select="handleFeatureSelect"
           @log="addLog"

@@ -28,12 +28,24 @@ class PublikasiPetaDigitalTest extends TestCase
 
         Storage::fake('local');
 
-        foreach (['layers-view', 'layers-manage'] as $perm) {
+        foreach ([
+            'publikasi-peta-view',
+            'publikasi-peta-create',
+            'publikasi-peta-update',
+            'publikasi-peta-delete',
+            'publikasi-peta-manage',
+        ] as $perm) {
             Permission::firstOrCreate(['name' => $perm, 'guard_name' => 'web']);
         }
 
         $adminRole = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
-        $adminRole->syncPermissions(['layers-view', 'layers-manage']);
+        $adminRole->syncPermissions([
+            'publikasi-peta-view',
+            'publikasi-peta-create',
+            'publikasi-peta-update',
+            'publikasi-peta-delete',
+            'publikasi-peta-manage',
+        ]);
 
         $this->adminUser = User::factory()->create();
         $this->adminUser->assignRole($adminRole);

@@ -190,11 +190,59 @@ export interface JaringanJalanRuasFeature {
     perkerasan?: string | null;
     kondisi?: string | null;
     sumber_data: string;
+    tahun_survey?: number | null;
+    rtrw_source_id?: number | null;
     status_validasi: string;
     sumber_proposal_id?: string | null;
     sumber_lokasi_id?: string | null;
     validated_at?: string | null;
   };
+}
+
+export interface CakupanDesaJalanItem {
+  id: number;
+  nama_desa: string;
+  id_kecamatan?: number | null;
+  nama_kecamatan?: string | null;
+  poros_count: number;
+  poros_panjang_m: number;
+  rtrw_jalan_desa_count: number;
+  rtrw_total_count: number;
+  status_cakupan: 'sudah_terdata' | 'belum_terdata';
+}
+
+export interface CakupanDesaSummary {
+  total_desa: number;
+  desa_terdata: number;
+  desa_belum_terdata: number;
+}
+
+export interface RtrwOrdeOption {
+  value: string;
+  label: string;
+  total: number;
+}
+
+export interface RtrwOrdeSegment {
+  id: number;
+  nama_jln?: string | null;
+  display_name: string;
+  namobj: string;
+  orde01: string;
+  orde02: string;
+  orde03: string;
+  orde04: string;
+  stsjrn?: string | null;
+  sbdata?: string | null;
+  panjang_m: number;
+  id_desa?: number | null;
+  nama_desa?: string | null;
+  id_kecamatan?: number | null;
+  nama_kecamatan?: string | null;
+  already_in_master: boolean;
+  spatial_duplicate: boolean;
+  recommended_hierarki: HierarkiJalanBkkd;
+  geojson: any;
 }
 
 export interface BkkdProposalLokasi {

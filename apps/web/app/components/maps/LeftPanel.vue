@@ -41,6 +41,9 @@ const props = withDefaults(
     isIdentifying?: boolean;
     inspectorOpen?: boolean;
     geoparkOverlayVisible?: boolean;
+    show3dBuildings?: boolean;
+    show3dTerrain?: boolean;
+    terrainExaggeration?: number;
   }>(),
   {
     isMobileDrawer: false,
@@ -55,6 +58,9 @@ const props = withDefaults(
     isIdentifying: false,
     inspectorOpen: false,
     geoparkOverlayVisible: false,
+    show3dBuildings: false,
+    show3dTerrain: false,
+    terrainExaggeration: 1.5,
   }
 );
 
@@ -94,6 +100,9 @@ const emit = defineEmits<{
   }): void;
   (e: "toggle-roads-visibility"): void;
   (e: "toggle-geopark-overlay"): void;
+  (e: "toggle-3d-buildings"): void;
+  (e: "toggle-3d-terrain"): void;
+  (e: "update-terrain-exaggeration", exaggeration: number): void;
   (e: "locate-user"): void;
   (e: "select-road", payload: {
     ruas: RekapRuasItem;
@@ -1118,11 +1127,17 @@ defineExpose({
             v-else-if="petaSubView === 'other-layers' || currentActiveTab === 'dataset'"
             key="sv-other-layers"
             :active-layers="props.activeLayers"
+            :show3d-buildings="props.show3dBuildings"
+            :show3d-terrain="props.show3dTerrain"
+            :terrain-exaggeration="props.terrainExaggeration"
             @back="handleGoToMap"
             @toggle-layer-visibility="(id) => emit('toggle-layer-visibility', id)"
             @update-layer-opacity="(payload) => emit('update-layer-opacity', payload)"
             @toggle-geoportal="(payload) => handleGeoportalToggle({ layer: payload.layer, active: payload.active })"
             @reorder-layers="(layers) => emit('reorder-layers', layers)"
+            @toggle-3d-buildings="emit('toggle-3d-buildings')"
+            @toggle-3d-terrain="emit('toggle-3d-terrain')"
+            @update-terrain-exaggeration="(val) => emit('update-terrain-exaggeration', val)"
           />
 
           <LayerDetailView

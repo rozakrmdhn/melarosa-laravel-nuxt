@@ -6,9 +6,15 @@ import { useGeoportalLayers, type GeoportalLayerItem } from "~/composables/useGe
 const props = withDefaults(
   defineProps<{
     activeLayers?: ActiveLayerItem[];
+    show3dBuildings?: boolean;
+    show3dTerrain?: boolean;
+    terrainExaggeration?: number;
   }>(),
   {
     activeLayers: () => [],
+    show3dBuildings: false,
+    show3dTerrain: false,
+    terrainExaggeration: 1.5,
   }
 );
 
@@ -18,6 +24,9 @@ const emit = defineEmits<{
   (e: "update-layer-opacity", payload: { layerId: string; opacity: number }): void;
   (e: "toggle-geoportal", payload: { layer: GeoportalLayerItem; active: boolean }): void;
   (e: "reorder-layers", layers: ActiveLayerItem[]): void;
+  (e: "toggle-3d-buildings"): void;
+  (e: "toggle-3d-terrain"): void;
+  (e: "update-terrain-exaggeration", exaggeration: number): void;
 }>();
 
 const {
@@ -351,7 +360,135 @@ const extraCatalogLayers = computed(() => {
       </div>
     </section>
 
-    <!-- 2. Peta Pendukung dari Instansi Lain -->
+    <!-- 2. Visualisasi 3D MapLibre GL JS -->
+    <section class="space-y-2 pt-1">
+      <div class="flex items-center justify-between gap-2 px-0.5">
+        <h2 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight">
+          Visualisasi 3D Peta
+        </h2>
+        <span class="text-xs font-medium text-slate-600 dark:text-slate-300 tabular-nums">
+          MapLibre GL
+        </span>
+      </div>
+
+      <div class="rounded-2xl bg-slate-100/85 dark:bg-white/[0.04] divide-y divide-slate-200/75 dark:divide-white/[0.06] overflow-hidden">
+        <!-- Bangunan 3D -->
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="props.show3dBuildings"
+          class="w-full px-3.5 py-3 text-left flex items-center justify-between gap-3 transition-colors cursor-pointer min-h-[60px] hover:bg-slate-200/45 dark:hover:bg-white/[0.04]"
+          @click="emit('toggle-3d-buildings')"
+        >
+          <span
+            class="size-10 rounded-xl flex items-center justify-center shrink-0 shadow-2xs transition-colors"
+            :class="props.show3dBuildings
+              ? 'bg-blue-600 text-white'
+              : 'bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-200'"
+          >
+            <UIcon name="i-lucide-building-2" class="size-5" aria-hidden="true" />
+          </span>
+
+          <div class="min-w-0 flex-1">
+            <p class="text-[13px] font-bold text-slate-900 dark:text-white truncate">
+              Bangunan 3D
+            </p>
+            <p class="text-xs text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-2 leading-snug">
+              Ekstrusi tinggi gedung 3D pada skala kota hingga desa.
+            </p>
+          </div>
+
+          <span
+            class="w-11 h-6 rounded-full p-0.5 transition-colors flex items-center shrink-0"
+            :class="props.show3dBuildings ? 'bg-blue-600 justify-end' : 'bg-slate-300 dark:bg-white/20 justify-start'"
+          >
+            <span class="size-5 rounded-full bg-white shadow-xs" />
+          </span>
+        </button>
+
+        <!-- Medan 3D (Terrain) -->
+        <div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="props.show3dTerrain"
+            class="w-full px-3.5 py-3 text-left flex items-center justify-between gap-3 transition-colors cursor-pointer min-h-[60px] hover:bg-slate-200/45 dark:hover:bg-white/[0.04]"
+            @click="emit('toggle-3d-terrain')"
+          >
+            <span
+              class="size-10 rounded-xl flex items-center justify-center shrink-0 shadow-2xs transition-colors"
+              :class="props.show3dTerrain
+                ? 'bg-blue-600 text-white'
+                : 'bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-200'"
+            >
+              <UIcon name="i-lucide-mountain" class="size-5" aria-hidden="true" />
+            </span>
+
+            <div class="min-w-0 flex-1">
+              <p class="text-[13px] font-bold text-slate-900 dark:text-white truncate">
+                Medan 3D (Terrain)
+              </p>
+              <p class="text-xs text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-2 leading-snug">
+                Bentuk elevasi bukit, lembah, dan bayangan topografi.
+              </p>
+            </div>
+
+            <span
+              class="w-11 h-6 rounded-full p-0.5 transition-colors flex items-center shrink-0"
+              :class="props.show3dTerrain ? 'bg-blue-600 justify-end' : 'bg-slate-300 dark:bg-white/20 justify-start'"
+            >
+              <span class="size-5 rounded-full bg-white shadow-xs" />
+            </span>
+          </button>
+
+          <!-- Slider Skala Elevasi Medan 3D -->
+          <div
+            v-if="props.show3dTerrain"
+            data-sheet-no-drag
+            draggable="false"
+            class="flex items-center gap-2.5 px-3.5 pb-3 pt-1 pl-16"
+            @pointerdown.stop
+            @mousedown.stop
+            @touchstart.stop
+            @touchmove.stop
+            @dragstart.prevent.stop
+          >
+            <span class="text-xs font-medium text-slate-700 dark:text-slate-200 shrink-0">
+              Elevasi
+            </span>
+            <input
+              :value="props.terrainExaggeration"
+              type="range"
+              draggable="false"
+              min="0.5"
+              max="3"
+              step="0.25"
+              aria-label="Atur skala ketinggian medan 3D"
+              class="flex-1 h-8 py-2 accent-blue-600 cursor-pointer touch-none"
+              @pointerdown.stop
+              @mousedown.stop
+              @touchstart.stop
+              @touchmove.stop
+              @dragstart.prevent.stop
+              @input="emit('update-terrain-exaggeration', Number(($event.target as HTMLInputElement).value))"
+              @change="emit('update-terrain-exaggeration', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="text-xs font-bold text-slate-800 dark:text-slate-100 tabular-nums w-10 text-right shrink-0">
+              {{ props.terrainExaggeration.toFixed(1) }}x
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <p
+        v-if="props.show3dBuildings || props.show3dTerrain"
+        class="text-xs font-medium text-slate-600 dark:text-slate-300 px-0.5 leading-snug"
+      >
+        Tahan klik kanan atau Ctrl + geser untuk memiringkan sudut pandang peta 3D.
+      </p>
+    </section>
+
+    <!-- 3. Peta Pendukung dari Instansi Lain -->
     <section class="space-y-2.5 pt-1">
       <div class="flex items-center justify-between px-0.5">
         <h2 class="text-sm font-bold text-slate-900 dark:text-white tracking-tight">

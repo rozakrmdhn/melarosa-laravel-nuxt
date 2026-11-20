@@ -327,6 +327,9 @@ const mobileSheetSnap = ref<SnapLevel>("min");
 const isMobileScreen = ref(false);
 const previousTabBeforeIdentify = ref<MainTab | null>(null);
 const showGeoparkOverlay = ref(false);
+const show3dBuildings = ref(false);
+const show3dTerrain = ref(false);
+const terrainExaggeration = ref(1.5);
 
 function isRoadLayerItem(layer: ActiveLayerItem): boolean {
   const hay = `${layer.id || ""} ${layer.layer_name || ""} ${layer.martinSource || ""} ${layer.title || ""} ${layer.name || ""}`.toLowerCase();
@@ -345,6 +348,20 @@ function handleToggleRoadsVisibility() {
 
 function handleToggleGeoparkOverlay() {
   showGeoparkOverlay.value = !showGeoparkOverlay.value;
+}
+
+function handleToggle3dBuildings() {
+  show3dBuildings.value = !show3dBuildings.value;
+}
+
+function handleToggle3dTerrain() {
+  show3dTerrain.value = !show3dTerrain.value;
+}
+
+function handleUpdateTerrainExaggeration(val: number) {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return;
+  terrainExaggeration.value = Math.max(0.5, Math.min(3, num));
 }
 
 function handleLocateUser() {
@@ -2606,6 +2623,9 @@ function handleSelectDataset(dataset: any) {
         :is-identifying="isIdentifyingFeatures"
         :inspector-open="locationBarOpen"
         :geopark-overlay-visible="showGeoparkOverlay"
+        :show3d-buildings="show3dBuildings"
+        :show3d-terrain="show3dTerrain"
+        :terrain-exaggeration="terrainExaggeration"
         @tab-change="handleTabChange"
         @open-layer-detail="handleOpenLayerDetail"
         @close-layer-detail="handleCloseLayerDetail"
@@ -2627,6 +2647,9 @@ function handleSelectDataset(dataset: any) {
         @select-coordinate="handleSelectCoordinate"
         @toggle-roads-visibility="handleToggleRoadsVisibility"
         @toggle-geopark-overlay="handleToggleGeoparkOverlay"
+        @toggle-3d-buildings="handleToggle3dBuildings"
+        @toggle-3d-terrain="handleToggle3dTerrain"
+        @update-terrain-exaggeration="handleUpdateTerrainExaggeration"
         @locate-user="handleLocateUser"
         @select-road="handleSelectRoadFromExplorer"
       />
@@ -2654,6 +2677,9 @@ function handleSelectDataset(dataset: any) {
           :active-tab="currentMainTab"
           :selected-geopark-site="selectedGeoparkSite"
           :geopark-sites="(currentMainTab === 'geopark' || showGeoparkOverlay) ? geoparkSites : []"
+          :show3d-buildings="show3dBuildings"
+          :show3d-terrain="show3dTerrain"
+          :terrain-exaggeration="terrainExaggeration"
           @select-geopark="handleOpenGeoparkDetail"
           @map-click="handleMapClick"
           @canvas-tap-dismiss="handleCanvasTapDismiss"
@@ -2904,6 +2930,9 @@ function handleSelectDataset(dataset: any) {
           :is-identifying="isIdentifyingFeatures"
           :inspector-open="locationBarOpen"
           :geopark-overlay-visible="showGeoparkOverlay"
+          :show3d-buildings="show3dBuildings"
+          :show3d-terrain="show3dTerrain"
+          :terrain-exaggeration="terrainExaggeration"
           @tab-change="handleTabChange"
           @open-layer-detail="handleOpenLayerDetail"
           @close-layer-detail="handleCloseLayerDetail"
@@ -2926,6 +2955,9 @@ function handleSelectDataset(dataset: any) {
           @select-coordinate="handleSelectCoordinate"
           @toggle-roads-visibility="handleToggleRoadsVisibility"
           @toggle-geopark-overlay="handleToggleGeoparkOverlay"
+          @toggle-3d-buildings="handleToggle3dBuildings"
+          @toggle-3d-terrain="handleToggle3dTerrain"
+          @update-terrain-exaggeration="handleUpdateTerrainExaggeration"
           @locate-user="handleLocateUser"
           @select-road="handleSelectRoadFromExplorer"
           @search-focus="handleMobileSearchFocus"

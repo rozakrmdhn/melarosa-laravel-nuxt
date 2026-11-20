@@ -57,6 +57,9 @@ const props = withDefaults(
     selectedGeoparkSite?: GeoparkSite | null;
     activeTab?: string;
     deferLabelsOnMove?: boolean;
+    show3dBuildings?: boolean;
+    show3dTerrain?: boolean;
+    terrainExaggeration?: number;
   }>(),
   {
     currentBasemap: "esri",
@@ -74,6 +77,9 @@ const props = withDefaults(
     selectedGeoparkSite: null,
     activeTab: "layers",
     deferLabelsOnMove: true,
+    show3dBuildings: false,
+    show3dTerrain: false,
+    terrainExaggeration: 1.5,
   }
 );
 
@@ -96,6 +102,10 @@ const DEFAULT_ZOOM_256 = 11;
 
 const BASEMAP_SOURCE_ID = "mr-basemap-source";
 const BASEMAP_LAYER_ID = "mr-basemap-layer";
+const TERRAIN_DEM_SOURCE_ID = "mr-src-terrain-dem";
+const TERRAIN_HILLSHADE_LAYER_ID = "mr-terrain-hillshade";
+const BUILDINGS_OSM_SOURCE_ID = "mr-src-osm-buildings";
+const BUILDINGS_3D_LAYER_ID = "mr-3d-buildings";
 const GRID_LINES_SOURCE_ID = "mr-graticule-lines-src";
 const GRID_LABELS_SOURCE_ID = "mr-graticule-labels-src";
 const GRID_LINES_LAYER_ID = "mr-graticule-lines-layer";
@@ -529,7 +539,195 @@ function syncBasemap() {
     const firstNonBasemapId = existingLayers.find((l: any) => l.id !== BASEMAP_LAYER_ID)?.id;
     mapInstance.addLayer(layer, firstNonBasemapId);
   }
+  enforceLayerStackOrder();
 }
+
+function build3dBuildingColorExpr(isDark: boolean) {
+  return [
+    "interpolate",
+    ["linear"],
+    ["coalesce", ["get", "render_height"], 8],
+    0,
+    isDark ? "#334155" : "#cbd5e1",
+    12,
+    isDark ? "#475569" : "#94a3b8",
+    30,
+    isDark ? "#64748b" : "#64748b",
+    60,
+    isDark ? "#94a3b8" : "#475569",
+  ];
+}
+
+function sync3dEnvironment(options?: {
+  adjustCamera?: boolean;
+  justEnabledBuildings?: boolean;
+  justEnabledTerrain?: boolean;
+}) {
+  if (!mapInstance) return;
+  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const wantTerrain = Boolean(props.show3dTerrain);
+  const wantBuildings = Boolean(props.show3dBuildings);
+  const exaggerationRaw = Number(props.terrainExaggeration);
+  const exaggeration = Number.isFinite(exaggerationRaw)
+    ? Math.max(0.5, Math.min(3, exaggerationRaw))
+    : 1.5;
+
+  // 1. 3D Terrain (AWS Mapzen Terrarium DEM + subtle hillshade)
+  if (wantTerrain) {
+    if (!mapInstance.getSource(TERRAIN_DEM_SOURCE_ID)) {
+      mapInstance.addSource(TERRAIN_DEM_SOURCE_ID, {
+        type: "raster-dem",
+        tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 15,
+        encoding: "terrarium",
+      });
+    }
+    if (!mapInstance.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+      mapInstance.addLayer(
+        {
+          id: TERRAIN_HILLSHADE_LAYER_ID,
+          type: "hillshade",
+          source: TERRAIN_DEM_SOURCE_ID,
+          layout: { visibility: "visible" },
+          paint: {
+            "hillshade-exaggeration": 0.28,
+            "hillshade-shadow-color": isDark ? "#020617" : "#475569",
+            "hillshade-highlight-color": isDark ? "#64748b" : "#ffffff",
+            "hillshade-accent-color": isDark ? "#334155" : "#94a3b8",
+          },
+        },
+        getFirstOverlayLayerId()
+      );
+    } else {
+      mapInstance.setLayoutProperty(TERRAIN_HILLSHADE_LAYER_ID, "visibility", "visible");
+      mapInstance.setPaintProperty(TERRAIN_HILLSHADE_LAYER_ID, "hillshade-shadow-color", isDark ? "#020617" : "#475569");
+      mapInstance.setPaintProperty(TERRAIN_HILLSHADE_LAYER_ID, "hillshade-highlight-color", isDark ? "#64748b" : "#ffffff");
+      mapInstance.setPaintProperty(TERRAIN_HILLSHADE_LAYER_ID, "hillshade-accent-color", isDark ? "#334155" : "#94a3b8");
+    }
+    try {
+      mapInstance.setTerrain({ source: TERRAIN_DEM_SOURCE_ID, exaggeration });
+    } catch {
+      // Abaikan bila WebGL terrain context belum siap
+    }
+  } else {
+    try {
+      if (mapInstance.getTerrain?.()) {
+        mapInstance.setTerrain(null);
+      }
+    } catch {}
+    if (mapInstance.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+      mapInstance.setLayoutProperty(TERRAIN_HILLSHADE_LAYER_ID, "visibility", "none");
+    }
+  }
+
+  // 2. 3D Buildings (OpenFreeMap / OpenMapTiles vector building fill-extrusion)
+  if (wantBuildings) {
+    if (!mapInstance.getSource(BUILDINGS_OSM_SOURCE_ID)) {
+      mapInstance.addSource(BUILDINGS_OSM_SOURCE_ID, {
+        type: "vector",
+        url: "https://tiles.openfreemap.org/planet",
+      });
+    }
+    const buildingColorExpr = build3dBuildingColorExpr(isDark);
+    if (!mapInstance.getLayer(BUILDINGS_3D_LAYER_ID)) {
+      mapInstance.addLayer(
+        {
+          id: BUILDINGS_3D_LAYER_ID,
+          type: "fill-extrusion",
+          source: BUILDINGS_OSM_SOURCE_ID,
+          "source-layer": "building",
+          minzoom: 13.5,
+          filter: ["!=", ["get", "hide_3d"], true],
+          layout: { visibility: "visible" },
+          paint: {
+            "fill-extrusion-color": buildingColorExpr,
+            "fill-extrusion-height": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              13.5,
+              0,
+              14.2,
+              ["coalesce", ["get", "render_height"], 8],
+            ],
+            "fill-extrusion-base": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              13.5,
+              0,
+              14.2,
+              ["coalesce", ["get", "render_min_height"], 0],
+            ],
+            "fill-extrusion-vertical-gradient": true,
+            "fill-extrusion-opacity": 0.88,
+          },
+        },
+        getFirstOverlayLayerId()
+      );
+    } else {
+      mapInstance.setLayoutProperty(BUILDINGS_3D_LAYER_ID, "visibility", "visible");
+      mapInstance.setPaintProperty(BUILDINGS_3D_LAYER_ID, "fill-extrusion-color", buildingColorExpr);
+    }
+  } else if (mapInstance.getLayer(BUILDINGS_3D_LAYER_ID)) {
+    mapInstance.setLayoutProperty(BUILDINGS_3D_LAYER_ID, "visibility", "none");
+  }
+
+  // 3. Atmospheric horizon sky for tilted 3D mode
+  try {
+    if (typeof mapInstance.setSky === "function") {
+      if (wantTerrain || wantBuildings) {
+        mapInstance.setSky({
+          "sky-color": isDark ? "#0f172a" : "#88c6fc",
+          "horizon-color": isDark ? "#1e293b" : "#e2eef8",
+          "fog-color": isDark ? "#1e293b" : "#e2eef8",
+          "fog-ground-blend": 0.45,
+          "sky-horizon-blend": 0.7,
+          "atmosphere-blend": 0.8,
+        });
+      } else {
+        mapInstance.setSky(undefined);
+      }
+    }
+  } catch {}
+
+  enforceLayerStackOrder();
+
+  if (options?.adjustCamera) {
+    const curPitch = mapInstance.getPitch?.() || 0;
+    const curZoom = mapInstance.getZoom?.() || 10;
+    if (wantTerrain || wantBuildings) {
+      const targetPitch = curPitch < 20 ? 48 : curPitch;
+      const shouldZoomIn = Boolean(options.justEnabledBuildings) && curZoom < 13.5;
+      if (curPitch < 20 || shouldZoomIn) {
+        mapInstance.easeTo({
+          pitch: targetPitch,
+          ...(shouldZoomIn ? { zoom: 14.2 } : {}),
+          duration: getMotionDuration(600),
+        });
+      }
+    } else if (curPitch > 0) {
+      mapInstance.easeTo({
+        pitch: 0,
+        duration: getMotionDuration(450),
+      });
+    }
+  }
+}
+
+watch(
+  [() => props.show3dBuildings, () => props.show3dTerrain, () => props.terrainExaggeration],
+  ([nextBuildings, nextTerrain], [prevBuildings, prevTerrain]) => {
+    const toggledBuildings = Boolean(nextBuildings) !== Boolean(prevBuildings);
+    const toggledTerrain = Boolean(nextTerrain) !== Boolean(prevTerrain);
+    sync3dEnvironment({
+      adjustCamera: toggledBuildings || toggledTerrain,
+      justEnabledBuildings: !prevBuildings && Boolean(nextBuildings),
+      justEnabledTerrain: !prevTerrain && Boolean(nextTerrain),
+    });
+  }
+);
 
 watch(
   [() => props.currentBasemap, () => basemapStoreForCanvas.items],
@@ -552,7 +750,11 @@ function enforceLayerStackOrder() {
   const orderedOverlayIds = TOP_OVERLAY_LAYER_IDS.filter((id) => Boolean(mapInstance.getLayer(id)));
   const firstOverlay = orderedOverlayIds[0];
 
-  // Order active GIS layers bottom-up beneath the overlays
+  if (mapInstance.getLayer(TERRAIN_HILLSHADE_LAYER_ID)) {
+    mapInstance.moveLayer(TERRAIN_HILLSHADE_LAYER_ID, firstOverlay);
+  }
+
+  // Order active GIS layers bottom-up beneath 3D buildings and top overlays
   const bottomUp = [...(props.activeLayers || [])].reverse();
   for (const layer of bottomUp) {
     const mvtRec = mvtLayersMap.get(layer.id);
@@ -568,6 +770,10 @@ function enforceLayerStackOrder() {
     if (wmsRec && mapInstance.getLayer(wmsRec.layerId)) {
       mapInstance.moveLayer(wmsRec.layerId, firstOverlay);
     }
+  }
+
+  if (mapInstance.getLayer(BUILDINGS_3D_LAYER_ID)) {
+    mapInstance.moveLayer(BUILDINGS_3D_LAYER_ID, firstOverlay);
   }
 
   // Re-assert overlay z-stack order from bottom overlay to top GPS dot
@@ -1983,9 +2189,10 @@ function resetView() {
 
 function resetNorth() {
   if (!mapInstance) return;
+  const keepTilt = Boolean(props.show3dBuildings || props.show3dTerrain);
   mapInstance.easeTo({
     bearing: 0,
-    pitch: 0,
+    ...(keepTilt ? {} : { pitch: 0 }),
     duration: getMotionDuration(350),
   });
 }
@@ -2904,6 +3111,9 @@ async function initMap() {
       zoom: initialZoomMl,
       minZoom: 5,
       maxZoom: 19,
+      maxPitch: 75,
+      dragRotate: true,
+      pitchWithRotate: true,
       attributionControl: false,
     });
 
@@ -2919,6 +3129,11 @@ async function initMap() {
       ensureHeadingBeamImage();
       applyInitialExtentOnInit();
       syncActiveLayers();
+      sync3dEnvironment({
+        adjustCamera: Boolean(props.show3dBuildings || props.show3dTerrain),
+        justEnabledBuildings: Boolean(props.show3dBuildings),
+        justEnabledTerrain: Boolean(props.show3dTerrain),
+      });
       syncPinMarker();
       syncGeoparkMarkers();
       syncCartoGrid();
@@ -3000,6 +3215,7 @@ async function initMap() {
     themeMutationObserver = new MutationObserver(() => {
       updateCartoGridTheme();
       syncActiveLayers();
+      sync3dEnvironment();
       if (activeSelectedFeature.value) {
         renderSelectedFeature(activeSelectedFeature.value, { force: true });
       }

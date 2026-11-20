@@ -301,9 +301,10 @@ class JalanPorosDesaController extends Controller
                 ], 422);
             }
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Invalid GeoJSON on JalanPorosDesa store: ' . $e->getMessage());
             return response()->json([
                 'ok'      => false,
-                'message' => 'Format GeoJSON geometri tidak dapat diproses: ' . $e->getMessage(),
+                'message' => 'Format GeoJSON geometri tidak dapat diproses.',
             ], 422);
         }
 
@@ -408,6 +409,16 @@ class JalanPorosDesaController extends Controller
                 ], 422);
             }
             $ruas->kode_ruas = $kode;
+        }
+
+        // Kunci wilayah otomatis sesuai akun pengguna yang dibatasi
+        if ($user && !$user->isAdminOrBappeda()) {
+            if ($user->id_desa) {
+                $validated['id_desa'] = $user->id_desa;
+                $validated['id_kecamatan'] = $user->id_kecamatan;
+            } elseif ($user->id_kecamatan) {
+                $validated['id_kecamatan'] = $user->id_kecamatan;
+            }
         }
 
         foreach (['nama_ruas', 'desa', 'kecamatan', 'panjang', 'lebar',

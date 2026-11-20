@@ -117,7 +117,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     async onRequestError(context: HttpFetchContext) {
       await callHooks(context, context.options.onFetchError);
 
-      if (import.meta.server || context.error.name === 'AbortError') return;
+      if (import.meta.server || context.error.name === 'AbortError' || (context.options as any)?.silent) return;
 
       const message = context.error?.message?.trim() || 'Gagal menghubungkan ke server. Periksa koneksi internet Anda.';
 
@@ -139,6 +139,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       } else if (
         context.response.status !== 422
         && !(context.response.status === 419 && !(context.options as any)?._csrfRetried)
+        && !(context.options as any)?.silent
         && import.meta.client
       ) {
         const data = context.response._data;

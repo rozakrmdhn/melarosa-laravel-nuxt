@@ -17,6 +17,20 @@ class JsonResponse
     {
         $request->headers->set('Accept', 'application/json');
 
+        $user = $request->user();
+        if ($user && !$user->status) {
+            \Illuminate\Support\Facades\Auth::guard('web')->logout();
+            if ($request->hasSession()) {
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+            }
+
+            return response()->json([
+                'ok' => false,
+                'message' => 'Akun Anda telah dinonaktifkan. Hubungi administrator.',
+            ], 403);
+        }
+
         return $next($request);
     }
 }

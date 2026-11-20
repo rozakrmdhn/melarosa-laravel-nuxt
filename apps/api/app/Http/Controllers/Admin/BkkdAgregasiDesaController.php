@@ -451,13 +451,22 @@ class BkkdAgregasiDesaController extends Controller
                 'Total Nilai Usulan (Rp)',
             ]);
 
+            $sanitizeCsvCell = static function (mixed $value): string {
+                $str = (string) ($value ?? '');
+                if ($str !== '' && in_array($str[0], ['=', '+', '-', '@', "\t", "\r"], true)) {
+                    return "'" . $str;
+                }
+
+                return $str;
+            };
+
             $no = 1;
             foreach ($records as $r) {
                 fputcsv($handle, [
                     $no++,
-                    $r['nama_kecamatan'],
-                    $r['nama_desa'],
-                    $r['nama_bidang'],
+                    $sanitizeCsvCell($r['nama_kecamatan']),
+                    $sanitizeCsvCell($r['nama_desa']),
+                    $sanitizeCsvCell($r['nama_bidang']),
                     $r['jumlah_usulan'],
                     number_format($r['total_nilai_usulan'], 0, ',', '.'),
                 ]);

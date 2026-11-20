@@ -117,7 +117,9 @@ export default defineNuxtConfig({
 
   security: {
     headers: {
-      strictTransportSecurity: false,
+      strictTransportSecurity: process.env.NODE_ENV === 'production'
+        ? { maxAge: 31536000, includeSubdomains: true }
+        : false,
       crossOriginEmbedderPolicy: 'unsafe-none',
       crossOriginOpenerPolicy: 'same-origin-allow-popups',
       referrerPolicy: 'strict-origin-when-cross-origin',
@@ -126,7 +128,7 @@ export default defineNuxtConfig({
         geolocation: ['self'],
       },
       contentSecurityPolicy: {
-        "upgrade-insecure-requests": false,
+        "upgrade-insecure-requests": process.env.NODE_ENV === 'production',
         "img-src": [
           "'self'",
           "data:",
@@ -144,9 +146,11 @@ export default defineNuxtConfig({
           "https://*.my.id",
           "https:",
           process.env.APP_URL || 'http://127.0.0.1:9000',
-          process.env.MARTIN_URL || 'http://127.0.0.1:9090',
-          'http://localhost:9090',
-          'http://127.0.0.1:9090',
+          ...(process.env.NODE_ENV !== 'production' ? [
+            process.env.MARTIN_URL || 'http://127.0.0.1:9090',
+            'http://localhost:9090',
+            'http://127.0.0.1:9090',
+          ] : []),
         ],
         "worker-src": ["'self'", "blob:"],
         "frame-src": ["'self'", "blob:"],
@@ -170,8 +174,8 @@ export default defineNuxtConfig({
           "https://api.simplesvg.com",
           "https://api.unisvg.com",
           process.env.APP_URL || 'http://127.0.0.1:9000',
-          process.env.MARTIN_URL || 'http://127.0.0.1:9090',
           ...(process.env.NODE_ENV !== 'production' ? [
+            process.env.MARTIN_URL || 'http://127.0.0.1:9090',
             "http://localhost:*",
             "http://127.0.0.1:*",
             "ws://localhost:*",

@@ -628,11 +628,16 @@ class BkkdProposalController extends Controller
         Gate::authorize('create', BkkdProposal::class);
         $user = $request->user();
 
+        $request->validate([
+            'rows' => ['nullable', 'array', 'max:500'],
+            'file' => ['nullable', 'file', 'max:5120'],
+        ]);
+
         $rows = $request->input('rows');
 
         if (empty($rows) && $request->hasFile('file')) {
             $file = $request->file('file');
-            $rows = $this->parseCsvFile($file->getRealPath());
+            $rows = array_slice($this->parseCsvFile($file->getRealPath()), 0, 500);
         }
 
         if (empty($rows) || !is_array($rows)) {

@@ -229,9 +229,10 @@ class BatasWilayahKecamatanController extends Controller
                 'data' => $fresh->toGeoJsonFeature(),
             ], 201);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('BatasWilayahKecamatan store error: ' . $e->getMessage());
             return response()->json([
                 'ok' => false,
-                'message' => 'Gagal menyimpan geometri PostGIS: ' . $e->getMessage(),
+                'message' => 'Gagal menyimpan geometri PostGIS.',
             ], 500);
         }
     }
@@ -303,9 +304,10 @@ class BatasWilayahKecamatanController extends Controller
                 'data' => $fresh->toGeoJsonFeature(),
             ]);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('BatasWilayahKecamatan update error: ' . $e->getMessage());
             return response()->json([
                 'ok' => false,
-                'message' => 'Gagal memperbarui geometri PostGIS: ' . $e->getMessage(),
+                'message' => 'Gagal memperbarui geometri PostGIS.',
             ], 500);
         }
     }

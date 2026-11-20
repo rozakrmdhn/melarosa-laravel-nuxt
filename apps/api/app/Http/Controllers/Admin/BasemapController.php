@@ -166,6 +166,16 @@ class BasemapController extends Controller
         $isUpdate = $ignoreId !== null;
         $reqRule = $isUpdate ? 'sometimes' : 'required';
 
+        $urlSchemeRule = function ($attr, $value, $fail) {
+            $v = trim((string) $value);
+            if ($v === '') {
+                return;
+            }
+            if (!str_starts_with($v, 'https://') && !str_starts_with($v, 'http://') && !str_starts_with($v, '/')) {
+                $fail('URL harus diawali https://, http://, atau path relatif /.');
+            }
+        };
+
         $validated = $request->validate([
             'kode'                  => [
                 $reqRule,
@@ -185,11 +195,11 @@ class BasemapController extends Controller
                     $fail('URL template harus diawali https://, http://, atau path relatif /.');
                 }
             }],
-            'fallback_url_template' => ['nullable', 'string', 'max:1000'],
+            'fallback_url_template' => ['nullable', 'string', 'max:1000', $urlSchemeRule],
             'tile_urls'             => ['nullable', 'array', 'max:8'],
-            'tile_urls.*'           => ['string', 'max:1000'],
+            'tile_urls.*'           => ['string', 'max:1000', $urlSchemeRule],
             'attribution'           => ['nullable', 'string', 'max:255'],
-            'thumbnail_url'         => ['nullable', 'string', 'max:255'],
+            'thumbnail_url'         => ['nullable', 'string', 'max:255', $urlSchemeRule],
             'preview_style'         => ['sometimes', 'string', Rule::in(self::PREVIEW_STYLES)],
             'min_zoom'              => ['sometimes', 'integer', 'min:0', 'max:22'],
             'max_zoom'              => ['sometimes', 'integer', 'min:1', 'max:22'],

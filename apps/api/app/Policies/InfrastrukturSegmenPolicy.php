@@ -34,7 +34,23 @@ class InfrastrukturSegmenPolicy
 
     public function view(User $user, InfrastrukturSegmen $segmen): bool
     {
-        return $this->viewAny($user);
+        if (!$this->viewAny($user)) {
+            return false;
+        }
+
+        if ($user->isAdminOrBappeda()) {
+            return true;
+        }
+
+        if ($user->id_desa) {
+            return (int) $segmen->id_desa === (int) $user->id_desa;
+        }
+
+        if ($user->hasAnyRole(['verifierKecamatan', 'verifikator-kecamatan', 'kecamatan']) || $user->id_kecamatan) {
+            return (int) $segmen->id_kecamatan === (int) $user->id_kecamatan;
+        }
+
+        return true;
     }
 
     public function create(User $user): bool

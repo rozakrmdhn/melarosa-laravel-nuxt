@@ -42,7 +42,9 @@ return [
     ))),
 
     'allowed_origins_patterns' => array_values(array_filter([
-        '#^https?://.*\.saggaserv\.my\.id$#',
+        env('APP_ENV') === 'production'
+            ? '#^https://.*\.saggaserv\.my\.id$#'
+            : '#^https?://.*\.saggaserv\.my\.id$#',
         env('APP_ENV') !== 'production' ? '#^https?://(localhost|127\.0\.0\.1)(:\d+)?$#' : null,
         env('APP_ENV') !== 'production' ? '#^https?://.*\.test(:\d+)?$#' : null,
     ])),

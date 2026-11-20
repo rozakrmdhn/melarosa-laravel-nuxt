@@ -6,13 +6,70 @@
 #   martin
 
 server:
-  listen_addresses: '${MARTIN_LISTEN_ADDRESSES:-0.0.0.0:9090}'
+  listen_addresses: '${MARTIN_LISTEN_ADDRESSES:-127.0.0.1:9090}'
   worker_processes: 4
 
 postgres:
   connection_string: '${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/db_melarosa}'
-  auto_publish:
-    tables:
-      from_schemas:
-        - public
-      id_format: '{table}'
+  auto_publish: false
+  tables:
+    bataswilayah_kabupaten:
+      schema: public
+      table: bataswilayah_kabupaten
+      srid: 4326
+      geometry_column: geom
+    bataswilayah_kecamatan:
+      schema: public
+      table: bataswilayah_kecamatan
+      srid: 4326
+      geometry_column: geom
+    bataswilayah_desa:
+      schema: public
+      table: bataswilayah_desa
+      srid: 4326
+      geometry_column: geom
+    jalan_porosdesa:
+      schema: public
+      table: jalan_porosdesa
+      srid: 4326
+      geometry_column: geom
+    jalan_kabupaten_luarkota:
+      schema: public
+      table: jalan_kabupaten_luarkota
+      srid: 4326
+      geometry_column: geom
+    rtrw_jaringan_transportasi_ln:
+      schema: public
+      table: rtrw_jaringan_transportasi_ln
+      srid: 4326
+      geometry_column: geom
+    infrastruktur_segmen:
+      schema: public
+      table: infrastruktur_segmen
+      srid: 4326
+      geometry_column: geom
+    infrastruktur_area:
+      schema: public
+      table: infrastruktur_area
+      srid: 4326
+      geometry_column: geom
+    jalan_lingkungan:
+      schema: public
+      table: jalan_lingkungan
+      srid: 4326
+      geometry_column: geom
+    jalan_peningkatanstatus:
+      schema: public
+      table: jalan_peningkatanstatus
+      srid: 4326
+      geometry_column: geom
+    jalan_segmen_pembangunan:
+      schema: public
+      table: jalan_segmen_pembangunan
+      srid: 4326
+      geometry_column: geom
+    bkkd_proposal_lokasi:
+      schema: public
+      table: bkkd_proposal_lokasi
+      srid: 4326
+      geometry_column: geom

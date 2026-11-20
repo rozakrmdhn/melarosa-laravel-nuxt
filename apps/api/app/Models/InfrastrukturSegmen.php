@@ -49,23 +49,10 @@ class InfrastrukturSegmen extends Model
         'namobj',
         'plotting_id',
         'is_non_pagu',
-        'verifikator',
-        'user_id',
         'status_parent',
         'sumber_data',
-        'status_verifikasi',
-        'catatan_verifikasi',
         'id_entry',
         'status_aset',
-        'created_by',
-        'created_by_role',
-        'submitted_desa_at',
-        'verified_kecamatan_by',
-        'verified_kecamatan_at',
-        'catatan_kecamatan',
-        'verified_bappeda_by',
-        'verified_bappeda_at',
-        'catatan_bappeda',
     ];
 
     protected $casts = [

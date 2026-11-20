@@ -4,7 +4,7 @@ import BasemapSwitcher from '~/components/common/BasemapSwitcher.vue';
 import { useDefaultBasemap } from '~/composables/useDefaultBasemap';
 import { useBasemapStore } from '~/stores/basemap';
 import { buildDynamicMaplibreBasemapSpec, resolveAbsoluteTileUrl } from '~/utils/basemap-sources';
-import { getStatusAnalisaMeta } from '~/utils/jaringan-jalan-format';
+import { computeGeometryBbox, getStatusAnalisaMeta } from '~/utils/jaringan-jalan-format';
 import type {
   JaringanMapLayersState,
   JaringanMapOpacityState,
@@ -80,10 +80,11 @@ const hoverTooltip = ref<{
 let mapInstance: any = null;
 let maplibregl: any = null;
 let resizeObserver: ResizeObserver | null = null;
-let pendingResizeRaf: number | null = null;
+let canvasReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let lastObservedW = 0;
 let lastObservedH = 0;
 let tileErrorCount = 0;
+let lastImmediateSelectKey: string | null = null;
 
 const appliedStatusCache = new Map<number, StatusAnalisaRtrw>();
 const appliedDimCache = new Map<number, boolean>();
@@ -225,7 +226,7 @@ function buildMapStyle(basemapCode: string) {
       },
       paint: {
         'line-color': kecLineColor,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1, 13, 2],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.8, 13, 1.5],
         'line-dasharray': [4, 2],
         'line-opacity': op.kecamatan ?? 0.72,
       },
@@ -241,7 +242,7 @@ function buildMapStyle(basemapCode: string) {
       },
       paint: {
         'line-color': desaLineColor,
-        'line-width': 0.9,
+        'line-width': 0.7,
         'line-dasharray': [2, 2],
         'line-opacity': op.desa ?? 0.48,
       },
@@ -259,7 +260,7 @@ function buildMapStyle(basemapCode: string) {
       },
       paint: {
         'line-color': buildRtrwPaintColor(props.colorModeType),
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 13, 3, 16, 4.8],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.1, 13, 2.2, 16, 3.6],
         'line-opacity': [
           'case',
           ['boolean', ['feature-state', 'dim'], false],
@@ -280,7 +281,7 @@ function buildMapStyle(basemapCode: string) {
       },
       paint: {
         'line-color': ['case', ['==', ['get', 'sumber_data'], 'rtrw_orde'], '#4f46e5', '#0d9488'],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.6, 13, 3.2, 16, 5],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 13, 2.4, 16, 3.8],
         'line-opacity': op.poros ?? 0.88,
       },
     },
@@ -296,7 +297,7 @@ function buildMapStyle(basemapCode: string) {
       },
       paint: {
         'line-color': dark ? '#0f172a' : '#ffffff',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 3.4, 13, 5.4, 16, 8],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.4, 13, 4, 16, 6],
         'line-opacity': Math.max(0.1, (op.kabupaten ?? 0.95) * 0.88),
       },
     },
@@ -312,7 +313,7 @@ function buildMapStyle(basemapCode: string) {
       },
       paint: {
         'line-color': dark ? '#38bdf8' : '#1d4ed8',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2, 13, 3.5, 16, 5.5],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.4, 13, 2.6, 16, 4.2],
         'line-opacity': op.kabupaten ?? 0.95,
       },
     },
@@ -324,7 +325,7 @@ function buildMapStyle(basemapCode: string) {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#0284c7',
-        'line-width': 7.5,
+        'line-width': 5.5,
         'line-opacity': 0.65,
       },
     },
@@ -336,20 +337,34 @@ function buildMapStyle(basemapCode: string) {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#10b981',
-        'line-width': 7.5,
+        'line-width': 5.5,
         'line-opacity': 0.65,
       },
     },
     {
-      id: 'highlight-primary-casing',
+      id: 'highlight-primary-halo-outer',
       type: 'line',
       source: 'selection-highlight',
       filter: ['==', ['get', 'role'], 'primary'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#ffffff',
-        'line-width': 11,
-        'line-opacity': 0.95,
+        'line-color': '#38bdf8',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 9, 14, 13, 17, 16],
+        'line-blur': 6,
+        'line-opacity': 0.48,
+      },
+    },
+    {
+      id: 'highlight-primary-halo-inner',
+      type: 'line',
+      source: 'selection-highlight',
+      filter: ['==', ['get', 'role'], 'primary'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#0ea5e9',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 5.2, 14, 7.2, 17, 9],
+        'line-blur': 1.8,
+        'line-opacity': 0.85,
       },
     },
     {
@@ -359,8 +374,8 @@ function buildMapStyle(basemapCode: string) {
       filter: ['==', ['get', 'role'], 'primary'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#f59e0b',
-        'line-width': 6,
+        'line-color': '#ffffff',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2, 14, 3, 17, 4],
         'line-opacity': 1,
       },
     },
@@ -470,7 +485,16 @@ function syncSelectionOverlay(fitToSelection = false) {
     src.setData(buildHighlightGeoJson(props.selection));
   }
 
-  if (fitToSelection && props.selection?.bbox && props.selection.bbox.length === 4) {
+  if (!props.selection) {
+    lastImmediateSelectKey = null;
+    return;
+  }
+
+  const selKey = `${props.selection.kind}:${props.selection.id}`;
+  const alreadyFittedImmediately = lastImmediateSelectKey === selKey;
+  lastImmediateSelectKey = null;
+
+  if (fitToSelection && !alreadyFittedImmediately && props.selection.bbox && props.selection.bbox.length === 4) {
     fitToBbox(props.selection.bbox);
   }
 }
@@ -538,10 +562,10 @@ function safeFitBounds(
 }
 
 function fitToBbox(bbox: [number, number, number, number] | null | undefined, maxZoom = 16.5) {
-  safeFitBounds(bbox, 48, maxZoom, 450);
+  safeFitBounds(bbox, 48, maxZoom, 240);
 }
 
-function fitToBojonegoro(duration = 440) {
+function fitToBojonegoro(duration = 280) {
   const flatBounds: [number, number, number, number] = [
     BOJONEGORO_BOUNDS[0][0],
     BOJONEGORO_BOUNDS[0][1],
@@ -570,27 +594,26 @@ function zoomBy(delta: number) {
   mapInstance.easeTo({ zoom: Math.max(8, Math.min(18.5, z + delta)), duration: 220 });
 }
 
-function scheduleMapResize() {
-  if (!mapInstance || !import.meta.client) return;
-  if (pendingResizeRaf !== null) {
-    cancelAnimationFrame(pendingResizeRaf);
+function resizeAndRedrawNow() {
+  const el = mapContainerRef.value;
+  if (!el || !mapInstance) return;
+  const w = Math.round(el.clientWidth);
+  const h = Math.round(el.clientHeight);
+  if (w < 40 || h < 40) return;
+  if (w === lastObservedW && h === lastObservedH) return;
+  lastObservedW = w;
+  lastObservedH = h;
+  mapInstance.resize();
+  // MapLibre resize() reallocates/clears the WebGL canvas and defers _render()
+  // to the next animation frame; calling redraw() synchronously paints inside
+  // the same frame before browser composite so zero blank frames appear.
+  if (isMapReady.value && typeof mapInstance.redraw === 'function') {
+    mapInstance.redraw();
   }
-  pendingResizeRaf = requestAnimationFrame(() => {
-    pendingResizeRaf = null;
-    const el = mapContainerRef.value;
-    if (!el || !mapInstance) return;
-    const w = Math.round(el.clientWidth);
-    const h = Math.round(el.clientHeight);
-    if (w < 40 || h < 40) return;
-    if (w === lastObservedW && h === lastObservedH) return;
-    lastObservedW = w;
-    lastObservedH = h;
-    mapInstance.resize();
-  });
 }
 
 function resizeMap() {
-  scheduleMapResize();
+  resizeAndRedrawNow();
 }
 
 function getTooltipStyle() {
@@ -608,6 +631,35 @@ function bindInteractiveEvents() {
 
   const queryableLayers = ['layer-kabupaten-lines', 'layer-poros-lines', 'layer-rtrw-lines'];
 
+  function queryAtPoint(point: { x: number; y: number }, layers: string[]) {
+    const hitTolerance = 5;
+    return mapInstance.queryRenderedFeatures(
+      [
+        [point.x - hitTolerance, point.y - hitTolerance],
+        [point.x + hitTolerance, point.y + hitTolerance],
+      ],
+      { layers },
+    );
+  }
+
+  function applyImmediateSelectionFeedback(kind: 'rtrw' | 'poros' | 'kabupaten', id: string | number, feat: any) {
+    lastImmediateSelectKey = `${kind}:${id}`;
+    const geom = feat?.geometry;
+    if (geom) {
+      const src = mapInstance.getSource('selection-highlight');
+      if (src && typeof src.setData === 'function') {
+        src.setData({
+          type: 'FeatureCollection',
+          features: [{ type: 'Feature', geometry: geom, properties: { role: 'primary' } }],
+        });
+      }
+      const bbox = computeGeometryBbox(geom);
+      if (bbox) {
+        safeFitBounds(bbox, 48, 16.5, 220);
+      }
+    }
+  }
+
   mapInstance.on('mousemove', (e: any) => {
     if (e?.lngLat) {
       cursorCoord.value = {
@@ -619,7 +671,7 @@ function bindInteractiveEvents() {
     const activeLayers = queryableLayers.filter((lid) => mapInstance.getLayer(lid));
     if (activeLayers.length === 0) return;
 
-    const features = mapInstance.queryRenderedFeatures(e.point, { layers: activeLayers });
+    const features = queryAtPoint(e.point, activeLayers);
     if (!features || features.length === 0) {
       mapInstance.getCanvas().style.cursor = '';
       hoverTooltip.value = null;
@@ -683,13 +735,14 @@ function bindInteractiveEvents() {
     );
     if (activeLayers.length === 0) return;
 
-    const features = mapInstance.queryRenderedFeatures(e.point, { layers: activeLayers });
+    const features = queryAtPoint(e.point, activeLayers);
     if (!features || features.length === 0) return;
 
     const rtrwFeat = features.find((f: any) => f.layer?.id === 'layer-rtrw-lines');
     if (rtrwFeat) {
       const rid = Number(rtrwFeat.properties?.id ?? rtrwFeat.id);
       if (Number.isFinite(rid) && rid > 0) {
+        applyImmediateSelectionFeedback('rtrw', rid, rtrwFeat);
         emit('select-rtrw', rid);
         return;
       }
@@ -697,7 +750,9 @@ function bindInteractiveEvents() {
 
     const porosFeat = features.find((f: any) => f.layer?.id === 'layer-poros-lines');
     if (porosFeat && porosFeat.properties?.id) {
-      emit('select-poros', String(porosFeat.properties.id));
+      const pid = String(porosFeat.properties.id);
+      applyImmediateSelectionFeedback('poros', pid, porosFeat);
+      emit('select-poros', pid);
       return;
     }
 
@@ -705,6 +760,7 @@ function bindInteractiveEvents() {
     if (kabFeat && kabFeat.properties?.id != null) {
       const kid = Number(kabFeat.properties.id);
       if (Number.isFinite(kid) && kid > 0) {
+        applyImmediateSelectionFeedback('kabupaten', kid, kabFeat);
         emit('select-kabupaten', kid);
       }
     }
@@ -742,6 +798,7 @@ async function initMap() {
       zoom: 10,
       minZoom: 8,
       maxZoom: 18.5,
+      fadeDuration: 0,
       trackResize: false,
       canvasContextAttributes: {
         preserveDrawingBuffer: true,
@@ -753,10 +810,17 @@ async function initMap() {
     mapInstance.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
     mapInstance.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-right');
 
-    mapInstance.on('load', () => {
+    const markCanvasReady = () => {
+      if (isMapReady.value) return;
+      if (canvasReadyFallbackTimer) {
+        clearTimeout(canvasReadyFallbackTimer);
+        canvasReadyFallbackTimer = null;
+      }
       isMapReady.value = true;
-      martinStatusState.value = 'ready';
-      emit('martin-status', { ok: true, errorCount: 0 });
+      if (martinStatusState.value === 'loading') {
+        martinStatusState.value = 'ready';
+        emit('martin-status', { ok: true, errorCount: 0 });
+      }
       const el = mapContainerRef.value;
       lastObservedW = Math.round(el?.clientWidth ?? 0);
       lastObservedH = Math.round(el?.clientHeight ?? 0);
@@ -767,7 +831,22 @@ async function initMap() {
       syncColorModePaint();
       syncRtrwFeatureStates(true);
       syncSelectionOverlay(false);
+      if (typeof mapInstance?.redraw === 'function') {
+        mapInstance.redraw();
+      }
+    };
+
+    mapInstance.on('style.load', () => {
+      markCanvasReady();
     });
+
+    mapInstance.on('load', () => {
+      markCanvasReady();
+    });
+
+    canvasReadyFallbackTimer = setTimeout(() => {
+      markCanvasReady();
+    }, 1800);
 
     mapInstance.on('zoom', () => {
       const z = mapInstance?.getZoom();
@@ -815,11 +894,16 @@ async function initMap() {
 
     if (typeof ResizeObserver !== 'undefined' && mapContainerRef.value) {
       resizeObserver = new ResizeObserver(() => {
-        scheduleMapResize();
+        resizeAndRedrawNow();
       });
       resizeObserver.observe(mapContainerRef.value);
     }
   } catch (err: any) {
+    if (canvasReadyFallbackTimer) {
+      clearTimeout(canvasReadyFallbackTimer);
+      canvasReadyFallbackTimer = null;
+    }
+    isMapReady.value = true;
     martinStatusState.value = 'warning';
     martinWarningDetail.value = err?.message || 'Gagal memuat MapLibre GL JS.';
     emit('martin-status', {
@@ -890,9 +974,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown);
-  if (pendingResizeRaf !== null) {
-    cancelAnimationFrame(pendingResizeRaf);
-    pendingResizeRaf = null;
+  if (canvasReadyFallbackTimer) {
+    clearTimeout(canvasReadyFallbackTimer);
+    canvasReadyFallbackTimer = null;
   }
   resizeObserver?.disconnect();
   resizeObserver = null;

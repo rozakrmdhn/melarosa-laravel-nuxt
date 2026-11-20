@@ -32,7 +32,23 @@ class MonitoringRealisasiPolicy
 
     public function view(User $user, MonitoringRealisasi $monitoring): bool
     {
-        return $this->viewAny($user);
+        if (!$this->viewAny($user)) {
+            return false;
+        }
+
+        if ($user->isAdminOrBappeda()) {
+            return true;
+        }
+
+        if ($user->id_desa) {
+            return (int) $monitoring->id_desa === (int) $user->id_desa;
+        }
+
+        if ($user->hasRole('verifierKecamatan') || $user->id_kecamatan) {
+            return (int) $monitoring->id_kecamatan === (int) $user->id_kecamatan;
+        }
+
+        return true;
     }
 
     public function create(User $user): bool

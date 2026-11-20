@@ -30,7 +30,7 @@ const selectedModel = computed<string>({
   <BasemapSwitcher
     v-model="selectedModel"
     variant="interactive"
-    engine="openlayers"
+    engine="maplibre"
     :allow-none="true"
     :is-mobile="isMobile"
     :is-mobile-sheet-open="isMobileSheetOpen"

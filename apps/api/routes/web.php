@@ -120,7 +120,7 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             // Spatial Editor Routes: Batas Wilayah Desa
             Route::get('batas-wilayah-desa', [BatasWilayahDesaController::class, 'index'])->middleware('permission:batas-desa-view|batas-desa-manage')->name('admin.batas-desa.index');
             Route::post('batas-wilayah-desa', [BatasWilayahDesaController::class, 'store'])->middleware('permission:batas-desa-create|batas-desa-manage')->name('admin.batas-desa.store');
-            Route::get('batas-wilayah-desa/{id}', [BatasWilayahDesaController::class, 'show'])->name('admin.batas-desa.show');
+            Route::get('batas-wilayah-desa/{id}', [BatasWilayahDesaController::class, 'show'])->middleware('permission:batas-desa-view|batas-desa-manage')->name('admin.batas-desa.show');
             Route::put('batas-wilayah-desa/{id}', [BatasWilayahDesaController::class, 'update'])->middleware('permission:batas-desa-update|batas-desa-manage')->name('admin.batas-desa.update');
             Route::delete('batas-wilayah-desa/{id}', [BatasWilayahDesaController::class, 'destroy'])->middleware('permission:batas-desa-delete|batas-desa-manage')->name('admin.batas-desa.destroy');
             Route::post('batas-wilayah-desa/{id}/split', [BatasWilayahDesaController::class, 'split'])->middleware('permission:batas-desa-update|batas-desa-manage')->name('admin.batas-desa.split');
@@ -135,7 +135,7 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             // Spatial Editor Routes: Jalan Poros Desa
             Route::get('jalan-poros-desa', [JalanPorosDesaController::class, 'index'])->middleware('permission:jalan-poros-desa-view|jalan-poros-desa.view|jalan-view|jalan-poros-desa-manage|jalan-poros-desa.manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.jalan-poros-desa.index');
             Route::post('jalan-poros-desa', [JalanPorosDesaController::class, 'store'])->middleware('permission:jalan-poros-desa-create|jalan-poros-desa-manage')->name('admin.jalan-poros-desa.store');
-            Route::get('jalan-poros-desa/{id}', [JalanPorosDesaController::class, 'show'])->name('admin.jalan-poros-desa.show');
+            Route::get('jalan-poros-desa/{id}', [JalanPorosDesaController::class, 'show'])->middleware('permission:jalan-poros-desa-view|jalan-poros-desa.view|jalan-view|jalan-poros-desa-manage|jalan-poros-desa.manage|infrastruktur-segmen-view|infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.jalan-poros-desa.show');
             Route::put('jalan-poros-desa/{id}', [JalanPorosDesaController::class, 'update'])->middleware('permission:jalan-poros-desa-update|jalan-poros-desa-manage')->name('admin.jalan-poros-desa.update');
             Route::delete('jalan-poros-desa/{id}', [JalanPorosDesaController::class, 'destroy'])->middleware('permission:jalan-poros-desa-delete|jalan-poros-desa-manage')->name('admin.jalan-poros-desa.destroy');
             Route::post('jalan-poros-desa/{id}/split', [JalanPorosDesaController::class, 'split'])->middleware('permission:jalan-poros-desa-split|jalan-poros-desa-manage')->name('admin.jalan-poros-desa.split');
@@ -201,7 +201,7 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             Route::get('infrastruktur-segmen/{id}/fotos/{fotoId}/file', [InfrastrukturSegmenFotoController::class, 'file'])->middleware('permission:infrastruktur-segmen-view')->name('admin.infrastruktur-segmen.fotos.file');
 
             // State Machine Verifikasi Segmen
-            Route::post('infrastruktur-segmen/{id}/submit', [InfrastrukturVerifikasiController::class, 'submit'])->name('admin.infrastruktur-segmen.submit');
+            Route::post('infrastruktur-segmen/{id}/submit', [InfrastrukturVerifikasiController::class, 'submit'])->middleware('permission:infrastruktur-segmen-create|infrastruktur-segmen-update')->name('admin.infrastruktur-segmen.submit');
             Route::post('infrastruktur-segmen/{id}/verify-kecamatan', [InfrastrukturVerifikasiController::class, 'verifyKecamatan'])->middleware('permission:infrastruktur-segmen-verify-kecamatan')->name('admin.infrastruktur-segmen.verify-kecamatan');
             Route::post('infrastruktur-segmen/{id}/verify-bappeda', [InfrastrukturVerifikasiController::class, 'verifyBappeda'])->middleware('permission:infrastruktur-segmen-verify-bappeda')->name('admin.infrastruktur-segmen.verify-bappeda');
 
@@ -354,7 +354,7 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
         }
 
         try {
-            $http = \Illuminate\Support\Facades\Http::timeout(10);
+            $http = \Illuminate\Support\Facades\Http::timeout(10)->withoutRedirecting();
             if (!app()->isProduction()) {
                 $http = $http->withoutVerifying();
             }
@@ -365,7 +365,8 @@ Route::prefix('api/v1')->middleware(['throttle:api'])->group(function () {
             }
             return response()->json(['features' => [], 'error' => 'WMS request failed: ' . $response->status()], $response->status());
         } catch (\Throwable $e) {
-            return response()->json(['features' => [], 'error' => 'WMS request failed: ' . $e->getMessage()], 500);
+            \Illuminate\Support\Facades\Log::warning('WMS proxy feature-info error: ' . $e->getMessage());
+            return response()->json(['features' => [], 'error' => 'WMS request failed'], 502);
         }
     })->name('wms.feature-info');
 

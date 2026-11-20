@@ -20,7 +20,7 @@ class GeoportalCswClientService
     public function __construct(?Client $client = null)
     {
         $this->httpClient = $client ?? new Client([
-            'verify' => false,
+            'verify' => app()->isProduction(),
             'timeout' => 20,
             'connect_timeout' => 10,
             'headers' => [

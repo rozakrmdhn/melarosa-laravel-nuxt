@@ -109,6 +109,18 @@ class MonitoringRealisasiController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
+        if (!$user->isAdminOrBappeda()) {
+            if ($user->id_kecamatan) {
+                $validated['id_kecamatan'] = (int) $user->id_kecamatan;
+            }
+            if ($user->id_desa) {
+                $validated['id_desa'] = (int) $user->id_desa;
+            }
+            if (isset($validated['status']) && in_array($validated['status'], ['approved', 'rejected'], true)) {
+                $validated['status'] = StatusMonitoring::Draft->value;
+            }
+        }
+
         // Cek keunikan (nomor_ba, tahun_anggaran)
         $exists = MonitoringRealisasi::where('nomor_ba', $validated['nomor_ba'])
             ->where('tahun_anggaran', $validated['tahun_anggaran'])
@@ -179,6 +191,19 @@ class MonitoringRealisasiController extends Controller
             'segmen_ids'        => ['nullable', 'array'],
             'segmen_ids.*'      => ['uuid', 'exists:infrastruktur_segmen,id'],
         ]);
+
+        $user = $request->user();
+        if (!$user->isAdminOrBappeda()) {
+            if ($user->id_kecamatan) {
+                $validated['id_kecamatan'] = (int) $user->id_kecamatan;
+            }
+            if ($user->id_desa) {
+                $validated['id_desa'] = (int) $user->id_desa;
+            }
+            if (isset($validated['status']) && in_array($validated['status'], ['approved', 'rejected'], true)) {
+                unset($validated['status']);
+            }
+        }
 
         return DB::transaction(function () use ($monitoring, $validated) {
             $monitoring->fill($validated);

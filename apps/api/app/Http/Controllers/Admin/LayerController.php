@@ -91,10 +91,20 @@ class LayerController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $urlValidator = static function (string $attr, mixed $value, \Closure $fail): void {
+            $v = trim((string) $value);
+            if ($v === '') {
+                return;
+            }
+            if (!str_starts_with($v, 'https://') && !str_starts_with($v, 'http://') && !str_starts_with($v, '/')) {
+                $fail("Kolom {$attr} wajib diawali https://, http://, atau path relatif /.");
+            }
+        };
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'protocol' => ['required', 'string', 'max:255'],
-            'url' => ['required', 'string', 'max:500'],
+            'url' => ['required', 'string', 'max:500', $urlValidator],
             'layer_name' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'default_visible' => ['sometimes', 'boolean'],
@@ -142,13 +152,23 @@ class LayerController extends Controller
      */
     public function update(Request $request, Layer $layer): JsonResponse
     {
+        $urlValidator = static function (string $attr, mixed $value, \Closure $fail): void {
+            $v = trim((string) $value);
+            if ($v === '') {
+                return;
+            }
+            if (!str_starts_with($v, 'https://') && !str_starts_with($v, 'http://') && !str_starts_with($v, '/')) {
+                $fail("Kolom {$attr} wajib diawali https://, http://, atau path relatif /.");
+            }
+        };
+
         $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:150'],
             'opd_name' => ['nullable', 'string', 'max:200'],
             'protocol' => ['sometimes', 'required', 'string', 'max:255'],
-            'url' => ['sometimes', 'required', 'string', 'max:500'],
-            'legend_url' => ['nullable', 'string', 'max:1000'],
+            'url' => ['sometimes', 'required', 'string', 'max:500', $urlValidator],
+            'legend_url' => ['nullable', 'string', 'max:1000', $urlValidator],
             'layer_name' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'default_visible' => ['sometimes', 'boolean'],
@@ -504,9 +524,40 @@ class LayerController extends Controller
         $tableCandidates[] = $layer;
         $tableCandidates[] = strtolower(str_replace(['-', ' '], '_', $layer));
 
+        $allowedSpatialTables = [
+            'bataswilayah_kabupaten',
+            'bataswilayah_kecamatan',
+            'bataswilayah_kecamatan_old',
+            'bataswilayah_desa',
+            'jalan_porosdesa',
+            'jalan_kabupaten_luarkota',
+            'rtrw_jaringan_transportasi_ln',
+            'infrastruktur_segmen',
+            'infrastruktur_area',
+            'jalan_lingkungan',
+            'jalan_peningkatanstatus',
+            'jalan_segmen_pembangunan',
+            'bkkd_proposal_lokasi',
+        ];
+
+        if ($layerModel && $layerModel->is_active) {
+            if ($layerModel->layer_name && preg_match('/^[a-zA-Z0-9_]+$/', $layerModel->layer_name)) {
+                $allowedSpatialTables[] = strtolower($layerModel->layer_name);
+            }
+            if (preg_match('/\/martin\/([a-zA-Z0-9_]+)/', $layerModel->url ?? '', $m)) {
+                $allowedSpatialTables[] = strtolower($m[1]);
+            }
+        }
+        $allowedSpatialTables = array_unique($allowedSpatialTables);
+
         $tableName = null;
         foreach (array_unique(array_filter($tableCandidates)) as $candidate) {
-            if (preg_match('/^[a-zA-Z0-9_]+$/', $candidate) && Schema::hasTable($candidate)) {
+            $normalizedCandidate = strtolower((string) $candidate);
+            if (
+                preg_match('/^[a-zA-Z0-9_]+$/', $candidate)
+                && in_array($normalizedCandidate, $allowedSpatialTables, true)
+                && Schema::hasTable($candidate)
+            ) {
                 $tableName = $candidate;
                 break;
             }

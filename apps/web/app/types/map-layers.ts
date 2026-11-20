@@ -139,6 +139,7 @@ export interface ActiveLayerItem {
 
   // Filter state
   filterKecamatan?: string | null;
+  filterKecamatanId?: number | null;
   filterDesa?: string | null;
   filterStatus?: string | null;
   filterExtent?: [number, number, number, number] | null;

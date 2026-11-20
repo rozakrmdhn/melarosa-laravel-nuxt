@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     const agent = new https.Agent({
-      rejectUnauthorized: false,
+      rejectUnauthorized: process.env.NODE_ENV === "production",
     });
 
     const responseText = await new Promise<string>((resolve, reject) => {

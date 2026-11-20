@@ -198,9 +198,10 @@ class BatasWilayahDesaController extends Controller
                 ], 422);
             }
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Invalid GeoJSON on BatasWilayahDesa store: ' . $e->getMessage());
             return response()->json([
                 'ok' => false,
-                'message' => 'Format GeoJSON geometri tidak dapat diproses: ' . $e->getMessage(),
+                'message' => 'Format GeoJSON geometri tidak dapat diproses.',
             ], 422);
         }
 

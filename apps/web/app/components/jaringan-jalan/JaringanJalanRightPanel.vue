@@ -107,53 +107,76 @@ const activeLabel = computed(() => {
       </div>
     </div>
 
-    <!-- Collapsed Vertical Rail -->
-    <button
-      v-if="collapsed"
-      type="button"
-      :aria-expanded="false"
-      aria-label="Buka panel inspektor ruas"
-      class="flex flex-col items-center pt-3 gap-3 flex-1 w-full cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-600"
-      title="Klik untuk membuka inspektor ruas"
-      @click="emit('update:collapsed', false)"
-    >
-      <span
-        :class="[
-          'p-1.5 rounded-md',
-          activeMode
-            ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400'
-            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
-        ]"
+    <!-- Collapsed Vertical Rail / Expanded Body -->
+    <Transition name="panel-fade" mode="out-in">
+      <button
+        v-if="collapsed"
+        key="rail"
+        type="button"
+        :aria-expanded="false"
+        aria-label="Buka panel inspektor ruas"
+        class="flex flex-col items-center pt-3 gap-3 flex-1 w-full cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-600"
+        title="Klik untuk membuka inspektor ruas"
+        @click="emit('update:collapsed', false)"
       >
-        <UIcon name="i-lucide-info" class="size-4" />
-      </span>
-      <span
-        class="text-xs font-medium text-gray-600 dark:text-gray-300 tracking-wide whitespace-nowrap"
-        style="writing-mode: vertical-rl;"
-      >
-        Inspektor Ruas
-      </span>
-    </button>
+        <span
+          :class="[
+            'p-1.5 rounded-md',
+            activeMode
+              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400'
+              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+          ]"
+        >
+          <UIcon name="i-lucide-info" class="size-4" />
+        </span>
+        <span
+          class="text-xs font-medium text-gray-600 dark:text-gray-300 tracking-wide whitespace-nowrap"
+          style="writing-mode: vertical-rl;"
+        >
+          Inspektor Ruas
+        </span>
+      </button>
 
-    <!-- Expanded Body -->
-    <div v-else class="flex-1 min-h-0 overflow-y-auto p-3">
-      <JaringanJalanInspectorCard
-        :active-mode="activeMode"
-        :rtrw-detail="rtrwDetail"
-        :loading-rtrw-detail="loadingRtrwDetail"
-        :selected-poros="selectedPoros"
-        :selected-kabupaten="selectedKabupaten"
-        :can-manage="canManage"
-        :adopting-rtrw="adoptingRtrw"
-        :saving-poros="savingPoros"
-        :deleting-poros="deletingPoros"
-        :is-mobile-drawer="false"
-        @adopt-rtrw="(p) => emit('adopt-rtrw', p)"
-        @save-poros="(p) => emit('save-poros', p)"
-        @request-delete-poros="(f) => emit('request-delete-poros', f)"
-        @clear-selection="emit('clear-selection')"
-        @zoom-to-bbox="(b) => emit('zoom-to-bbox', b)"
-      />
-    </div>
+      <!-- Expanded Body -->
+      <div v-else key="body" class="flex-1 min-h-0 overflow-y-auto p-3">
+        <JaringanJalanInspectorCard
+          :active-mode="activeMode"
+          :rtrw-detail="rtrwDetail"
+          :loading-rtrw-detail="loadingRtrwDetail"
+          :selected-poros="selectedPoros"
+          :selected-kabupaten="selectedKabupaten"
+          :can-manage="canManage"
+          :adopting-rtrw="adoptingRtrw"
+          :saving-poros="savingPoros"
+          :deleting-poros="deletingPoros"
+          :is-mobile-drawer="false"
+          @adopt-rtrw="(p) => emit('adopt-rtrw', p)"
+          @save-poros="(p) => emit('save-poros', p)"
+          @request-delete-poros="(f) => emit('request-delete-poros', f)"
+          @clear-selection="emit('clear-selection')"
+          @zoom-to-bbox="(b) => emit('zoom-to-bbox', b)"
+        />
+      </div>
+    </Transition>
   </aside>
 </template>
+
+<style scoped>
+.panel-fade-enter-active,
+.panel-fade-leave-active {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.panel-fade-enter-from,
+.panel-fade-leave-to {
+  opacity: 0;
+  transform: translateX(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-fade-enter-active,
+  .panel-fade-leave-active {
+    transition: none;
+  }
+}
+</style>

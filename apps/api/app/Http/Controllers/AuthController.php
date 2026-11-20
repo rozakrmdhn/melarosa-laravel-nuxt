@@ -87,6 +87,23 @@ class AuthController extends Controller
             $user = $userProvider->user;
         }
 
+        if (!$user || !$user->status) {
+            $this->auditLog->log(
+                event: 'login.blocked',
+                module: 'auth',
+                auditable: $user,
+                description: 'Login OAuth ditolak: akun tidak aktif.',
+                meta: ['provider' => $provider],
+            );
+
+            return view('oauth', [
+                'message' => [
+                    'ok' => false,
+                    'message' => 'Akun Anda dinonaktifkan. Hubungi administrator.',
+                ],
+            ]);
+        }
+
         Auth::login($user, true);
 
         $request->session()->regenerate();

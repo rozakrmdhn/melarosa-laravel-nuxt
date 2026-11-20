@@ -40,9 +40,10 @@ class MartinLayerController extends Controller
                 'total' => count($items),
             ]);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Martin catalog fetch error: ' . $e->getMessage());
             return response()->json([
                 'ok' => false,
-                'message' => 'Gagal membaca katalog dari Martin Tile Server: ' . $e->getMessage(),
+                'message' => 'Gagal membaca katalog dari Martin Tile Server.',
                 'martin_url' => rtrim((string) config('services.martin.url', 'http://localhost:9090'), '/'),
                 'data' => [],
                 'total' => 0,

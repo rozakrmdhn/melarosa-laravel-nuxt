@@ -79,10 +79,34 @@ const isWilayahRestricted = computed(
   () => !isAdmin() && (isKecamatanRestricted.value || isDesaRestricted.value)
 );
 
+// ─── Responsive Breakpoint (Single MapLibre WebGL Instance) ───────────────────
+
+const windowWidth = ref(import.meta.client ? window.innerWidth : 1280);
+const isDesktop = computed(() => windowWidth.value >= 1024);
+
+function handleWindowResize() {
+  windowWidth.value = window.innerWidth;
+}
+
+onMounted(() => {
+  if (import.meta.client) {
+    windowWidth.value = window.innerWidth;
+    window.addEventListener("resize", handleWindowResize, { passive: true });
+  }
+});
+
+onBeforeUnmount(() => {
+  if (import.meta.client) {
+    window.removeEventListener("resize", handleWindowResize);
+  }
+});
+
 // ─── Nuxt UI Splitter & Workspace Layout ──────────────────────────────────────
 
 const SIDE_PANEL_WIDTH = 300;
-const SIDE_PANEL_MIN = 280;
+const RIGHT_PANEL_WIDTH = 360;
+const BOTTOM_PANEL_HEIGHT = 280;
+const SIDE_PANEL_MIN = 250;
 const SIDE_PANEL_MAX = 480;
 
 const horizontalSplitterItems = ref<SplitterItem[]>([
@@ -90,7 +114,7 @@ const horizontalSplitterItems = ref<SplitterItem[]>([
     id: "left-panel",
     slot: "left",
     sizeUnit: "px",
-    defaultSize: SIDE_PANEL_WIDTH,
+    defaultSize: 42,
     minSize: SIDE_PANEL_MIN,
     maxSize: SIDE_PANEL_MAX,
     collapsible: true,
@@ -100,7 +124,7 @@ const horizontalSplitterItems = ref<SplitterItem[]>([
   {
     id: "map-canvas",
     slot: "map",
-    minSize: 25,
+    minSize: 30,
     class: "flex flex-1 w-full h-full relative overflow-hidden",
   },
   {
@@ -108,7 +132,7 @@ const horizontalSplitterItems = ref<SplitterItem[]>([
     slot: "right",
     sizeUnit: "px",
     defaultSize: 42,
-    minSize: SIDE_PANEL_MIN,
+    minSize: 280,
     maxSize: SIDE_PANEL_MAX,
     collapsible: true,
     collapsedSize: 42,
@@ -120,16 +144,16 @@ const verticalSplitterItems = ref<SplitterItem[]>([
   {
     id: "main-workspace",
     slot: "workspace",
-    minSize: 30,
+    minSize: 32,
     class: "flex flex-1 w-full h-full overflow-hidden",
   },
   {
     id: "bottom-panel",
     slot: "bottom",
     sizeUnit: "px",
-    defaultSize: 42,
-    minSize: 220,
-    maxSize: 550,
+    defaultSize: 40,
+    minSize: 180,
+    maxSize: 520,
     collapsible: true,
     collapsedSize: 40,
     class: "flex flex-col h-full",
@@ -138,11 +162,18 @@ const verticalSplitterItems = ref<SplitterItem[]>([
 
 const bottomActiveTab = ref<"table" | "console">("table");
 
-// ─── Map & Layer State ────────────────────────────────────────────────────────
+// ─── Map & Layer State (MapLibre GL JS Engine) ────────────────────────────────
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
 const mobileMapCanvasRef = ref<InstanceType<typeof MapCanvas> | null>(null);
-const { currentBasemap, setBasemapChoice } = useDefaultBasemap<BasemapType>("openlayers");
+const { currentBasemap, setBasemapChoice } = useDefaultBasemap<BasemapType>("maplibre");
+
+function scheduleMapResize() {
+  nextTick(() => {
+    mapCanvasRef.value?.resizeMap?.();
+    mobileMapCanvasRef.value?.resizeMap?.();
+  });
+}
 
 function fitAllBounds() {
   mapCanvasRef.value?.fitBounds();
@@ -290,7 +321,9 @@ watch(viewMode, (newMode) => {
     refreshTable();
   } else if (newMode === "map") {
     nextTick(() => {
+      scheduleMapResize();
       mapCanvasRef.value?.fitBounds();
+      mobileMapCanvasRef.value?.fitBounds();
     });
   }
 });
@@ -574,21 +607,49 @@ const verticalSplitterRef = ref<any>(null);
 
 const isDraggingHorizontal = ref(false);
 const isDraggingVertical = ref(false);
+const leftPanelCollapsed = ref(true);
+const rightPanelCollapsed = ref(true);
+const bottomPanelCollapsed = ref(true);
 
 function onHorizontalDragging(_index: number, dragging: boolean) {
   isDraggingHorizontal.value = dragging;
+  if (!dragging) {
+    scheduleMapResize();
+  }
 }
 
 function onVerticalDragging(_index: number, dragging: boolean) {
   isDraggingVertical.value = dragging;
+  if (!dragging) {
+    scheduleMapResize();
+  }
 }
 
-const rightPanelSlotData = shallowRef<{
+interface SplitterSlotCtrl {
   collapsed: boolean;
   collapse: () => void;
   expand: () => void;
   resize: (size: number) => void;
-} | null>(null);
+}
+
+const leftPanelSlotData = shallowRef<SplitterSlotCtrl | null>(null);
+const rightPanelSlotData = shallowRef<SplitterSlotCtrl | null>(null);
+const bottomPanelSlotData = shallowRef<SplitterSlotCtrl | null>(null);
+
+function syncLeftPanelActions(
+  collapsed: boolean,
+  collapse: () => void,
+  expand: () => void,
+  resize: (size: number) => void
+) {
+  leftPanelSlotData.value = { collapsed, collapse, expand, resize };
+  if (leftPanelCollapsed.value !== collapsed) {
+    queueMicrotask(() => {
+      leftPanelCollapsed.value = collapsed;
+    });
+  }
+  return "";
+}
 
 function syncRightPanelActions(
   collapsed: boolean,
@@ -597,37 +658,63 @@ function syncRightPanelActions(
   resize: (size: number) => void
 ) {
   rightPanelSlotData.value = { collapsed, collapse, expand, resize };
+  if (rightPanelCollapsed.value !== collapsed) {
+    queueMicrotask(() => {
+      rightPanelCollapsed.value = collapsed;
+    });
+  }
+  return "";
+}
+
+function syncBottomPanelActions(
+  collapsed: boolean,
+  collapse: () => void,
+  expand: () => void,
+  resize: (size: number) => void
+) {
+  bottomPanelSlotData.value = { collapsed, collapse, expand, resize };
+  if (bottomPanelCollapsed.value !== collapsed) {
+    queueMicrotask(() => {
+      bottomPanelCollapsed.value = collapsed;
+    });
+  }
   return "";
 }
 
 function expandRightPanel() {
+  if (!isDesktop.value) return;
   if (rightPanelSlotData.value) {
     if (rightPanelSlotData.value.collapsed) {
-      rightPanelSlotData.value.resize(SIDE_PANEL_WIDTH);
+      rightPanelSlotData.value.resize(RIGHT_PANEL_WIDTH);
     }
   } else {
-    horizontalSplitterRef.value?.panelsRef?.[2]?.resize?.(SIDE_PANEL_WIDTH);
+    horizontalSplitterRef.value?.panelsRef?.[2]?.resize?.(RIGHT_PANEL_WIDTH);
   }
+  scheduleMapResize();
 }
 
 // ─── Toggle All Panels (Focus / Map-Only Mode) ───────────────────────────────
 
-const allPanelsHidden = ref(false);
+const allPanelsHidden = computed(() =>
+  Boolean(leftPanelCollapsed.value && rightPanelCollapsed.value && bottomPanelCollapsed.value)
+);
 
 function toggleAllPanels() {
+  if (!isDesktop.value) return;
   if (allPanelsHidden.value) {
-    // Restore all panels to default sizes
-    horizontalSplitterRef.value?.panelsRef?.[0]?.resize?.(SIDE_PANEL_WIDTH);
-    expandRightPanel();
-    verticalSplitterRef.value?.panelsRef?.[1]?.resize?.(280);
-    allPanelsHidden.value = false;
+    leftPanelSlotData.value?.resize(SIDE_PANEL_WIDTH);
+    bottomPanelSlotData.value?.resize(BOTTOM_PANEL_HEIGHT);
+    handleBottomPanelExpandChange(false);
+    if (selectedFeature.value) {
+      rightPanelSlotData.value?.resize(RIGHT_PANEL_WIDTH);
+    }
   } else {
-    // Collapse all panels — full-map focus mode
-    horizontalSplitterRef.value?.panelsRef?.[0]?.collapse?.();
+    leftPanelSlotData.value?.collapse();
     collapseRightPanel();
-    verticalSplitterRef.value?.panelsRef?.[1]?.collapse?.();
-    allPanelsHidden.value = true;
+    bottomPanelSlotData.value?.collapse();
+    handleBottomPanelExpandChange(true);
   }
+  scheduleMapResize();
 }
 
 function collapseRightPanel() {
@@ -638,6 +725,7 @@ function collapseRightPanel() {
   } else {
     horizontalSplitterRef.value?.panelsRef?.[2]?.collapse?.();
   }
+  scheduleMapResize();
 }
 
 watch(selectedFeature, (feat) => {
@@ -903,6 +991,10 @@ function openMobileTab(tab: "layer" | "table" | "inspector" | "filter") {
 const isFormOpen = ref(false);
 const isEditing = ref(false);
 const submitting = ref(false);
+const showRawGeoJson = ref(false);
+const formNameError = ref("");
+const formGeometryError = ref("");
+
 const formState = reactive({
   id: "" as string,
   kode_ruas: undefined as number | undefined,
@@ -911,8 +1003,8 @@ const formState = reactive({
   kecamatan: "",
   panjang: undefined as number | undefined,
   lebar: undefined as number | undefined,
-  perkerasan: "",
-  kondisi: "",
+  perkerasan: undefined as string | undefined,
+  kondisi: undefined as string | undefined,
   status_awal: "",
   status_eksisting: "",
   sumber_data: "",
@@ -923,6 +1015,80 @@ const formState = reactive({
 
 const kondisiOptions = ["Baik", "Sedang", "Rusak", "Rusak Berat"];
 const perkerasanOptions = ["Aspal", "Beton", "Kerikil", "Tanah", "Lainnya"];
+const statusAwalPresets = ["Jalan Desa", "Jalan Poros Desa", "Jalan Lingkungan"];
+const statusEksistingPresets = ["Jalan Poros Desa", "Jalan Kabupaten", "Jalan Desa"];
+
+const kondisiCardMeta: Array<{
+  value: string;
+  label: string;
+  dotClass: string;
+  activeClass: string;
+}> = [
+  {
+    value: "Baik",
+    label: "Baik",
+    dotClass: "bg-emerald-500",
+    activeClass:
+      "border-emerald-500 bg-emerald-50/90 text-emerald-900 dark:border-emerald-500/80 dark:bg-emerald-950/60 dark:text-emerald-200 ring-1 ring-emerald-500/30",
+  },
+  {
+    value: "Sedang",
+    label: "Sedang",
+    dotClass: "bg-amber-500",
+    activeClass:
+      "border-amber-500 bg-amber-50/90 text-amber-900 dark:border-amber-500/80 dark:bg-amber-950/60 dark:text-amber-200 ring-1 ring-amber-500/30",
+  },
+  {
+    value: "Rusak",
+    label: "Rusak",
+    dotClass: "bg-orange-500",
+    activeClass:
+      "border-orange-500 bg-orange-50/90 text-orange-900 dark:border-orange-500/80 dark:bg-orange-950/60 dark:text-orange-200 ring-1 ring-orange-500/30",
+  },
+  {
+    value: "Rusak Berat",
+    label: "Rusak Berat",
+    dotClass: "bg-red-500",
+    activeClass:
+      "border-red-500 bg-red-50/90 text-red-900 dark:border-red-500/80 dark:bg-red-950/60 dark:text-red-200 ring-1 ring-red-500/30",
+  },
+];
+
+const parsedFormGeometrySummary = computed(() => {
+  if (!formState.geometry) {
+    return { valid: false, type: "-", vertexCount: 0, startCoord: null as [number, number] | null, endCoord: null as [number, number] | null };
+  }
+  try {
+    const g = JSON.parse(formState.geometry);
+    const geom = g?.type === "Feature" ? g.geometry : g;
+    if (!geom || !geom.type || !Array.isArray(geom.coordinates)) {
+      return { valid: false, type: "-", vertexCount: 0, startCoord: null, endCoord: null };
+    }
+    if (geom.type === "LineString") {
+      const pts = geom.coordinates.filter((c: any) => Array.isArray(c) && c.length >= 2);
+      return {
+        valid: pts.length >= 2,
+        type: "LineString",
+        vertexCount: pts.length,
+        startCoord: pts.length > 0 ? [Number(pts[0][0]), Number(pts[0][1])] : null,
+        endCoord: pts.length > 1 ? [Number(pts[pts.length - 1][0]), Number(pts[pts.length - 1][1])] : null,
+      };
+    }
+    if (geom.type === "MultiLineString") {
+      const flat = geom.coordinates.flat().filter((c: any) => Array.isArray(c) && c.length >= 2);
+      return {
+        valid: flat.length >= 2,
+        type: "MultiLineString",
+        vertexCount: flat.length,
+        startCoord: flat.length > 0 ? [Number(flat[0][0]), Number(flat[0][1])] : null,
+        endCoord: flat.length > 1 ? [Number(flat[flat.length - 1][0]), Number(flat[flat.length - 1][1])] : null,
+      };
+    }
+    return { valid: false, type: String(geom.type), vertexCount: 0, startCoord: null, endCoord: null };
+  } catch {
+    return { valid: false, type: "Format JSON Tidak Valid", vertexCount: 0, startCoord: null, endCoord: null };
+  }
+});
 
 // ─── Select Menu Options & Cascading Helpers for Form ────────────────────────
 const formKecamatanItems = computed(() => {
@@ -999,6 +1165,10 @@ function handleFormDesaChange(val: any) {
 
   if (match) {
     formState.id_desa = match.id;
+    if (!isEditing.value && (!formState.nama_ruas.trim() || /^Jl\.\s*Poros\s*Desa\s+/i.test(formState.nama_ruas.trim()))) {
+      formState.nama_ruas = `Jl. Poros Desa ${match.nama}`;
+      formNameError.value = "";
+    }
     // Jika kecamatan belum diisi, otomatis isi dari parent desa
     if (!formState.kecamatan || !formState.id_kecamatan) {
       const parentKec = kecamatanOptions.value.find((k) => k.id === match.id_kecamatan);
@@ -1109,14 +1279,22 @@ function openCreate() {
   if (mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
   }
-  mapCanvasRef.value?.startDrawing();
-  mobileMapCanvasRef.value?.startDrawing();
+
+  nextTick(() => {
+    scheduleMapResize();
+    mapCanvasRef.value?.startDrawing();
+    mobileMapCanvasRef.value?.startDrawing();
+  });
 
   addLog("INFO", "Mode gambar garis ruas jalan diaktifkan.");
 }
 
 function handleDrawSaved(payload: { geojson: any; lengthMeters: number }) {
   isSavingSuccess = false;
+  showRawGeoJson.value = false;
+  formNameError.value = "";
+  formGeometryError.value = "";
+
   if (isEditing.value) {
     formState.panjang = Math.round(payload.lengthMeters);
     formState.geometry = JSON.stringify(payload.geojson, null, 2);
@@ -1162,18 +1340,18 @@ function handleDrawSaved(payload: { geojson: any; lengthMeters: number }) {
 
     formState.id = "";
     formState.kode_ruas = summaryData.value?.next_kode_ruas || undefined;
-    formState.nama_ruas = "";
+    formState.nama_ruas = initDesa ? `Jl. Poros Desa ${initDesa}` : "";
     formState.desa = initDesa;
     formState.id_desa = initDesaId;
     formState.kecamatan = initKec;
     formState.id_kecamatan = initKecId;
     formState.panjang = Math.round(payload.lengthMeters);
-    formState.lebar = undefined;
-    formState.perkerasan = undefined as string | undefined;
-    formState.kondisi = undefined as string | undefined;
-    formState.status_awal = "";
-    formState.status_eksisting = "";
-    formState.sumber_data = "";
+    formState.lebar = 4;
+    formState.perkerasan = "Aspal";
+    formState.kondisi = "Baik";
+    formState.status_awal = "Jalan Desa";
+    formState.status_eksisting = "Jalan Poros Desa";
+    formState.sumber_data = "Digitasi Peta GIS";
     formState.geometry = JSON.stringify(payload.geojson, null, 2);
     isFormOpen.value = true;
   }
@@ -1276,28 +1454,50 @@ async function openEdit(feat: any) {
   formState.sumber_data = completeData.sumber_data || "";
   formState.geometry = JSON.stringify(geom || { type: "LineString", coordinates: [] }, null, 2);
 
-  // 3. Tutup drawer pada mobile jika sedang terbuka
+  // 3. Pindah ke tampilan peta & tutup drawer pada mobile jika sedang terbuka
+  if (viewMode.value === "table") {
+    viewMode.value = "map";
+  }
   if (mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
   }
 
-  // 4. Masuk ke mode edit geometri di kanvas peta aktif
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 1024;
-  if (isValidGeometry(geom)) {
-    if (isMobile) {
-      mobileMapCanvasRef.value?.startEditingGeometry(geom, formState.id);
-    } else {
+  // 4. Masuk ke mode edit geometri di kanvas peta aktif setelah DOM peta siap
+  nextTick(() => {
+    scheduleMapResize();
+    if (isValidGeometry(geom)) {
       mapCanvasRef.value?.startEditingGeometry(geom, formState.id);
-    }
-    addLog("INFO", `Mode edit spasial aktif untuk ruas: ${formState.nama_ruas}`);
-  } else {
-    if (isMobile) {
-      mobileMapCanvasRef.value?.startDrawing();
+      mobileMapCanvasRef.value?.startEditingGeometry(geom, formState.id);
+      addLog("INFO", `Mode edit spasial aktif untuk ruas: ${formState.nama_ruas}`);
     } else {
       mapCanvasRef.value?.startDrawing();
+      mobileMapCanvasRef.value?.startDrawing();
+      addLog("INFO", `Mode gambar baru untuk ruas: ${formState.nama_ruas}`);
     }
-    addLog("INFO", `Mode gambar baru untuk ruas: ${formState.nama_ruas}`);
+  });
+}
+
+function resumeMapGeometryEditingFromModal() {
+  isFormOpen.value = false;
+  if (viewMode.value === "table") {
+    viewMode.value = "map";
   }
+  nextTick(() => {
+    scheduleMapResize();
+    let parsedGeom: any = null;
+    try {
+      parsedGeom = formState.geometry ? JSON.parse(formState.geometry) : null;
+    } catch {
+      parsedGeom = null;
+    }
+    if (isValidGeometry(parsedGeom)) {
+      mapCanvasRef.value?.startEditingGeometry(parsedGeom, formState.id || undefined);
+      mobileMapCanvasRef.value?.startEditingGeometry(parsedGeom, formState.id || undefined);
+    } else {
+      mapCanvasRef.value?.startDrawing();
+      mobileMapCanvasRef.value?.startDrawing();
+    }
+  });
 }
 
 async function handleSave() {
@@ -1310,14 +1510,30 @@ async function handleSave() {
     return;
   }
 
+  formNameError.value = "";
+  formGeometryError.value = "";
+
   if (!formState.nama_ruas.trim()) {
+    formNameError.value = "Nama ruas jalan wajib diisi sebelum menyimpan.";
     toast.add({ title: "Validasi Gagal", description: "Nama ruas wajib diisi.", color: "error" });
     return;
   }
   let geom: any;
   try {
     geom = JSON.parse(formState.geometry);
+    if (!isValidGeometry(geom)) {
+      formGeometryError.value = "Geometri harus berupa LineString dengan minimal 2 titik koordinat.";
+      showRawGeoJson.value = true;
+      toast.add({
+        title: "Geometri Belum Lengkap",
+        description: "Garis ruas harus memiliki minimal 2 titik koordinat.",
+        color: "error",
+      });
+      return;
+    }
   } catch {
+    formGeometryError.value = "Format GeoJSON tidak valid. Periksa tanda kurung koordinat.";
+    showRawGeoJson.value = true;
     toast.add({
       title: "Format Geometri Salah",
       description: "Geometry harus berupa GeoJSON valid.",
@@ -1476,12 +1692,18 @@ async function handleStartSplit(feat: any) {
     return;
   }
 
+  if (viewMode.value === "table") {
+    viewMode.value = "map";
+  }
   if (mobileDrawerOpen.value) {
     mobileDrawerOpen.value = false;
   }
 
-  mapCanvasRef.value?.startSplitMode(completeData);
-  mobileMapCanvasRef.value?.startSplitMode(completeData);
+  nextTick(() => {
+    scheduleMapResize();
+    mapCanvasRef.value?.startSplitMode(completeData);
+    mobileMapCanvasRef.value?.startSplitMode(completeData);
+  });
   addLog("INFO", `Mode split aktif untuk ruas: "${completeData.nama_ruas}". Klik pada garis jalan di peta.`);
 }
 
@@ -1683,8 +1905,8 @@ async function handleConfirmSplit() {
       class="flex flex-1 overflow-hidden relative w-full h-full"
     >
 
-      <!-- Desktop View: Nested Two-Tier USplitter (Vertical + Horizontal) -->
-      <div class="hidden lg:flex flex-1 w-full h-full overflow-hidden">
+      <!-- Desktop View (>= 1024px): Nested Two-Tier USplitter (Jaringan Jalan Reference) -->
+      <div v-if="isDesktop" class="flex flex-1 w-full h-full overflow-hidden">
         <USplitter
           ref="verticalSplitterRef"
           :items="verticalSplitterItems"
@@ -1697,7 +1919,7 @@ async function handleConfirmSplit() {
             handle: 'h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-row-resize'
           }"
         >
-          <!-- Workspace: Horizontal Splitter (Left 300px + Map + Right 380px in px units) -->
+          <!-- Workspace: Horizontal Splitter (Left 300px + MapLibre + Right 360px) -->
           <template #workspace>
             <USplitter
               ref="horizontalSplitterRef"
@@ -1712,7 +1934,8 @@ async function handleConfirmSplit() {
               }"
             >
               <!-- Panel Kiri: Layer & Simbologi -->
-              <template #left="{ item, collapsed, collapse, expand, resize }">
+              <template #left="{ collapsed, collapse, expand, resize }">
+                <span :class="syncLeftPanelActions(collapsed, collapse, expand, resize)" class="hidden" />
                 <LeftPanel
                   :collapsed="collapsed"
                   :collapsible="true"
@@ -1731,14 +1954,14 @@ async function handleConfirmSplit() {
                   :total-panjang-km="summaryData?.total_panjang_km"
                   :kondisi-stats="kondisiStats"
                   :loading="loading"
-                  @update:collapsed="(c) => c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand())"
+                  @update:collapsed="(c) => { c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand()); scheduleMapResize(); }"
                   @zoom-to-layer="fitAllBounds"
                   @reset-filters="resetFilters"
                   @apply-filter="fitAllBounds"
                 />
               </template>
 
-              <!-- Map Canvas -->
+              <!-- Center MapLibre GL JS Canvas -->
               <template #map>
                 <div class="w-full h-full relative overflow-hidden">
                   <MapCanvas
@@ -1765,11 +1988,22 @@ async function handleConfirmSplit() {
                     @split-point-selected="handleSplitPointSelected"
                     @map-click="(coord) => clickedCoordinate = coord"
                   />
+
+                  <!-- Floating Reopen Right Panel Button when collapsed with active selection -->
+                  <button
+                    v-if="selectedFeature && rightPanelCollapsed"
+                    type="button"
+                    class="absolute bottom-11 right-3 z-20 inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-white/95 px-3 py-1.5 text-xs font-semibold text-blue-900 shadow-lg backdrop-blur-md hover:bg-blue-50 dark:border-blue-700 dark:bg-[#0e1424]/95 dark:text-blue-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+                    @click="expandRightPanel"
+                  >
+                    <UIcon name="i-lucide-panel-right-open" class="size-4 text-blue-600 dark:text-blue-400" />
+                    <span>Buka Detail Ruas</span>
+                  </button>
                 </div>
               </template>
 
               <!-- Panel Kanan: Properties / Feature Inspector -->
-              <template #right="{ item, collapsed, collapse, expand, resize }">
+              <template #right="{ collapsed, collapse, expand, resize }">
                 <span :class="syncRightPanelActions(collapsed, collapse, expand, resize)" class="hidden" />
                 <RightPanel
                   :collapsed="collapsed"
@@ -1780,7 +2014,7 @@ async function handleConfirmSplit() {
                   :can-edit="canEditFeature(selectedFeature)"
                   :can-split="canSplitFeature(selectedFeature)"
                   :can-delete="canDeleteFeature(selectedFeature)"
-                  @update:collapsed="(c) => c ? collapse() : (resize ? resize(SIDE_PANEL_WIDTH) : expand())"
+                  @update:collapsed="(c) => { c ? collapse() : (resize ? resize(RIGHT_PANEL_WIDTH) : expand()); scheduleMapResize(); }"
                   @zoom-to-feature="handleZoomToFeature"
                   @edit-feature="openEdit"
                   @split-feature="handleStartSplit"
@@ -1792,7 +2026,8 @@ async function handleConfirmSplit() {
           </template>
 
           <!-- Panel Bawah: Tabel Atribut & Konsol -->
-          <template #bottom="{ item, collapsed, collapse, expand, resize }">
+          <template #bottom="{ collapsed, collapse, expand, resize }">
+            <span :class="syncBottomPanelActions(collapsed, collapse, expand, resize)" class="hidden" />
             <BottomPanel
               :collapsed="collapsed"
               :collapsible="true"
@@ -1813,7 +2048,7 @@ async function handleConfirmSplit() {
               :can-edit-row="canEditFeature"
               :can-split-row="canSplitFeature"
               :can-delete-row="canDeleteFeature"
-              @update:collapsed="(c) => { c ? collapse() : (resize ? resize(280) : expand()); handleBottomPanelExpandChange(c); }"
+              @update:collapsed="(c) => { c ? collapse() : (resize ? resize(BOTTOM_PANEL_HEIGHT) : expand()); handleBottomPanelExpandChange(c); scheduleMapResize(); }"
               @reset-filters="resetFilters"
               @row-click="handleZoomToFeature"
               @edit-row="openEdit"
@@ -1825,8 +2060,8 @@ async function handleConfirmSplit() {
         </USplitter>
       </div>
 
-      <!-- Mobile View: Full-Bleed Map Canvas -->
-      <div class="lg:hidden flex-1 relative overflow-hidden h-full w-full">
+      <!-- Mobile & Tablet View (< 1024px): Full-Bleed MapLibre Canvas + Floating Peek Card -->
+      <div v-else class="flex-1 relative overflow-hidden h-full w-full">
         <MapCanvas
           ref="mobileMapCanvasRef"
           :api-base="apiBase"
@@ -1851,6 +2086,70 @@ async function handleConfirmSplit() {
           @split-point-selected="handleSplitPointSelected"
           @map-click="(coord) => clickedCoordinate = coord"
         />
+
+        <!-- Floating Feature Peek Card di Atas Dock saat Sheet Tertutup (Jaringan Jalan Reference) -->
+        <div
+          v-if="selectedFeature && !mobileDrawerOpen"
+          class="absolute left-3 right-3 sm:left-auto sm:right-3 sm:w-96 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 rounded-xl border border-gray-200 bg-white/95 p-3 shadow-xl backdrop-blur-md dark:border-gray-700 dark:bg-[#0e1424]/95"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <UBadge
+                  :label="selectedFeature.properties?.kondisi || 'Ruas'"
+                  :color="getKondisiBadge(selectedFeature.properties?.kondisi).color"
+                  variant="subtle"
+                  size="xs"
+                />
+                <span class="text-[11px] font-mono font-semibold text-gray-700 dark:text-gray-300 tabular-nums">
+                  {{ Math.round(selectedFeature.properties?.panjang_meter || 0).toLocaleString("id-ID") }} m
+                </span>
+              </div>
+              <p class="mt-1 text-sm font-bold text-gray-900 dark:text-white truncate">
+                {{ selectedFeature.properties?.nama_ruas || "Ruas Jalan" }}
+              </p>
+              <p class="text-xs text-gray-600 dark:text-gray-300 truncate">
+                {{ selectedFeature.properties?.desa || "-" }}, Kec. {{ selectedFeature.properties?.kecamatan || "-" }}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              aria-label="Hapus pilihan ruas"
+              class="size-11 flex items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="selectedFeature = null"
+            >
+              <UIcon name="i-lucide-x" class="size-4" />
+            </button>
+          </div>
+
+          <div class="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              class="min-h-[44px] flex-1 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="openMobileTab('inspector')"
+            >
+              Buka Detail & Aksi
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom ke ruas terpilih"
+              class="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-800 dark:border-gray-700 dark:bg-[#0b0f19] dark:text-gray-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="handleZoomToFeature(selectedFeature)"
+            >
+              <UIcon name="i-lucide-locate-fixed" class="size-4" />
+            </button>
+            <button
+              v-if="canSplitFeature(selectedFeature)"
+              type="button"
+              aria-label="Split ruas terpilih"
+              class="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg border border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-300 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+              @click="handleStartSplit(selectedFeature)"
+            >
+              <UIcon name="i-lucide-scissors" class="size-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -2616,168 +2915,430 @@ async function handleConfirmSplit() {
       </div>
     </MobileBottomSheet>
 
-    <!-- ═══ MODAL: Tambah / Edit Ruas Jalan (Clean Nuxt UI 4) ═════════════════ -->
+    <!-- ═══ MODAL: Tambah / Edit Ruas Jalan (GIS Post-Draw Dialog) ═════════════ -->
     <UModal
       v-model:open="isFormOpen"
-      :title="isEditing ? 'Edit Ruas Jalan' : 'Tambah Ruas Jalan'"
-      :ui="{ content: 'max-w-2xl w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800' }"
+      :title="isEditing ? 'Edit Atribut & Geometri Ruas Jalan' : 'Simpan Ruas Jalan Baru'"
+      :description="
+        isEditing
+          ? 'Perbarui identitas, lokasi wilayah, spesifikasi teknis, atau kembali ke peta untuk menggeser titik garis.'
+          : 'Garis ruas berhasil digambar di peta. Lengkapi atribut di bawah untuk menyimpan ke basis data PostGIS.'
+      "
+      :ui="{
+        content:
+          'max-w-3xl w-[calc(100vw-1.5rem)] max-h-[90vh] flex flex-col overflow-hidden bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl',
+        header: 'px-4 sm:px-5 py-3.5 border-b border-gray-200 dark:border-gray-800 shrink-0',
+        body: 'p-4 sm:p-5 overflow-y-auto flex-1 min-h-0',
+        footer: 'px-4 sm:px-5 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-[#0e1424]/80 shrink-0',
+      }"
     >
       <template #body>
-        <div class="space-y-3.5 px-1">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <UFormField label="Nama Ruas" required size="sm">
-              <UInput
-                v-model="formState.nama_ruas"
-                placeholder="Contoh: Jl. Poros Desa Mulyorejo"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
+        <form class="space-y-4" @submit.prevent="handleSave">
+          <!-- 1. Spatial Geometry Telemetry Banner -->
+          <div
+            class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition-colors"
+            :class="
+              parsedFormGeometrySummary.valid
+                ? 'border-emerald-200/90 bg-emerald-50/50 dark:border-emerald-800/60 dark:bg-emerald-950/25'
+                : 'border-amber-300 bg-amber-50/70 dark:border-amber-700/70 dark:bg-amber-950/30'
+            "
+          >
+            <div class="flex items-start sm:items-center gap-3 min-w-0">
+              <div
+                class="size-9 rounded-lg flex items-center justify-center shrink-0"
+                :class="
+                  parsedFormGeometrySummary.valid
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-amber-500 text-white'
+                "
+              >
+                <UIcon
+                  :name="parsedFormGeometrySummary.valid ? 'i-lucide-route' : 'i-lucide-alert-triangle'"
+                  class="size-4.5"
+                />
+              </div>
 
-            <UFormField
-              label="Kode Ruas"
-              :description="isEditing ? 'Primary key kode ruas (integer)' : 'Otomatis diisi urutan berikutnya, dapat disesuaikan'"
-              size="sm"
-            >
-              <UInputNumber
-                v-model="formState.kode_ruas"
-                :placeholder="summaryData?.next_kode_ruas ? `Urutan berikutnya: ${summaryData.next_kode_ruas}` : 'Nomor kode ruas'"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
+              <div class="min-w-0 space-y-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-xs font-semibold text-gray-900 dark:text-white">
+                    {{
+                      parsedFormGeometrySummary.valid
+                        ? "Geometri Garis Siap Disimpan"
+                        : "Geometri Perlu Diperiksa"
+                    }}
+                  </span>
+                  <UBadge
+                    :label="parsedFormGeometrySummary.type"
+                    :color="parsedFormGeometrySummary.valid ? 'success' : 'warning'"
+                    variant="subtle"
+                    size="xs"
+                    class="font-mono"
+                  />
+                  <UBadge
+                    :label="`${parsedFormGeometrySummary.vertexCount} titik vertex`"
+                    color="neutral"
+                    variant="subtle"
+                    size="xs"
+                    class="font-mono"
+                  />
+                  <UBadge
+                    v-if="formState.panjang"
+                    :label="`${Number(formState.panjang).toLocaleString('id-ID')} m (${(Number(formState.panjang) / 1000).toFixed(2)} km)`"
+                    color="primary"
+                    variant="subtle"
+                    size="xs"
+                    class="font-mono"
+                  />
+                </div>
 
-            <UFormField label="Kecamatan" size="sm">
-              <USelectMenu
-                :model-value="formState.kecamatan"
-                :items="formKecamatanItems"
-                value-key="value"
-                label-key="label"
-                placeholder="Pilih atau cari kecamatan..."
-                :disabled="isKecamatanRestricted || isDesaRestricted"
-                size="sm"
-                class="w-full"
-                @update:model-value="handleFormKecamatanChange"
-              />
-            </UFormField>
+                <div
+                  v-if="parsedFormGeometrySummary.startCoord && parsedFormGeometrySummary.endCoord"
+                  class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono text-gray-600 dark:text-gray-300 tabular-nums"
+                >
+                  <span>
+                    Awal: {{ parsedFormGeometrySummary.startCoord[1].toFixed(5) }}, {{ parsedFormGeometrySummary.startCoord[0].toFixed(5) }}
+                  </span>
+                  <span class="text-gray-400">-></span>
+                  <span>
+                    Akhir: {{ parsedFormGeometrySummary.endCoord[1].toFixed(5) }}, {{ parsedFormGeometrySummary.endCoord[0].toFixed(5) }}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-            <UFormField
-              :label="formSelectedKecamatanObj ? `Desa (${formSelectedKecamatanObj.nama})` : 'Desa / Kelurahan'"
-              size="sm"
-            >
-              <USelectMenu
-                :model-value="formState.desa"
-                :items="formDesaItems"
-                value-key="value"
-                label-key="label"
-                :placeholder="formSelectedKecamatanObj ? `Pilih desa di ${formSelectedKecamatanObj.nama}...` : 'Pilih atau cari desa...'"
-                :disabled="isDesaRestricted"
-                size="sm"
-                class="w-full"
-                @update:model-value="handleFormDesaChange"
+            <div class="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+              <UButton
+                type="button"
+                icon="i-lucide-pen-tool"
+                label="Sesuaikan Garis di Peta"
+                size="xs"
+                color="primary"
+                variant="soft"
+                class="cursor-pointer font-medium"
+                @click="resumeMapGeometryEditingFromModal"
               />
-            </UFormField>
-
-            <UFormField label="Panjang (m)" size="sm">
-              <UInputNumber
-                v-model="formState.panjang"
-                :step="1"
-                placeholder="Contoh: 2450"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-
-            <UFormField label="Lebar (m)" size="sm">
-              <UInputNumber
-                v-model="formState.lebar"
-                :step="0.1"
-                placeholder="Contoh: 4.5"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-
-            <UFormField label="Perkerasan" size="sm">
-              <USelect
-                v-model="formState.perkerasan"
-                :items="perkerasanOptions"
-                placeholder="Pilih perkerasan"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-
-            <UFormField label="Kondisi" size="sm">
-              <USelect
-                v-model="formState.kondisi"
-                :items="kondisiOptions"
-                placeholder="Pilih kondisi"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-
-            <UFormField label="Status Awal" size="sm">
-              <UInput
-                v-model="formState.status_awal"
-                placeholder="Contoh: Jalan Desa"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-
-            <UFormField label="Status Eksisting" size="sm">
-              <UInput
-                v-model="formState.status_eksisting"
-                placeholder="Contoh: Jalan Poros Desa"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
+            </div>
           </div>
 
-          <UFormField label="Sumber Data" size="sm">
-            <UInput
-              v-model="formState.sumber_data"
-              placeholder="Contoh: Survei Lapangan Dinas PUPR"
-              size="sm"
-              class="w-full"
-            />
-          </UFormField>
+          <!-- 2. Section: Identitas & Lokasi Wilayah -->
+          <div class="p-3.5 rounded-xl border border-gray-200/90 dark:border-gray-800 bg-gray-50/40 dark:bg-white/[0.02] space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5">
+                <UIcon name="i-lucide-map-pin" class="size-3.5 text-blue-600 dark:text-blue-400" />
+                <h3 class="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                  Identitas & Lokasi Administratif
+                </h3>
+              </div>
+              <span class="text-[11px] text-gray-500 dark:text-gray-400">
+                * Wajib diisi
+              </span>
+            </div>
 
-          <UFormField
-            label="Geometri (GeoJSON LineString)"
-            description="Format koordinat WGS84: [[lon, lat], [lon, lat]]"
-            required
-            size="sm"
-          >
-            <UTextarea
-              v-model="formState.geometry"
-              :rows="4"
-              size="sm"
-              class="w-full font-mono text-xs"
-              placeholder='{ "type": "LineString", "coordinates": [[111.85, -7.15], [111.87, -7.16]] }'
-            />
-          </UFormField>
-        </div>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <!-- Nama Ruas -->
+              <div class="sm:col-span-8">
+                <UFormField
+                  label="Nama Ruas Jalan"
+                  required
+                  size="sm"
+                  :error="formNameError || undefined"
+                >
+                  <UInput
+                    v-model="formState.nama_ruas"
+                    placeholder="Contoh: Jl. Poros Desa Mulyorejo"
+                    icon="i-lucide-signpost"
+                    size="sm"
+                    autofocus
+                    class="w-full"
+                    @update:model-value="formNameError = ''"
+                  />
+                </UFormField>
+              </div>
+
+              <!-- Kode Ruas -->
+              <div class="sm:col-span-4">
+                <UFormField
+                  label="Kode / No. Ruas"
+                  size="sm"
+                >
+                  <UInputNumber
+                    v-model="formState.kode_ruas"
+                    :placeholder="summaryData?.next_kode_ruas ? `Auto: ${summaryData.next_kode_ruas}` : 'Nomor kode'"
+                    size="sm"
+                    class="w-full font-mono"
+                  />
+                </UFormField>
+              </div>
+
+              <!-- Kecamatan -->
+              <div class="sm:col-span-6">
+                <UFormField label="Kecamatan" size="sm">
+                  <USelectMenu
+                    :model-value="formState.kecamatan"
+                    :items="formKecamatanItems"
+                    value-key="value"
+                    label-key="label"
+                    icon="i-lucide-building-2"
+                    placeholder="Pilih atau cari kecamatan..."
+                    :disabled="isKecamatanRestricted || isDesaRestricted"
+                    size="sm"
+                    class="w-full"
+                    @update:model-value="handleFormKecamatanChange"
+                  />
+                </UFormField>
+              </div>
+
+              <!-- Desa -->
+              <div class="sm:col-span-6">
+                <UFormField
+                  :label="formSelectedKecamatanObj ? `Desa (${formSelectedKecamatanObj.nama})` : 'Desa / Kelurahan'"
+                  size="sm"
+                >
+                  <USelectMenu
+                    :model-value="formState.desa"
+                    :items="formDesaItems"
+                    value-key="value"
+                    label-key="label"
+                    icon="i-lucide-home"
+                    :placeholder="formSelectedKecamatanObj ? `Pilih desa di ${formSelectedKecamatanObj.nama}...` : 'Pilih atau cari desa...'"
+                    :disabled="isDesaRestricted"
+                    size="sm"
+                    class="w-full"
+                    @update:model-value="handleFormDesaChange"
+                  />
+                </UFormField>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Section: Dimensi & Kondisi Fisik Jalan -->
+          <div class="p-3.5 rounded-xl border border-gray-200/90 dark:border-gray-800 bg-gray-50/40 dark:bg-white/[0.02] space-y-3.5">
+            <div class="flex items-center gap-1.5">
+              <UIcon name="i-lucide-ruler" class="size-3.5 text-blue-600 dark:text-blue-400" />
+              <h3 class="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                Dimensi & Spesifikasi Teknis
+              </h3>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <UFormField
+                label="Panjang Ruas (meter)"
+                description="Terhitung otomatis dari panjang garis peta"
+                size="sm"
+              >
+                <UInputNumber
+                  v-model="formState.panjang"
+                  :step="1"
+                  :min="1"
+                  placeholder="Contoh: 2450"
+                  size="sm"
+                  class="w-full font-mono"
+                />
+              </UFormField>
+
+              <UFormField
+                label="Lebar Rata-rata (meter)"
+                description="Lebar badan perkerasan jalan"
+                size="sm"
+              >
+                <UInputNumber
+                  v-model="formState.lebar"
+                  :step="0.5"
+                  :min="0.5"
+                  placeholder="Contoh: 4.0"
+                  size="sm"
+                  class="w-full font-mono"
+                />
+              </UFormField>
+            </div>
+
+            <!-- Interactive Pills: Jenis Perkerasan -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                Jenis Perkerasan
+              </label>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="item in perkerasanOptions"
+                  :key="item"
+                  type="button"
+                  :aria-pressed="formState.perkerasan === item"
+                  class="min-h-[34px] px-3 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+                  :class="
+                    formState.perkerasan === item
+                      ? 'border-blue-600 bg-blue-600 text-white shadow-xs'
+                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0e1424] text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                  "
+                  @click="formState.perkerasan = item"
+                >
+                  {{ item }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Interactive Cards: Kondisi Jalan -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                Kondisi Visual Jalan
+              </label>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  v-for="item in kondisiCardMeta"
+                  :key="item.value"
+                  type="button"
+                  :aria-pressed="formState.kondisi === item.value"
+                  class="min-h-[38px] px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-2 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+                  :class="
+                    formState.kondisi === item.value
+                      ? item.activeClass
+                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0e1424] text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                  "
+                  @click="formState.kondisi = item.value"
+                >
+                  <span class="size-2.5 rounded-full shrink-0" :class="item.dotClass" />
+                  <span class="truncate">{{ item.label }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. Section: Status Administratif & Sumber Data -->
+          <div class="p-3.5 rounded-xl border border-gray-200/90 dark:border-gray-800 bg-gray-50/40 dark:bg-white/[0.02] space-y-3">
+            <div class="flex items-center gap-1.5">
+              <UIcon name="i-lucide-file-check-2" class="size-3.5 text-blue-600 dark:text-blue-400" />
+              <h3 class="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                Status & Sumber Data
+              </h3>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <UFormField label="Status Awal" size="sm">
+                <UInput
+                  v-model="formState.status_awal"
+                  placeholder="Contoh: Jalan Desa"
+                  size="sm"
+                  class="w-full"
+                />
+                <div class="flex flex-wrap gap-1 mt-1">
+                  <button
+                    v-for="preset in statusAwalPresets"
+                    :key="preset"
+                    type="button"
+                    class="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                    @click="formState.status_awal = preset"
+                  >
+                    {{ preset }}
+                  </button>
+                </div>
+              </UFormField>
+
+              <UFormField label="Status Eksisting" size="sm">
+                <UInput
+                  v-model="formState.status_eksisting"
+                  placeholder="Contoh: Jalan Poros Desa"
+                  size="sm"
+                  class="w-full"
+                />
+                <div class="flex flex-wrap gap-1 mt-1">
+                  <button
+                    v-for="preset in statusEksistingPresets"
+                    :key="preset"
+                    type="button"
+                    class="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                    @click="formState.status_eksisting = preset"
+                  >
+                    {{ preset }}
+                  </button>
+                </div>
+              </UFormField>
+
+              <UFormField label="Sumber Data" size="sm">
+                <UInput
+                  v-model="formState.sumber_data"
+                  placeholder="Contoh: Survei Lapangan PUPR"
+                  size="sm"
+                  class="w-full"
+                />
+              </UFormField>
+            </div>
+          </div>
+
+          <!-- 5. Collapsible Raw GeoJSON Inspector -->
+          <div class="rounded-xl border border-gray-200/90 dark:border-gray-800 overflow-hidden">
+            <button
+              type="button"
+              class="w-full flex items-center justify-between px-3.5 py-2.5 bg-gray-50/70 dark:bg-white/[0.02] hover:bg-gray-100/70 dark:hover:bg-white/[0.04] text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors cursor-pointer"
+              @click="showRawGeoJson = !showRawGeoJson"
+            >
+              <span class="flex items-center gap-2">
+                <UIcon name="i-lucide-braces" class="size-3.5 text-gray-500" />
+                <span>Koordinat GeoJSON Mentah (Opsional / Tingkat Lanjut)</span>
+              </span>
+              <UIcon
+                :name="showRawGeoJson ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                class="size-4 text-gray-500"
+              />
+            </button>
+
+            <div
+              v-if="showRawGeoJson"
+              class="p-3.5 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#0b0f19] space-y-2"
+            >
+              <UFormField
+                label="GeoJSON LineString (WGS84)"
+                description="Format: { &quot;type&quot;: &quot;LineString&quot;, &quot;coordinates&quot;: [[lon, lat], [lon, lat]] }"
+                :error="formGeometryError || undefined"
+                size="sm"
+              >
+                <UTextarea
+                  v-model="formState.geometry"
+                  :rows="4"
+                  size="sm"
+                  class="w-full font-mono text-xs"
+                  placeholder='{ "type": "LineString", "coordinates": [[111.85, -7.15], [111.87, -7.16]] }'
+                  @update:model-value="formGeometryError = ''"
+                />
+              </UFormField>
+            </div>
+          </div>
+        </form>
       </template>
 
       <template #footer>
-        <div class="flex justify-end gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 w-full">
           <UButton
-            label="Batal"
+            type="button"
+            icon="i-lucide-pen-tool"
+            label="Kembali ke Peta"
             color="neutral"
-            variant="ghost"
-            @click="isFormOpen = false"
+            variant="outline"
+            size="sm"
+            class="cursor-pointer"
+            @click="resumeMapGeometryEditingFromModal"
           />
-          <UButton
-            :label="isEditing ? 'Simpan Perubahan' : 'Simpan Ruas'"
-            color="primary"
-            variant="solid"
-            :loading="submitting"
-            @click="handleSave"
-          />
+
+          <div class="flex items-center gap-2 ml-auto">
+            <UButton
+              type="button"
+              label="Tutup"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              class="cursor-pointer"
+              @click="isFormOpen = false"
+            />
+            <UButton
+              type="button"
+              icon="i-lucide-check"
+              :label="isEditing ? 'Simpan Perubahan' : 'Simpan Ruas Jalan'"
+              color="primary"
+              variant="solid"
+              size="sm"
+              class="cursor-pointer font-semibold"
+              :loading="submitting"
+              @click="handleSave"
+            />
+          </div>
         </div>
       </template>
     </UModal>

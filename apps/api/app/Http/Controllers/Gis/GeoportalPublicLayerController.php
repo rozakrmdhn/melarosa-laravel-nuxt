@@ -151,18 +151,17 @@ class GeoportalPublicLayerController extends Controller
         $host = parse_url($targetUrl, PHP_URL_HOST);
         $allowedHosts = [
             'geoportal.bojonegorokab.go.id',
-            'localhost',
-            '127.0.0.1',
         ];
 
-        if (!in_array(strtolower($host), $allowedHosts, true)) {
+        if (!in_array(strtolower((string) $host), $allowedHosts, true)) {
             return response()->json(['ok' => false, 'message' => 'Host is not in the allowed list'], 403);
         }
 
         try {
             $client = new Client([
-                'verify' => false,
+                'verify' => app()->isProduction(),
                 'timeout' => 10,
+                'allow_redirects' => false,
             ]);
 
             // Forward query parameters

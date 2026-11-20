@@ -260,27 +260,17 @@ defineExpose({
 </template>
 
 <style scoped>
-/* ScaleLine Control styling inside target container */
-:deep(.ol-scale-line) {
+/* MapLibre ScaleControl styling inside target container */
+:deep(.maplibregl-ctrl-scale) {
   position: relative !important;
   bottom: auto !important;
   left: auto !important;
   right: auto !important;
   top: auto !important;
-  background: transparent !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border: none !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  box-shadow: none !important;
-}
-
-:deep(.ol-scale-line-inner) {
   color: #1e293b;
   border: 1.5px solid #475569;
   border-top: none;
+  border-radius: 0 !important;
   font-size: 10.5px;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -290,21 +280,19 @@ defineExpose({
   margin: 0 auto;
   padding: 0 5px 1.5px;
   background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
   line-height: 1.15;
   transition: color 0.2s ease, border-color 0.2s ease;
 }
 
-:global(.dark) :deep(.ol-scale-line),
-.dark :deep(.ol-scale-line) {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-:global(.dark) :deep(.ol-scale-line-inner),
-.dark :deep(.ol-scale-line-inner) {
+:global(.dark) :deep(.maplibregl-ctrl-scale),
+.dark :deep(.maplibregl-ctrl-scale) {
   color: #e2e8f0;
   border: 1.5px solid #94a3b8;
   border-top: none;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 </style>

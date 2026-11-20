@@ -43,7 +43,7 @@ const emit = defineEmits<{
 const basemapStore = useBasemapStore();
 
 const basemapList = computed<BasemapDef[]>(() => {
-  const dynamicItems = basemapStore.listForEngine("openlayers").map((item) => ({
+  const dynamicItems = basemapStore.listForEngine("maplibre").map((item) => ({
     key: item.kode as BasemapKey,
     name: item.nama,
     tagline: item.tagline || item.provider || "Peta dasar dinamis",

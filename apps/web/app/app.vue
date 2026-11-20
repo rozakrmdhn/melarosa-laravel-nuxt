@@ -81,6 +81,7 @@ onMounted(() => {
     // 3. Watchdog notifikasi toast agar selalu menutup otomatis tepat waktu
     //    walaupun kursor di luar browser atau jendela kehilangan fokus (window.blur).
     const DEFAULT_TOAST_MS = 4000;
+    const WATCHDOG_GRACE_MS = 350;
     const trackedToasts = new Map<string, { sig: string; expiresAt: number }>();
     let toastPollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -105,8 +106,16 @@ onMounted(() => {
       }
       if (typeof PointerEvent !== "undefined") {
         viewport.dispatchEvent(new PointerEvent("pointerleave", { bubbles: false }));
+      } else {
+        viewport.dispatchEvent(new Event("pointerleave", { bubbles: false }));
       }
-      viewport.dispatchEvent(new CustomEvent("toast.viewportResume"));
+    };
+
+    // Cegah window.blur menghentikan (pause) timer progres toast ketika tidak sedang di-hover
+    const handleWindowBlurCapture = (event: FocusEvent) => {
+      if (globalToasts.value.length > 0 && !isHoveringToastCard()) {
+        event.stopImmediatePropagation();
+      }
     };
 
     const checkAndDismissExpiredToasts = () => {
@@ -156,7 +165,10 @@ onMounted(() => {
           const sig = `${durationMs}|${item._duplicate ?? 0}|${item._updated ? 1 : 0}`;
           const prev = trackedToasts.get(item.id);
           if (!prev || prev.sig !== sig) {
-            trackedToasts.set(item.id, { sig, expiresAt: Date.now() + durationMs });
+            trackedToasts.set(item.id, {
+              sig,
+              expiresAt: Date.now() + durationMs + WATCHDOG_GRACE_MS,
+            });
           }
         }
 
@@ -184,6 +196,7 @@ onMounted(() => {
       setTimeout(checkAndDismissExpiredToasts, 0);
     };
 
+    window.addEventListener("blur", handleWindowBlurCapture, true);
     window.addEventListener("blur", handleToastWindowEvent);
     window.addEventListener("focus", handleToastWindowEvent);
     document.addEventListener("visibilitychange", handleToastWindowEvent);
@@ -194,6 +207,7 @@ onMounted(() => {
         clearInterval(toastPollTimer);
         toastPollTimer = null;
       }
+      window.removeEventListener("blur", handleWindowBlurCapture, true);
       window.removeEventListener("blur", handleToastWindowEvent);
       window.removeEventListener("focus", handleToastWindowEvent);
       document.removeEventListener("visibilitychange", handleToastWindowEvent);

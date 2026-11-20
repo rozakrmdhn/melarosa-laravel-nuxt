@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import "ol/ol.css";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type {
   BasemapType,
   DesaOption,
@@ -8,11 +8,21 @@ import type {
   RuasProperties,
   SelectedFeature,
 } from "~/types/dataset-editor";
-import { DEFAULT_SYMBOLOGY, DEFAULT_JALAN_POROS_SYMBOLOGY } from "~/types/dataset-editor";
+import { DEFAULT_JALAN_POROS_SYMBOLOGY, DEFAULT_SYMBOLOGY } from "~/types/dataset-editor";
 import { $http } from "~/utils/helpers";
 import BasemapSwitcher from "~/components/common/BasemapSwitcher.vue";
 import { useBasemapStore } from "~/stores/basemap";
-import { createOpenLayersBasemapSource } from "~/utils/basemap-sources";
+import {
+  buildDynamicMaplibreBasemapSpec,
+  resolveAbsoluteTileUrl,
+} from "~/utils/basemap-sources";
+import { computeGeometryBbox } from "~/utils/jaringan-jalan-format";
+import {
+  extractMergedRoadCoordinates,
+  haversineDistanceMeters,
+  projectPointOntoRoad,
+  type LngLat,
+} from "~/utils/road-geometry";
 
 const props = withDefaults(
   defineProps<{
@@ -61,44 +71,34 @@ const emit = defineEmits<{
   (e: "mapClick", coordinate: [number, number]): void;
 }>();
 
+const BOJONEGORO_BOUNDS: [number, number, number, number] = [111.415, -7.475, 112.17, -6.975];
+
 const colorMode = useColorMode();
 const config = useRuntimeConfig();
-const martinUrl = computed(() => (config.public.martinUrl as string) || "/martin");
+const basemapStore = useBasemapStore();
+const martinBase = computed(() =>
+  String(config.public.martinUrl || "/martin").replace(/\/+$/, "")
+);
+const isDarkTheme = computed(() => colorMode.value === "dark");
+
 const mapContainer = ref<HTMLElement | null>(null);
-const scaleLineTarget = ref<HTMLElement | null>(null);
-const tooltipEl = ref<HTMLElement | null>(null);
-const pulseEl = ref<HTMLElement | null>(null);
-const isPulseVisible = ref(false);
 const mapLoaded = ref(false);
 const isMvtLoading = ref(false);
-let activeTileCount = 0;
-let mvtSafetyTimeout: any = null;
+const martinStatusState = ref<"ready" | "loading" | "warning">("loading");
+const martinWarningDetail = ref<string | null>(null);
+const showMartinPopover = ref(false);
 
-function onTileLoadStart() {
-  activeTileCount++;
-  isMvtLoading.value = true;
-  emit("mvtLoading", true);
-  clearTimeout(mvtSafetyTimeout);
-  mvtSafetyTimeout = setTimeout(() => {
-    if (activeTileCount > 0) {
-      activeTileCount = 0;
-      isMvtLoading.value = false;
-      emit("mvtLoading", false);
-    }
-  }, 8000);
-}
-
-function onTileLoadFinish() {
-  activeTileCount = Math.max(0, activeTileCount - 1);
-  if (activeTileCount === 0) {
-    clearTimeout(mvtSafetyTimeout);
-    isMvtLoading.value = false;
-    emit("mvtLoading", false);
-  }
-}
+const currentZoom = ref(10.5);
+const currentPitch = ref(0);
+const currentBearing = ref(0);
+const is3DTiltActive = computed(() => currentPitch.value >= 15);
+const cursorCoord = ref<{ lng: number; lat: number } | null>(null);
 const mouseCoords = ref("");
-const hoveredFeature = ref<any>(null);
-const tooltipData = ref<{
+const tileRefreshNonce = ref(0);
+
+const hoverTooltip = ref<{
+  x: number;
+  y: number;
   nama_ruas: string;
   kondisi: string;
   panjang_meter: number;
@@ -106,1052 +106,1078 @@ const tooltipData = ref<{
   kecamatan: string;
 } | null>(null);
 
-// ─── Draw Feature State ───────────────────────────────────────────────────────
+// ─── Draw / Vertex Edit / Snap State (shallowRef avoids Vue Proxy DataCloneError in MapLibre Worker) ───
 const isDrawing = ref(false);
 const hasCompletedLine = ref(false);
-const drawnPointCount = ref(0);
-const drawnLengthMeters = ref(0);
-const drawnFeature = ref<any>(null);
-const redoStack = ref<any[]>([]);
-
-const canUndo = computed(() => {
-  if (hasCompletedLine.value) {
-    const coords = drawnFeature.value?.getGeometry()?.getCoordinates();
-    return Boolean(coords && coords.length > 0);
-  }
-  return drawnPointCount.value > 0;
-});
-
-const canRedo = computed(() => {
-  return redoStack.value.length > 0;
-});
-
-const canSave = computed(() => {
-  return drawnPointCount.value >= 2;
-});
-
-const isDrawInteracting = computed(() => {
-  return isDrawing.value && !hasCompletedLine.value;
-});
-
-let drawSource: any = null;
-let drawLayer: any = null;
-let drawInteraction: any = null;
-let modifyInteraction: any = null;
-let activeGeomListener: any = null;
 const isEditingExisting = ref(false);
+const drawnCoords = shallowRef<LngLat[]>([]);
+const previewCursorCoord = shallowRef<LngLat | null>(null);
+const undoStack = shallowRef<LngLat[][]>([]);
+const redoStack = shallowRef<LngLat[][]>([]);
 
-let snapSource: any = null;
-let drawSnapInteraction: any = null;
-let networkSnapInteraction: any = null;
+const drawnPointCount = computed(() => drawnCoords.value.length);
+const drawnLengthMeters = computed(() => {
+  const pts = drawnCoords.value;
+  if (pts.length < 2) return 0;
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    total += haversineDistanceMeters(pts[i - 1]!, pts[i]!);
+  }
+  return Math.round(total);
+});
+
+const canUndo = computed(() => undoStack.value.length > 0);
+const canRedo = computed(() => redoStack.value.length > 0);
+const canSave = computed(() => drawnCoords.value.length >= 2);
+const isDrawInteracting = computed(() => isDrawing.value && !hasCompletedLine.value);
+
 const isSnappingEnabled = ref(true);
 const snapRoadCount = ref(0);
 const isSnapLoading = ref(false);
 const editingRuasId = ref<string | number | null>(null);
+const snapCandidateRoads = shallowRef<LngLat[][]>([]);
+const activeSnapPoint = shallowRef<{ coord: LngLat; kind: "vertex" | "edge" } | null>(null);
+
+let draggingVertexIndex: number | null = null;
+let dragSnapshotBefore: LngLat[] | null = null;
+let suppressNextClickAfterDrag = false;
 let snapFetchAbort: AbortController | null = null;
 let lastSnapBbox = "";
-let snapMoveEndTimer: any = null;
+let snapMoveEndTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingEditorAction: (() => void) | null = null;
+let lastAppliedLineDash: string = props.symbology?.lineDash || "solid";
 
+// ─── Split Mode State ─────────────────────────────────────────────────────────
 const isSplitMode = ref(false);
-const splitRoadData = ref<any>(null);
-let splitSource: any = null;
-let splitLayer: any = null;
-let splitSnapInteraction: any = null;
-let splitClickListener: any = null;
-const splitSelectedCoord = ref<[number, number] | null>(null);
+const splitRoadData = shallowRef<any>(null);
+const splitRoadCoords = shallowRef<LngLat[]>([]);
+const splitPreviewPoint = shallowRef<{ coord: LngLat; alongMeters: number } | null>(null);
+const splitSelectedCoord = shallowRef<LngLat | null>(null);
 
+// ─── MapLibre & Geoman Runtime Refs ───────────────────────────────────────────
 let mapInstance: any = null;
-let tileLayer: any = null;
-let vectorTileLayer: any = null;
-let vectorTileSource: any = null;
-let tooltipOverlay: any = null;
-let pulseOverlay: any = null;
-let olModules: any = null;
+let maplibregl: any = null;
+let gmInstance: any = null;
+let GeomanClass: any = null;
+let isRestoringGeomanState = false;
+let pulseMarker: any = null;
+let resizeObserver: ResizeObserver | null = null;
+let canvasReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let hasFittedToSummaryBbox = false;
+let lastFittedBboxKey = "";
+let hasUserInteractedWithCamera = false;
+let lastObservedW = 0;
+let lastObservedH = 0;
+let tileErrorCount = 0;
 
-const basemapStore = useBasemapStore();
-
-function getBasemapSource(type: BasemapType) {
-  if (!olModules || type === "none") return null;
-  const item = basemapStore.getByCode(type, "openlayers");
-  return createOpenLayersBasemapSource(item ?? type, olModules);
+function prefersReducedMotion(): boolean {
+  if (!import.meta.client || typeof window === "undefined") return false;
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 }
 
-watch(
-  () => basemapStore.items,
-  () => {
-    if (tileLayer && olModules && props.basemap !== "none") {
-      tileLayer.setSource(getBasemapSource(props.basemap));
-    }
-  },
-);
+function getMotionDuration(ms: number, fallbackMs = 0): number {
+  if (prefersReducedMotion()) return 0;
+  if (typeof ms === "number" && Number.isFinite(ms)) return Math.max(0, ms);
+  return Math.max(0, fallbackMs);
+}
 
-function setBasemap(type: BasemapType) {
-  emit("update:basemap", type);
-  if (tileLayer && olModules) {
-    if (type === "none") {
-      tileLayer.setVisible(false);
-      tileLayer.setSource(null);
-    } else {
-      tileLayer.setVisible(true);
-      tileLayer.setSource(getBasemapSource(type));
-    }
+function toPlainCoord(pt: LngLat): [number, number] {
+  return [Number(pt[0]), Number(pt[1])];
+}
+
+function cloneCoords(pts: LngLat[]): LngLat[] {
+  return pts.map((p) => [Number(p[0]), Number(p[1])] as LngLat);
+}
+
+function pushUndoSnapshot() {
+  const nextUndo = [...undoStack.value, cloneCoords(drawnCoords.value)];
+  if (nextUndo.length > 80) {
+    nextUndo.shift();
   }
+  undoStack.value = nextUndo;
+  redoStack.value = [];
 }
 
-const KONDISI_COLORS: Record<string, string> = {
-  BAIK: "#10b981",
-  SEDANG: "#f59e0b",
-  RUSAK: "#f97316",
-  "RUSAK BERAT": "#ef4444",
-};
+function martinTileUrl(sourceId: string): string {
+  const base = resolveAbsoluteTileUrl(`${martinBase.value}/${sourceId}/{z}/{x}/{y}`);
+  return tileRefreshNonce.value > 0 ? `${base}?v=${tileRefreshNonce.value}` : base;
+}
 
-const PERKERASAN_COLORS: Record<string, string> = {
-  Aspal: "#0284c7",
-  Beton: "#6366f1",
-  Kerikil: "#d97706",
-  Tanah: "#854d0e",
-  Lainnya: "#64748b",
-};
-
-function getStrokeColor(feature: any): string {
+// ─── Symbology & Filter Expressions ──────────────────────────────────────────
+function buildRoadColorExpression(): any {
   const sym = props.symbology || DEFAULT_JALAN_POROS_SYMBOLOGY;
+
   if (sym.colorMode === "kondisi") {
-    const k = String(feature.get("kondisi") || "").toLowerCase().trim();
-    if (k.includes("rusak berat")) return KONDISI_COLORS["RUSAK BERAT"];
-    if (k.includes("rusak ringan")) return "#f97316";
-    if (k.includes("rusak")) return KONDISI_COLORS["RUSAK"];
-    if (k.includes("sedang")) return KONDISI_COLORS["SEDANG"];
-    if (k.includes("baik")) return KONDISI_COLORS["BAIK"];
-    return sym.lineColor || "#2563eb";
+    const kondisiExpr: any = ["downcase", ["coalesce", ["to-string", ["get", "kondisi"]], ""]];
+    return [
+      "case",
+      ["in", "rusak berat", kondisiExpr],
+      "#ef4444",
+      ["in", "rusak ringan", kondisiExpr],
+      "#f97316",
+      ["in", "rusak", kondisiExpr],
+      "#f97316",
+      ["in", "sedang", kondisiExpr],
+      "#f59e0b",
+      ["in", "baik", kondisiExpr],
+      "#10b981",
+      sym.lineColor || "#2563eb",
+    ];
   }
+
   if (sym.colorMode === "perkerasan") {
-    const p = String(feature.get("perkerasan") || "").trim();
-    return PERKERASAN_COLORS[p] || PERKERASAN_COLORS["Lainnya"] || "#64748b";
+    return [
+      "match",
+      ["coalesce", ["to-string", ["get", "perkerasan"]], ""],
+      "Aspal",
+      "#0284c7",
+      "Beton",
+      "#6366f1",
+      "Kerikil",
+      "#d97706",
+      "Tanah",
+      "#854d0e",
+      "#64748b",
+    ];
   }
+
   return sym.lineColor || "#2563eb";
 }
 
-function getLineDash(): number[] | undefined {
+function buildRoadDashArray(): number[] | undefined {
   const sym = props.symbology || DEFAULT_SYMBOLOGY;
-  if (sym.lineDash === "dashed") return [8, 6];
-  if (sym.lineDash === "dotted") return [2, 4];
+  if (sym.lineDash === "dashed") return [3, 2];
+  if (sym.lineDash === "dotted") return [0.5, 2];
   return undefined;
 }
 
-function getLabelText(feature: any): string {
-  const sym = props.symbology || DEFAULT_SYMBOLOGY;
-  if (!sym.labelEnabled) return "";
-
-  const currentZoom = mapInstance ? (mapInstance.getView()?.getZoom() || 0) : 0;
-  if (currentZoom < (sym.labelMinZoom ?? 13)) return "";
-
-  const field = sym.labelField || "nama_ruas";
-  if (field === "panjang") {
-    const pMeter = feature.get("panjang_meter");
-    const pKm = feature.get("panjang");
-    if (pMeter != null && pMeter !== "") {
-      return `${Number(pMeter).toLocaleString("id-ID", { maximumFractionDigits: 1 })} m`;
-    }
-    if (pKm != null && pKm !== "") {
-      return `${Number(pKm).toLocaleString("id-ID", { maximumFractionDigits: 1 })} m`;
-    }
-    return "";
-  }
-  const val = feature.get(field);
-  return val ? String(val) : "";
+function buildRoadWidthExpression(): any {
+  const sym = props.symbology || DEFAULT_JALAN_POROS_SYMBOLOGY;
+  const base = Math.max(1.5, Number(sym.lineWidth || 3));
+  return [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    9,
+    Math.max(1.2, base * 0.65),
+    13,
+    base,
+    17,
+    base * 1.45,
+  ];
 }
 
-// ─── Style & Text Cache for High-Performance MVT Rendering ───────────────────
-const textStyleCache = new Map<string, any>();
-const featureStyleCache = new Map<string, any>();
+function buildMvtFilterExpression(): any {
+  const clauses: any[] = ["all"];
 
-function clearStyleCache() {
-  textStyleCache.clear();
-  featureStyleCache.clear();
-}
-
-function matchesFilters(feature: any): boolean {
-  if (!feature) return false;
-
-  // 1. Kecamatan Filter
-  if (props.kecamatanFilter && props.kecamatanFilter !== "ALL") {
-    const filterKecNorm = String(props.kecamatanFilter).trim().toLowerCase();
-    const optMatch = props.kecamatanOptions?.find(
-      (k) => k.nama.trim().toLowerCase() === filterKecNorm || String(k.id) === filterKecNorm
+  if (props.kecamatanFilter) {
+    const target = props.kecamatanFilter.trim().toLowerCase();
+    const matchedKec = props.kecamatanOptions.find(
+      (k) => k.nama.toLowerCase() === target || String(k.id) === target
     );
-    const targetNames = [filterKecNorm];
-    if (optMatch) targetNames.push(optMatch.nama.trim().toLowerCase());
-
-    const targetIds = optMatch ? [String(optMatch.id)] : [];
-    if (/^\d+$/.test(filterKecNorm)) targetIds.push(filterKecNorm);
-
-    const featKec = String(feature.get("kecamatan") || "").trim().toLowerCase();
-    const featKecId = feature.get("id_kecamatan") != null ? String(feature.get("id_kecamatan")).trim() : "";
-
-    const matchKec =
-      (featKec && targetNames.some((n) => featKec === n || featKec.includes(n) || n.includes(featKec))) ||
-      (featKecId && targetIds.includes(featKecId));
-
-    if (!matchKec) return false;
+    const kecName = (matchedKec?.nama || props.kecamatanFilter).trim().toLowerCase();
+    const kecOr: any[] = [
+      "any",
+      ["==", ["downcase", ["coalesce", ["to-string", ["get", "kecamatan"]], ""]], kecName],
+      ["==", ["downcase", ["coalesce", ["to-string", ["get", "nama_kecamatan"]], ""]], kecName],
+    ];
+    if (matchedKec?.id != null) {
+      kecOr.push(["==", ["to-number", ["get", "id_kecamatan"], -999], Number(matchedKec.id)]);
+    }
+    clauses.push(kecOr);
   }
 
-  // 2. Desa Filter
-  if (props.desaFilter && props.desaFilter !== "ALL") {
-    const filterDesaNorm = String(props.desaFilter).trim().toLowerCase();
-    const optMatch = props.desaOptions?.find(
-      (d) => d.nama.trim().toLowerCase() === filterDesaNorm || String(d.id) === filterDesaNorm
+  if (props.desaFilter) {
+    const target = props.desaFilter.trim().toLowerCase();
+    const matchedDesa = props.desaOptions.find(
+      (d) => d.nama.toLowerCase() === target || String(d.id) === target
     );
-    const targetNames = [filterDesaNorm];
-    if (optMatch) targetNames.push(optMatch.nama.trim().toLowerCase());
-
-    const targetIds = optMatch ? [String(optMatch.id)] : [];
-    if (/^\d+$/.test(filterDesaNorm)) targetIds.push(filterDesaNorm);
-
-    const featDesa = String(feature.get("desa") || "").trim().toLowerCase();
-    const featDesaId = feature.get("id_desa") != null ? String(feature.get("id_desa")).trim() : "";
-
-    const matchDesa =
-      (featDesa && targetNames.some((n) => featDesa === n || featDesa.includes(n) || n.includes(featDesa))) ||
-      (featDesaId && targetIds.includes(featDesaId));
-
-    if (!matchDesa) return false;
-  }
-
-  // 3. Kondisi Filter
-  if (props.kondisiFilter && props.kondisiFilter !== "ALL") {
-    const filterKondisi = String(props.kondisiFilter).toUpperCase().trim();
-    const featKondisi = String(feature.get("kondisi") || "").toUpperCase().trim();
-
-    let matchKondisi = false;
-    if (filterKondisi === "RUSAK BERAT") {
-      matchKondisi = featKondisi.includes("RUSAK BERAT");
-    } else if (filterKondisi === "SEDANG") {
-      matchKondisi = featKondisi.includes("SEDANG");
-    } else if (filterKondisi === "BAIK") {
-      matchKondisi = featKondisi.includes("BAIK");
-    } else if (filterKondisi === "RUSAK") {
-      matchKondisi = featKondisi.includes("RUSAK");
-    } else {
-      matchKondisi = featKondisi.includes(filterKondisi);
+    const desaName = (matchedDesa?.nama || props.desaFilter).trim().toLowerCase();
+    const desaOr: any[] = [
+      "any",
+      ["==", ["downcase", ["coalesce", ["to-string", ["get", "desa"]], ""]], desaName],
+      ["==", ["downcase", ["coalesce", ["to-string", ["get", "nama_desa"]], ""]], desaName],
+    ];
+    if (matchedDesa?.id != null) {
+      desaOr.push(["==", ["to-number", ["get", "id_desa"], -999], Number(matchedDesa.id)]);
     }
-
-    if (!matchKondisi) return false;
+    clauses.push(desaOr);
   }
 
-  // 4. Perkerasan Filter
-  if (props.perkerasanFilter && props.perkerasanFilter !== "ALL") {
-    const filterPerkerasan = String(props.perkerasanFilter).toLowerCase().trim();
-    const featPerkerasan = String(feature.get("perkerasan") || "").toLowerCase().trim();
-
-    let matchPerkerasan = false;
-    if (filterPerkerasan === "lainnya") {
-      const isStandard =
-        featPerkerasan.includes("aspal") ||
-        featPerkerasan.includes("beton") ||
-        featPerkerasan.includes("kerikil") ||
-        featPerkerasan.includes("tanah");
-      matchPerkerasan = !isStandard;
-    } else {
-      matchPerkerasan = featPerkerasan.includes(filterPerkerasan);
-    }
-
-    if (!matchPerkerasan) return false;
+  if (props.kondisiFilter) {
+    const target = props.kondisiFilter.trim().toLowerCase();
+    clauses.push(["in", target, ["downcase", ["coalesce", ["to-string", ["get", "kondisi"]], ""]]]);
   }
 
-  return true;
+  if (props.perkerasanFilter) {
+    const target = props.perkerasanFilter.trim().toLowerCase();
+    clauses.push(["in", target, ["downcase", ["coalesce", ["to-string", ["get", "perkerasan"]], ""]]]);
+  }
+
+  return clauses.length > 1 ? clauses : null;
 }
 
-function getFeatureStyle(feature: any) {
-  if (!olModules) return null;
-  if (!matchesFilters(feature)) return null;
+function buildSelectedMvtFilterExpression(): any {
+  const selId = props.selectedFeature?.id ? String(props.selectedFeature.id).trim() : "";
+  if (!selId) {
+    return ["==", ["to-string", ["get", "id"]], "__NO_MATCH__"];
+  }
+  return ["==", ["to-string", ["get", "id"]], selId];
+}
 
-  const { Style, Stroke, Fill, Text } = olModules;
-  const id = String(feature.get("id") || feature.getId() || "");
-  const isSelected = props.selectedFeature?.id === id;
-  const hoverId = hoveredFeature.value
-    ? String(hoveredFeature.value.get("id") || hoveredFeature.value.getId() || "")
-    : "";
-  const isHovered = hoverId === id;
+function buildSelectedFeatureGeoJson() {
+  const geom = props.selectedFeature?.geometry;
+  if (!geom) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  try {
+    const parsed =
+      typeof geom === "string" ? JSON.parse(geom) : JSON.parse(JSON.stringify(geom));
+    const geometry = parsed?.type === "Feature" ? parsed.geometry : parsed;
+    if (!geometry || !geometry.type) {
+      return { type: "FeatureCollection", features: [] };
+    }
+    return {
+      type: "FeatureCollection",
+      features: [{ type: "Feature", geometry, properties: {} }],
+    };
+  } catch {
+    return { type: "FeatureCollection", features: [] };
+  }
+}
 
-  const sym = props.symbology || DEFAULT_SYMBOLOGY;
-  const isDark = colorMode.value === "dark";
+function buildDrawLineGeoJson() {
+  const features: any[] = [];
+  if (!gmInstance?.loaded && drawnCoords.value.length >= 2) {
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: cloneCoords(drawnCoords.value),
+      },
+      properties: { role: "line" },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
 
-  // Base stroke properties
-  const baseColor = getStrokeColor(feature);
-  const strokeWidth = sym.lineWidth || 2.5;
-  const lineDash = getLineDash();
+function buildDrawPreviewGeoJson() {
+  const features: any[] = [];
+  if (!gmInstance?.loaded && isDrawInteracting.value && drawnCoords.value.length >= 1 && previewCursorCoord.value) {
+    const last = drawnCoords.value[drawnCoords.value.length - 1]!;
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [toPlainCoord(last), toPlainCoord(previewCursorCoord.value)],
+      },
+      properties: {},
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
 
-  // Label text if enabled & zoom threshold met
-  const labelText = getLabelText(feature);
-  let textStyle: any = undefined;
+function buildDrawVerticesGeoJson() {
+  if (gmInstance?.loaded) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  const total = drawnCoords.value.length;
+  const features: any[] = drawnCoords.value.map((coord, idx) => ({
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: toPlainCoord(coord),
+    },
+    properties: {
+      index: idx,
+      isEndpoint: idx === 0 || idx === total - 1,
+    },
+  }));
+  return { type: "FeatureCollection", features };
+}
 
-  if (labelText) {
-    const fontSize = sym.labelFontSize || 11;
-    const textColor = sym.labelColor || (isDark ? "#f8fafc" : "#0f172a");
-    const haloColor = sym.labelHaloColor || (isDark ? "#090d16" : "#ffffff");
-    const haloWidth = sym.labelHaloWidth ?? 3;
-    const textKey = `${labelText}_${fontSize}_${textColor}_${haloColor}_${haloWidth}`;
-
-    textStyle = textStyleCache.get(textKey);
-    if (!textStyle) {
-      textStyle = new Text({
-        text: labelText,
-        font: `bold ${fontSize}px system-ui, -apple-system, sans-serif`,
-        placement: "line",
-        maxAngle: Math.PI / 4,
-        overflow: false,
-        fill: new Fill({ color: textColor }),
-        stroke: new Stroke({ color: haloColor, width: haloWidth }),
-        offsetY: -8,
+function buildDrawMidpointsGeoJson() {
+  const features: any[] = [];
+  if (!gmInstance?.loaded && isDrawing.value && drawnCoords.value.length >= 2) {
+    for (let i = 0; i < drawnCoords.value.length - 1; i++) {
+      const a = drawnCoords.value[i]!;
+      const b = drawnCoords.value[i + 1]!;
+      features.push({
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [Number((a[0] + b[0]) / 2), Number((a[1] + b[1]) / 2)],
+        },
+        properties: {
+          insertAfterIndex: i,
+        },
       });
-      textStyleCache.set(textKey, textStyle);
     }
   }
-
-  if (isSelected) {
-    return new Style({
-      stroke: new Stroke({
-        color: "#0284c7",
-        width: Math.max(strokeWidth + 2.5, 4.5),
-        lineDash: undefined,
-      }),
-      text: textStyle,
-      zIndex: 100,
-    });
-  }
-
-  if (isHovered) {
-    return new Style({
-      stroke: new Stroke({
-        color: isDark ? "#ffffff" : "#0f172a",
-        width: Math.max(strokeWidth + 1.5, 3.5),
-        lineDash: undefined,
-      }),
-      text: textStyle,
-      zIndex: 50,
-    });
-  }
-
-  const styleKey = `${baseColor}_${strokeWidth}_${sym.lineDash || "solid"}_${labelText || ""}`;
-  let cached = featureStyleCache.get(styleKey);
-  if (!cached) {
-    cached = new Style({
-      stroke: new Stroke({
-        color: baseColor,
-        width: strokeWidth,
-        lineDash,
-      }),
-      text: textStyle,
-      zIndex: 10,
-    });
-    featureStyleCache.set(styleKey, cached);
-  }
-
-  return cached;
+  return { type: "FeatureCollection", features };
 }
 
-function fitBounds() {
-  if (!mapInstance || !olModules) return;
-  const size = mapInstance.getSize();
-  if (!size || size[0] <= 0 || size[1] <= 0) return;
+function buildSnapIndicatorGeoJson() {
+  if (!activeSnapPoint.value) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: toPlainCoord(activeSnapPoint.value.coord),
+        },
+        properties: {
+          kind: String(activeSnapPoint.value.kind),
+        },
+      },
+    ],
+  };
+}
 
-  const { transformExtent } = olModules;
-  if (props.bbox) {
-    const [minX, minY, maxX, maxY] = props.bbox;
-    const extent = transformExtent([minX, minY, maxX, maxY], "EPSG:4326", "EPSG:3857");
-    mapInstance.getView().fit(extent, {
-      duration: 700,
-      padding: [50, 50, 50, 50],
-      maxZoom: 15,
+function buildSplitGeoJson() {
+  const features: any[] = [];
+  if (isSplitMode.value && splitRoadCoords.value.length >= 2) {
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: cloneCoords(splitRoadCoords.value),
+      },
+      properties: { role: "road" },
     });
+  }
+  if (isSplitMode.value && splitPreviewPoint.value) {
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: toPlainCoord(splitPreviewPoint.value.coord),
+      },
+      properties: { role: "preview" },
+    });
+  }
+  if (isSplitMode.value && splitSelectedCoord.value) {
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: toPlainCoord(splitSelectedCoord.value),
+      },
+      properties: { role: "pin" },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+function buildMapStyle(basemapCode: BasemapType) {
+  const isNone = basemapCode === "none";
+  const item = isNone ? null : basemapStore.getByCode(basemapCode, "maplibre");
+  const { sources, layers } = isNone
+    ? { sources: {} as Record<string, any>, layers: [] as any[] }
+    : buildDynamicMaplibreBasemapSpec(item ?? basemapCode, { baseOpacity: 0.92 });
+
+  const dark = isDarkTheme.value;
+  const kecLineColor = dark ? "rgba(148, 163, 184, 0.45)" : "rgba(71, 85, 105, 0.38)";
+  const desaLineColor = dark ? "rgba(148, 163, 184, 0.28)" : "rgba(100, 116, 139, 0.25)";
+
+  if (isNone) {
+    layers.unshift({
+      id: "canvas-background",
+      type: "background",
+      paint: {
+        "background-color": "#ffffff",
+      },
+    });
+  }
+
+  sources["martin-kecamatan"] = {
+    type: "vector",
+    tiles: [martinTileUrl("bataswilayah_kecamatan")],
+    minzoom: 8,
+    maxzoom: 18,
+  };
+  sources["martin-desa"] = {
+    type: "vector",
+    tiles: [martinTileUrl("bataswilayah_desa")],
+    minzoom: 10,
+    maxzoom: 18,
+  };
+  sources["martin-poros"] = {
+    type: "vector",
+    tiles: [martinTileUrl("jalan_porosdesa")],
+    minzoom: 8,
+    maxzoom: 19,
+  };
+  sources["selected-road-geojson"] = {
+    type: "geojson",
+    data: buildSelectedFeatureGeoJson(),
+  };
+  sources["draw-line-source"] = {
+    type: "geojson",
+    data: buildDrawLineGeoJson(),
+  };
+  sources["draw-preview-source"] = {
+    type: "geojson",
+    data: buildDrawPreviewGeoJson(),
+  };
+  sources["draw-midpoints-source"] = {
+    type: "geojson",
+    data: buildDrawMidpointsGeoJson(),
+  };
+  sources["draw-vertices-source"] = {
+    type: "geojson",
+    data: buildDrawVerticesGeoJson(),
+  };
+  sources["snap-indicator-source"] = {
+    type: "geojson",
+    data: buildSnapIndicatorGeoJson(),
+  };
+  sources["split-source"] = {
+    type: "geojson",
+    data: buildSplitGeoJson(),
+  };
+
+  const dash = buildRoadDashArray();
+  const vis = props.layerVisible ? "visible" : "none";
+  const mvtFilter = buildMvtFilterExpression();
+
+  layers.push(
+    {
+      id: "layer-kecamatan-context",
+      type: "line",
+      source: "martin-kecamatan",
+      "source-layer": "bataswilayah_kecamatan",
+      paint: {
+        "line-color": kecLineColor,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.8, 13, 1.4],
+        "line-dasharray": [4, 2],
+      },
+    },
+    {
+      id: "layer-desa-context",
+      type: "line",
+      source: "martin-desa",
+      "source-layer": "bataswilayah_desa",
+      minzoom: 11,
+      paint: {
+        "line-color": desaLineColor,
+        "line-width": 0.75,
+        "line-dasharray": [2, 2],
+      },
+    },
+    {
+      id: "layer-poros-casing",
+      type: "line",
+      source: "martin-poros",
+      "source-layer": "jalan_porosdesa",
+      ...(mvtFilter ? { filter: mvtFilter } : {}),
+      layout: {
+        visibility: vis,
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": dark ? "rgba(7, 11, 20, 0.8)" : "rgba(255, 255, 255, 0.85)",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          9,
+          Math.max(2.6, (props.symbology?.lineWidth || 3) * 0.65 + 1.5),
+          13,
+          (props.symbology?.lineWidth || 3) + 2.2,
+          17,
+          (props.symbology?.lineWidth || 3) * 1.45 + 2.6,
+        ],
+        "line-opacity": Math.max(0.15, props.layerOpacity * 0.85),
+      },
+    },
+    {
+      id: "layer-poros-lines",
+      type: "line",
+      source: "martin-poros",
+      "source-layer": "jalan_porosdesa",
+      ...(mvtFilter ? { filter: mvtFilter } : {}),
+      layout: {
+        visibility: vis,
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": buildRoadColorExpression(),
+        "line-width": buildRoadWidthExpression(),
+        "line-opacity": props.layerOpacity,
+        ...(dash ? { "line-dasharray": dash } : {}),
+      },
+    },
+    // Instant MVT Selection Highlight (0ms latency before full GeoJSON arrives)
+    {
+      id: "layer-poros-selected-mvt-casing",
+      type: "line",
+      source: "martin-poros",
+      "source-layer": "jalan_porosdesa",
+      filter: buildSelectedMvtFilterExpression(),
+      layout: {
+        visibility: vis,
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": 8.5,
+        "line-opacity": 0.9,
+      },
+    },
+    {
+      id: "layer-poros-selected-mvt-line",
+      type: "line",
+      source: "martin-poros",
+      "source-layer": "jalan_porosdesa",
+      filter: buildSelectedMvtFilterExpression(),
+      layout: {
+        visibility: vis,
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "#0284c7",
+        "line-width": 4.8,
+      },
+    },
+    // Selected Road Highlight (Full GeoJSON)
+    {
+      id: "layer-selected-casing",
+      type: "line",
+      source: "selected-road-geojson",
+      layout: {
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": 9,
+        "line-opacity": 0.9,
+      },
+    },
+    {
+      id: "layer-selected-line",
+      type: "line",
+      source: "selected-road-geojson",
+      layout: {
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "#0284c7",
+        "line-width": 5,
+      },
+    },
+    // Split Mode Layers
+    {
+      id: "layer-split-road-casing",
+      type: "line",
+      source: "split-source",
+      filter: ["==", ["get", "role"], "road"],
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": 9,
+        "line-opacity": 0.9,
+      },
+    },
+    {
+      id: "layer-split-road-line",
+      type: "line",
+      source: "split-source",
+      filter: ["==", ["get", "role"], "road"],
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#f59e0b",
+        "line-width": 5,
+      },
+    },
+    {
+      id: "layer-split-preview-point",
+      type: "circle",
+      source: "split-source",
+      filter: ["==", ["get", "role"], "preview"],
+      paint: {
+        "circle-radius": 7,
+        "circle-color": "rgba(245, 158, 11, 0.35)",
+        "circle-stroke-color": "#d97706",
+        "circle-stroke-width": 2.5,
+      },
+    },
+    {
+      id: "layer-split-pin-point",
+      type: "circle",
+      source: "split-source",
+      filter: ["==", ["get", "role"], "pin"],
+      paint: {
+        "circle-radius": 8,
+        "circle-color": "#dc2626",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 3,
+      },
+    },
+    // Draw & Edit Geometry Layers
+    {
+      id: "layer-draw-casing",
+      type: "line",
+      source: "draw-line-source",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "rgba(16, 185, 129, 0.35)",
+        "line-width": 9,
+      },
+    },
+    {
+      id: "layer-draw-line",
+      type: "line",
+      source: "draw-line-source",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#059669",
+        "line-width": 3.5,
+      },
+    },
+    {
+      id: "layer-draw-preview",
+      type: "line",
+      source: "draw-preview-source",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#10b981",
+        "line-width": 2.5,
+        "line-dasharray": [2.5, 2],
+      },
+    },
+    {
+      id: "layer-draw-midpoints",
+      type: "circle",
+      source: "draw-midpoints-source",
+      paint: {
+        "circle-radius": 5,
+        "circle-color": "rgba(16, 185, 129, 0.72)",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1.5,
+      },
+    },
+    {
+      id: "layer-draw-vertices",
+      type: "circle",
+      source: "draw-vertices-source",
+      paint: {
+        "circle-radius": ["case", ["==", ["get", "isEndpoint"], true], 7, 6],
+        "circle-color": ["case", ["==", ["get", "isEndpoint"], true], "#059669", "#10b981"],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2.5,
+      },
+    },
+    // Live Magnetic Snap Ring
+    {
+      id: "layer-snap-indicator",
+      type: "circle",
+      source: "snap-indicator-source",
+      paint: {
+        "circle-radius": 9,
+        "circle-color": "rgba(37, 99, 235, 0.2)",
+        "circle-stroke-color": "#2563eb",
+        "circle-stroke-width": 2.5,
+      },
+    }
+  );
+
+  return {
+    version: 8 as const,
+    sources,
+    layers,
+  };
+}
+
+// ─── Layer Sync Helpers ───────────────────────────────────────────────────────
+function syncPorosStylingAndFilters() {
+  if (!mapInstance) return;
+  const currentDashMode = props.symbology?.lineDash || "solid";
+  if (currentDashMode !== lastAppliedLineDash) {
+    lastAppliedLineDash = currentDashMode;
+    applyMapStyle(props.basemap);
+    return;
+  }
+
+  const vis = props.layerVisible ? "visible" : "none";
+  const mvtFilter = buildMvtFilterExpression();
+  const dash = buildRoadDashArray();
+
+  for (const lid of ["layer-poros-casing", "layer-poros-lines"]) {
+    if (!mapInstance.getLayer(lid)) continue;
+    mapInstance.setLayoutProperty(lid, "visibility", vis);
+    mapInstance.setFilter(lid, mvtFilter);
+  }
+
+  if (mapInstance.getLayer("layer-poros-lines")) {
+    mapInstance.setPaintProperty("layer-poros-lines", "line-color", buildRoadColorExpression());
+    mapInstance.setPaintProperty("layer-poros-lines", "line-width", buildRoadWidthExpression());
+    mapInstance.setPaintProperty("layer-poros-lines", "line-opacity", props.layerOpacity);
+    if (dash) {
+      mapInstance.setPaintProperty("layer-poros-lines", "line-dasharray", dash);
+    }
+  }
+  if (mapInstance.getLayer("layer-poros-casing")) {
+    mapInstance.setPaintProperty(
+      "layer-poros-casing",
+      "line-opacity",
+      Math.max(0.15, props.layerOpacity * 0.85)
+    );
+  }
+}
+
+function syncSelectedRoadSource() {
+  if (!mapInstance) return;
+  const mvtSelFilter = buildSelectedMvtFilterExpression();
+  if (mapInstance.getLayer("layer-poros-selected-mvt-casing")) {
+    mapInstance.setFilter("layer-poros-selected-mvt-casing", mvtSelFilter);
+  }
+  if (mapInstance.getLayer("layer-poros-selected-mvt-line")) {
+    mapInstance.setFilter("layer-poros-selected-mvt-line", mvtSelFilter);
+  }
+  const src = mapInstance.getSource("selected-road-geojson");
+  if (src && typeof src.setData === "function") {
+    src.setData(buildSelectedFeatureGeoJson());
+  }
+}
+
+function syncDrawSources() {
+  if (!mapInstance) return;
+  try {
+    mapInstance.getSource("draw-line-source")?.setData(buildDrawLineGeoJson());
+    mapInstance.getSource("draw-preview-source")?.setData(buildDrawPreviewGeoJson());
+    mapInstance.getSource("draw-midpoints-source")?.setData(buildDrawMidpointsGeoJson());
+    mapInstance.getSource("draw-vertices-source")?.setData(buildDrawVerticesGeoJson());
+    mapInstance.getSource("snap-indicator-source")?.setData(buildSnapIndicatorGeoJson());
+  } catch (err) {
+    console.warn("[MapLibre] syncDrawSources warning:", err);
+  }
+}
+
+function syncSplitSource() {
+  if (!mapInstance) return;
+  try {
+    mapInstance.getSource("split-source")?.setData(buildSplitGeoJson());
+  } catch (err) {
+    console.warn("[MapLibre] syncSplitSource warning:", err);
+  }
+}
+
+function syncPulseMarker() {
+  if (!mapInstance || !maplibregl) return;
+  if (!props.clickedCoordinate) {
+    if (pulseMarker) {
+      pulseMarker.remove();
+      pulseMarker = null;
+    }
+    return;
+  }
+
+  if (!pulseMarker) {
+    const el = document.createElement("div");
+    el.className = "pointer-events-none flex items-center justify-center size-8";
+    el.innerHTML =
+      '<span class="absolute size-7 rounded-full bg-blue-500/35 animate-ping"></span>' +
+      '<span class="relative size-3.5 rounded-full bg-blue-600 ring-2 ring-white shadow-md flex items-center justify-center">' +
+      '<span class="size-1 rounded-full bg-white"></span></span>';
+    pulseMarker = new maplibregl.Marker({ element: el, anchor: "center" });
+  }
+  const lng = Number(props.clickedCoordinate[0]);
+  const lat = Number(props.clickedCoordinate[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+  pulseMarker.setLngLat([lng, lat]).addTo(mapInstance);
+}
+
+// ─── Basemap & Tile Refresh ──────────────────────────────────────────────────
+function syncAllOverlaysAfterStyleChange() {
+  if (!mapInstance) return;
+  syncPorosStylingAndFilters();
+  syncSelectedRoadSource();
+  syncDrawSources();
+  syncSplitSource();
+}
+
+function applyMapStyle(code: BasemapType) {
+  if (!mapInstance) return;
+  lastAppliedLineDash = props.symbology?.lineDash || "solid";
+  const wasDrawing = isDrawing.value;
+  const wasCompleted = hasCompletedLine.value;
+  const savedCoords = cloneCoords(drawnCoords.value);
+
+  if (gmInstance) {
+    try {
+      void gmInstance.destroy({ removeSources: false });
+    } catch {
+      // ignore destroy during style swap
+    }
+    gmInstance = null;
+  }
+
+  mapInstance.setStyle(buildMapStyle(code));
+  mapInstance.once("style.load", async () => {
+    syncAllOverlaysAfterStyleChange();
+    await initGeoman();
+    if (wasDrawing && gmInstance?.loaded) {
+      if (wasCompleted && savedCoords.length >= 2) {
+        await importCoordsIntoGeomanEdit(savedCoords);
+      } else {
+        await syncGeomanSnapping();
+        await gmInstance.enableDraw("line");
+      }
+    }
+  });
+  mapInstance.once("styledata", () => {
+    if (mapInstance?.getSource("draw-line-source")) {
+      syncAllOverlaysAfterStyleChange();
+    }
+  });
+}
+
+function setBasemap(type: BasemapType) {
+  emit("update:basemap", type);
+  applyMapStyle(type);
+}
+
+function refreshVectorTiles() {
+  tileRefreshNonce.value++;
+  if (mapInstance && mapLoaded.value) {
+    applyMapStyle(props.basemap);
+  }
+}
+
+// ─── Navigation & Fit Bounds ─────────────────────────────────────────────────
+function isValidBounds(
+  b: [number, number, number, number] | null | undefined
+): b is [number, number, number, number] {
+  if (!Array.isArray(b) || b.length !== 4) return false;
+  if (b.some((v) => v === null || v === undefined || v === "")) return false;
+  const [minX, minY, maxX, maxY] = b.map(Number);
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return false;
+  if (minX > maxX || minY > maxY) return false;
+  return minX >= -180 && maxX <= 180 && minY >= -85 && maxY <= 85;
+}
+
+function safeFitBounds(
+  bbox: [number, number, number, number] | null | undefined,
+  padding = 56,
+  maxZoom = 16.5,
+  duration = 520
+) {
+  if (!mapInstance || !isValidBounds(bbox)) return;
+  const el = mapContainer.value;
+  const w = el?.clientWidth ?? 0;
+  const h = el?.clientHeight ?? 0;
+  if (w < 80 || h < 80) return;
+
+  const [minX, minY, maxX, maxY] = bbox.map(Number) as [number, number, number, number];
+  const motionMs = getMotionDuration(duration, 520);
+
+  if (Math.abs(maxX - minX) < 1e-6 && Math.abs(maxY - minY) < 1e-6) {
+    mapInstance.easeTo({
+      center: [minX, minY],
+      zoom: Math.min(maxZoom, 15.5),
+      duration: motionMs,
+    });
+    return;
+  }
+
+  const maxAllowedPad = Math.max(8, Math.floor((Math.min(w, h) - 32) / 2));
+  const safePad = Math.max(8, Math.min(padding, maxAllowedPad));
+
+  try {
+    mapInstance.fitBounds(
+      [
+        [minX, minY],
+        [maxX, maxY],
+      ],
+      { padding: safePad, maxZoom, duration: motionMs }
+    );
+  } catch {
+    // Abaikan sementara saat panel terlalu sempit
+  }
+}
+
+function formatBboxKey(b: [number, number, number, number]): string {
+  return b.map((n) => Number(n).toFixed(5)).join(",");
+}
+
+function fitBounds(duration = 480) {
+  if (!mapInstance) return;
+  const safeDuration =
+    typeof duration === "number" && Number.isFinite(duration) ? Math.max(0, duration) : 480;
+  mapInstance.resize();
+  if (isValidBounds(props.bbox)) {
+    hasFittedToSummaryBbox = true;
+    lastFittedBboxKey = formatBboxKey(props.bbox);
+    safeFitBounds(props.bbox, 52, 16, safeDuration);
   } else {
-    mapInstance.getView().animate({
-      center: olModules.fromLonLat([111.88, -7.2]),
-      zoom: 11,
-      duration: 600,
-    });
+    safeFitBounds(BOJONEGORO_BOUNDS, 40, 15, safeDuration);
   }
 }
 
 function zoomIn() {
   if (!mapInstance) return;
-  const view = mapInstance.getView();
-  view.animate({ zoom: (view.getZoom() || 10) + 1, duration: 200 });
+  const z = mapInstance.getZoom() ?? 10.5;
+  mapInstance.easeTo({ zoom: Math.min(19, z + 1), duration: getMotionDuration(220) });
 }
 
 function zoomOut() {
   if (!mapInstance) return;
-  const view = mapInstance.getView();
-  view.animate({ zoom: (view.getZoom() || 10) - 1, duration: 200 });
+  const z = mapInstance.getZoom() ?? 10.5;
+  mapInstance.easeTo({ zoom: Math.max(8, z - 1), duration: getMotionDuration(220) });
 }
 
-function fitGeometryToCenter(geometryOrExtent: any, duration = 600, callback?: () => void) {
-  if (!mapInstance || !olModules || !geometryOrExtent) return;
-  mapInstance.updateSize();
-  const size = mapInstance.getSize();
-  if (!size || size[0] <= 0 || size[1] <= 0) return;
-
-  const extent = Array.isArray(geometryOrExtent) && geometryOrExtent.length === 4
-    ? geometryOrExtent
-    : geometryOrExtent?.getExtent?.();
-
-  if (!extent || !extent.every((n: number) => !isNaN(n) && isFinite(n))) return;
-
-  mapInstance.getView().fit(extent, {
-    size,
-    padding: [90, 90, 90, 90],
-    maxZoom: 17,
-    duration,
-    callback,
+function toggle3DTilt() {
+  if (!mapInstance) return;
+  mapInstance.easeTo({
+    pitch: is3DTiltActive.value ? 0 : 45,
+    duration: getMotionDuration(350),
   });
 }
 
-function zoomToGeometry(geometry: any) {
-  if (!mapInstance || !olModules || !geometry) return false;
-  try {
-    const geojsonFormat = new olModules.GeoJSON();
-    const geom = geojsonFormat.readGeometry(geometry, {
-      dataProjection: "EPSG:4326",
-      featureProjection: "EPSG:3857",
-    });
-    const extent = geom.getExtent();
-    if (extent && extent.every((n: number) => !isNaN(n) && isFinite(n))) {
-      fitGeometryToCenter(extent, 600);
-      return true;
-    }
-  } catch {
-    // fallback
-  }
-  return false;
+function resetNorthAndTilt() {
+  if (!mapInstance) return;
+  mapInstance.easeTo({
+    bearing: 0,
+    pitch: 0,
+    duration: getMotionDuration(300),
+  });
 }
 
-function zoomToCentroid(coords: [number, number] | string | any) {
-  if (!mapInstance || !olModules) return;
-  const size = mapInstance.getSize();
-  if (!size || size[0] <= 0 || size[1] <= 0) return;
-
-  let lonLat: [number, number] | null = null;
-
-  if (typeof coords === "string") {
-    try {
-      const parsed = JSON.parse(coords);
-      if (Array.isArray(parsed) && parsed.length >= 2) {
-        lonLat = [Number(parsed[0]), Number(parsed[1])] as [number, number];
-      } else if (parsed?.coordinates && Array.isArray(parsed.coordinates)) {
-        lonLat = [Number(parsed.coordinates[0]), Number(parsed.coordinates[1])] as [number, number];
-      }
-    } catch {
-      const parts = coords.split(",").map((s) => parseFloat(s.trim()));
-      if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-        lonLat = [parts[0], parts[1]];
-      }
-    }
-  } else if (Array.isArray(coords) && coords.length >= 2) {
-    lonLat = [Number(coords[0]), Number(coords[1])];
-  } else if (coords && typeof coords === "object") {
-    if (Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
-      lonLat = [Number(coords.coordinates[0]), Number(coords.coordinates[1])];
-    } else if (coords.lon != null && coords.lat != null) {
-      lonLat = [Number(coords.lon), Number(coords.lat)];
-    } else if (coords.x != null && coords.y != null) {
-      lonLat = [Number(coords.x), Number(coords.y)];
-    }
+function zoomToCentroid(centroid: { type?: string; coordinates?: [number, number] } | [number, number] | null) {
+  if (!mapInstance || !centroid) return;
+  const coords = Array.isArray(centroid) ? centroid : centroid.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return;
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+    return;
   }
+  mapInstance.flyTo({
+    center: [lng, lat],
+    zoom: 16,
+    duration: getMotionDuration(600),
+    essential: true,
+  });
+}
 
-  if (lonLat && !isNaN(lonLat[0]) && !isNaN(lonLat[1])) {
-    mapInstance.getView().animate({
-      center: olModules.fromLonLat(lonLat),
-      zoom: 16,
-      duration: 700,
-    });
+function zoomToGeometry(geom: any) {
+  if (!mapInstance || !geom) return;
+  const parsed = typeof geom === "string" ? JSON.parse(geom) : geom;
+  const bbox = computeGeometryBbox(parsed?.geometry ?? parsed);
+  if (bbox) {
+    safeFitBounds(bbox, 72, 17, 520);
   }
 }
 
-const tileVersion = ref(Date.now());
-
-function getMvtUrl() {
-  const base = martinUrl.value;
-  const params = new URLSearchParams();
-  params.set("_v", String(tileVersion.value));
-  const qs = params.toString();
-  return `${base}/jalan_porosdesa/{z}/{x}/{y}?${qs}`;
-}
-
-function refreshVectorTiles() {
-  tileVersion.value = Date.now();
-  clearStyleCache();
-  if (vectorTileSource) {
-    const newUrl = getMvtUrl();
-    vectorTileSource.setUrl(newUrl);
-
-    try {
-      if ((vectorTileSource as any).sourceTiles_) {
-        (vectorTileSource as any).sourceTiles_ = {};
-      }
-      if ((vectorTileSource as any).tileKeysBySourceTileUrl_) {
-        (vectorTileSource as any).tileKeysBySourceTileUrl_ = {};
-      }
-      if ((vectorTileSource as any).tileCache) {
-        (vectorTileSource as any).tileCache.clear();
-      }
-      const renderer = (vectorTileLayer as any)?.getRenderer?.();
-      if (renderer) {
-        if (renderer.tileCache_) {
-          renderer.tileCache_.clear();
-        }
-        if (renderer.sourceTileCache_) {
-          renderer.sourceTileCache_.clear();
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    vectorTileSource.clear();
-    vectorTileSource.refresh();
-  }
-  if (vectorTileLayer) {
-    vectorTileLayer.changed();
-  }
-  if (mapInstance) {
-    mapInstance.render();
+function resizeMap() {
+  const el = mapContainer.value;
+  if (!el || !mapInstance) return;
+  const w = Math.round(el.clientWidth);
+  const h = Math.round(el.clientHeight);
+  if (w < 40 || h < 40) return;
+  if (w === lastObservedW && h === lastObservedH) return;
+  lastObservedW = w;
+  lastObservedH = h;
+  mapInstance.resize();
+  if (mapLoaded.value && typeof mapInstance.redraw === "function") {
+    mapInstance.redraw();
   }
 }
 
-watch(
-  [
-    () => props.kecamatanFilter,
-    () => props.desaFilter,
-    () => props.kondisiFilter,
-    () => props.perkerasanFilter,
-  ],
-  () => {
-    clearStyleCache();
-    if (vectorTileLayer) {
-      vectorTileLayer.changed();
+// ─── Magnetic Snapping Engine (Native MapLibre Pixel-Space Snapping) ─────────
+function resolveSnappedCoord(rawLngLat: LngLat, excludeVertexIdx: number | null = null): {
+  coord: LngLat;
+  snapped: { coord: LngLat; kind: "vertex" | "edge" } | null;
+} {
+  if (!isSnappingEnabled.value || !mapInstance) {
+    return { coord: rawLngLat, snapped: null };
+  }
+
+  const cursorPx = mapInstance.project(rawLngLat);
+  const VERTEX_TOLERANCE_PX = 14;
+  const EDGE_TOLERANCE_PX = 12;
+
+  let bestVertexDist = VERTEX_TOLERANCE_PX;
+  let bestVertexCoord: LngLat | null = null;
+
+  // 1. Check self-vertices
+  for (let i = 0; i < drawnCoords.value.length; i++) {
+    if (excludeVertexIdx !== null && i === excludeVertexIdx) continue;
+    const pt = drawnCoords.value[i]!;
+    const px = mapInstance.project(pt);
+    const d = Math.hypot(px.x - cursorPx.x, px.y - cursorPx.y);
+    if (d < bestVertexDist) {
+      bestVertexDist = d;
+      bestVertexCoord = pt;
     }
   }
-);
 
-function getKondisiBadgeColor(kondisi: string | null | undefined): "success" | "warning" | "error" | "neutral" {
-  if (!kondisi) return "neutral";
-  const k = kondisi.toLowerCase();
-  if (k.includes("baik")) return "success";
-  if (k.includes("sedang")) return "warning";
-  if (k.includes("rusak berat")) return "error";
-  if (k.includes("rusak")) return "warning";
-  return "neutral";
-}
+  // 2. Check nearby road vertices
+  for (const road of snapCandidateRoads.value) {
+    for (const pt of road) {
+      const px = mapInstance.project(pt);
+      const d = Math.hypot(px.x - cursorPx.x, px.y - cursorPx.y);
+      if (d < bestVertexDist) {
+        bestVertexDist = d;
+        bestVertexCoord = pt;
+      }
+    }
+  }
 
-async function initMap() {
-  if (!import.meta.client) return;
-  await nextTick();
-  if (!mapContainer.value) return;
-
-  try {
-    const [
-      { default: Map },
-      { default: View },
-      { default: TileLayer },
-      { default: VectorTileLayer },
-      { default: VectorTileSource },
-      { default: OSM },
-      { default: XYZ },
-      { default: MVT },
-      { default: GeoJSON },
-      stylePkg,
-      projPkg,
-      { default: Overlay },
-      { default: ScaleLine },
-      { default: VectorLayer },
-      { default: VectorSource },
-      { default: Draw },
-      { default: Modify },
-      { default: Snap },
-      { default: Feature },
-      { default: Point },
-      spherePkg,
-    ] = await Promise.all([
-      import("ol/Map.js"),
-      import("ol/View.js"),
-      import("ol/layer/Tile.js"),
-      import("ol/layer/VectorTile.js"),
-      import("ol/source/VectorTile.js"),
-      import("ol/source/OSM.js"),
-      import("ol/source/XYZ.js"),
-      import("ol/format/MVT.js"),
-      import("ol/format/GeoJSON.js"),
-      import("ol/style.js"),
-      import("ol/proj.js"),
-      import("ol/Overlay.js"),
-      import("ol/control/ScaleLine.js"),
-      import("ol/layer/Vector.js"),
-      import("ol/source/Vector.js"),
-      import("ol/interaction/Draw.js"),
-      import("ol/interaction/Modify.js"),
-      import("ol/interaction/Snap.js"),
-      import("ol/Feature.js"),
-      import("ol/geom/Point.js"),
-      import("ol/sphere.js"),
-    ]);
-
-    olModules = {
-      Map,
-      View,
-      TileLayer,
-      VectorTileLayer,
-      VectorTileSource,
-      OSM,
-      XYZ,
-      MVT,
-      GeoJSON,
-      Style: stylePkg.Style,
-      Fill: stylePkg.Fill,
-      Stroke: stylePkg.Stroke,
-      Text: stylePkg.Text,
-      Circle: stylePkg.Circle,
-      fromLonLat: projPkg.fromLonLat,
-      toLonLat: projPkg.toLonLat,
-      transformExtent: projPkg.transformExtent,
-      Overlay,
-      VectorLayer,
-      VectorSource,
-      Draw,
-      Modify,
-      Snap,
-      Feature,
-      Point,
-      sphere: spherePkg,
+  if (bestVertexCoord) {
+    return {
+      coord: [bestVertexCoord[0], bestVertexCoord[1]],
+      snapped: { coord: [bestVertexCoord[0], bestVertexCoord[1]], kind: "vertex" },
     };
-
-    tileLayer = new TileLayer({
-      source: props.basemap === 'none' ? null : getBasemapSource(props.basemap),
-      visible: props.basemap !== 'none',
-      zIndex: 0,
-    });
-
-    const mvtUrl = getMvtUrl();
-    vectorTileSource = new VectorTileSource({
-      format: new MVT({ idProperty: "id" }),
-      url: mvtUrl,
-      maxZoom: 18,
-    });
-
-    vectorTileSource.on("tileloadstart", onTileLoadStart);
-    vectorTileSource.on("tileloadend", onTileLoadFinish);
-    vectorTileSource.on("tileloaderror", onTileLoadFinish);
-
-    vectorTileLayer = new VectorTileLayer({
-      source: vectorTileSource,
-      style: getFeatureStyle,
-      renderMode: "hybrid",
-      declutter: true,
-      zIndex: 10,
-      visible: props.layerVisible,
-      opacity: props.layerOpacity,
-    });
-
-    // ─── Drawing Layer Setup (LineString Feature Drawing) ─────────────────
-    drawSource = new VectorSource({ wrapX: false });
-    snapSource = new VectorSource({ wrapX: false });
-    drawLayer = new VectorLayer({
-      source: drawSource,
-      zIndex: 50,
-      style: [
-        new stylePkg.Style({
-          stroke: new stylePkg.Stroke({
-            color: "rgba(16, 185, 129, 0.35)",
-            width: 8,
-          }),
-        }),
-        new stylePkg.Style({
-          stroke: new stylePkg.Stroke({
-            color: "#10b981",
-            width: 3.5,
-          }),
-          image: new stylePkg.Circle({
-            radius: 5,
-            fill: new stylePkg.Fill({ color: "#10b981" }),
-            stroke: new stylePkg.Stroke({ color: "#ffffff", width: 2 }),
-          }),
-        }),
-      ],
-    });
-
-    if (tooltipEl.value) {
-      tooltipOverlay = new Overlay({
-        element: tooltipEl.value,
-        offset: [0, 1],
-        positioning: "bottom-center",
-        stopEvent: false,
-      });
-    }
-
-    if (pulseEl.value) {
-      pulseOverlay = new Overlay({
-        element: pulseEl.value,
-        positioning: "center-center",
-        stopEvent: false,
-      });
-    }
-
-    const scaleLineControl = new ScaleLine({
-      target: scaleLineTarget.value || undefined,
-      units: "metric",
-      minWidth: 80,
-      bar: false,
-    });
-
-    mapInstance = new Map({
-      target: mapContainer.value,
-      layers: [tileLayer, vectorTileLayer, drawLayer],
-      view: new View({
-        center: olModules.fromLonLat([111.88, -7.2]),
-        zoom: 11,
-        minZoom: 7,
-        maxZoom: 20,
-      }),
-      overlays: [
-        ...(tooltipOverlay ? [tooltipOverlay] : []),
-        ...(pulseOverlay ? [pulseOverlay] : []),
-      ],
-      controls: [scaleLineControl],
-    });
-
-    splitSource = new VectorSource({ wrapX: false });
-    splitLayer = new VectorLayer({
-      source: splitSource,
-      zIndex: 55,
-      style: (feat: any) => {
-        if (feat.get("isMarker")) {
-          return new stylePkg.Style({
-            image: new stylePkg.Circle({
-              radius: 7,
-              fill: new stylePkg.Fill({ color: "#f59e0b" }),
-              stroke: new stylePkg.Stroke({ color: "#ffffff", width: 2.5 }),
-            }),
-          });
-        }
-        return [
-          new stylePkg.Style({
-            stroke: new stylePkg.Stroke({
-              color: "rgba(245, 158, 11, 0.4)",
-              width: 9,
-            }),
-          }),
-          new stylePkg.Style({
-            stroke: new stylePkg.Stroke({
-              color: "#f59e0b",
-              width: 3.5,
-              lineDash: [8, 6],
-            }),
-          }),
-        ];
-      },
-    });
-    mapInstance.addLayer(splitLayer);
-
-    // Pointer move: coords update every event; hit-test throttled to one per animation frame
-    let pointerRafId: number | null = null;
-    mapInstance.on("pointermove", (e: any) => {
-      if (e.dragging) {
-        if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
-        return;
-      }
-
-      if (isDrawing.value) {
-        if (mapContainer.value) mapContainer.value.style.cursor = "crosshair";
-        hoveredFeature.value = null;
-        tooltipData.value = null;
-        if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
-        return;
-      }
-
-      // Cheap: update coords on every event for smooth coordinate display
-      const lonLat = olModules.toLonLat(e.coordinate);
-      const coordsText = `${lonLat[0].toFixed(5)}, ${lonLat[1].toFixed(5)}`;
-      mouseCoords.value = coordsText;
-      emit("update:mouseCoords", coordsText);
-
-      // Expensive: gate hit-test to one per animation frame
-      const coord = e.coordinate;
-      const pixel = mapInstance.getEventPixel(e.originalEvent);
-      if (pointerRafId !== null) return;
-      pointerRafId = requestAnimationFrame(() => {
-        pointerRafId = null;
-
-        let hit: any = null;
-        mapInstance.forEachFeatureAtPixel(
-          pixel,
-          (f: any) => {
-            if (!matchesFilters(f)) return false;
-            hit = f;
-            return true;
-          },
-          {
-            layerFilter: (l: any) => l === vectorTileLayer,
-            hitTolerance: 5,
-          }
-        );
-
-        const prevHoverId = hoveredFeature.value
-          ? String(hoveredFeature.value.get("id") || hoveredFeature.value.getId() || "")
-          : "";
-        const currentHitId = hit
-          ? String(hit.get("id") || hit.getId() || "")
-          : "";
-
-        if (hit && props.layerVisible) {
-          if (mapContainer.value) mapContainer.value.style.cursor = "pointer";
-          hoveredFeature.value = hit;
-          const p = hit.getProperties?.() ?? {};
-          tooltipData.value = {
-            nama_ruas: p.nama_ruas || hit.get("nama_ruas") || "Ruas Jalan",
-            kondisi: p.kondisi || hit.get("kondisi") || "-",
-            panjang_meter: parseFloat(p.panjang_meter || hit.get("panjang_meter") || "0"),
-            desa: p.desa || hit.get("desa") || "-",
-            kecamatan: p.kecamatan || hit.get("kecamatan") || "-",
-          };
-          if (tooltipOverlay) tooltipOverlay.setPosition(coord);
-        } else {
-          if (mapContainer.value) mapContainer.value.style.cursor = "";
-          hoveredFeature.value = null;
-          tooltipData.value = null;
-          if (tooltipOverlay) tooltipOverlay.setPosition(undefined);
-        }
-
-        if (currentHitId !== prevHoverId) {
-          vectorTileLayer.changed();
-        }
-      });
-    });
-
-    // Click select
-    mapInstance.on("click", (e: any) => {
-      if (isDrawing.value) return;
-
-      if (e.coordinate && pulseOverlay) {
-        pulseOverlay.setPosition(e.coordinate);
-        isPulseVisible.value = true;
-      }
-
-      if (olModules?.toLonLat && e.coordinate) {
-        const lonLat = olModules.toLonLat(e.coordinate);
-        if (lonLat && lonLat.length >= 2) {
-          emit("mapClick", [lonLat[0], lonLat[1]]);
-        }
-      }
-
-      if (!props.layerVisible) return;
-      const pixel = mapInstance.getEventPixel(e.originalEvent);
-      let clicked: any = null;
-      mapInstance.forEachFeatureAtPixel(
-        pixel,
-        (f: any) => {
-          if (!matchesFilters(f)) return false;
-          clicked = f;
-          return true;
-        },
-        {
-          layerFilter: (l: any) => l === vectorTileLayer,
-          hitTolerance: 6,
-        }
-      );
-
-      if (clicked) {
-        const propsObj = clicked.getProperties?.() ?? {};
-        const featId = String(propsObj.id || clicked.getId() || clicked.get?.("id") || "");
-
-        let centroid = null;
-        if (propsObj.centroid) {
-          try {
-            centroid = typeof propsObj.centroid === "string" ? JSON.parse(propsObj.centroid) : propsObj.centroid;
-          } catch {
-            centroid = null;
-          }
-        }
-
-        const pMeter = propsObj.panjang_meter != null && propsObj.panjang_meter !== "" ? parseFloat(propsObj.panjang_meter) : null;
-        const pManual = propsObj.panjang != null && propsObj.panjang !== "" ? parseFloat(propsObj.panjang) : null;
-        const finalPanjang = pMeter ?? pManual ?? 0;
-
-        const selected: SelectedFeature = {
-          id: featId,
-          properties: {
-            id: featId,
-            kode_ruas: propsObj.kode_ruas != null && propsObj.kode_ruas !== "" ? Number(propsObj.kode_ruas) : null,
-            nama_ruas: propsObj.nama_ruas || "-",
-            desa: propsObj.desa || null,
-            kecamatan: propsObj.kecamatan || null,
-            panjang: pManual ?? pMeter ?? 0,
-            panjang_meter: pMeter ?? pManual ?? 0,
-            lebar: propsObj.lebar != null && propsObj.lebar !== "" ? parseFloat(propsObj.lebar) : null,
-            perkerasan: propsObj.perkerasan || null,
-            kondisi: propsObj.kondisi || null,
-            status_awal: propsObj.status_awal || null,
-            status_eksisting: propsObj.status_eksisting || null,
-            sumber_data: propsObj.sumber_data || null,
-            id_desa: propsObj.id_desa != null && propsObj.id_desa !== "" ? Number(propsObj.id_desa) : null,
-            id_kecamatan: propsObj.id_kecamatan != null && propsObj.id_kecamatan !== "" ? Number(propsObj.id_kecamatan) : null,
-            centroid,
-          },
-        };
-        emit("select", selected);
-        emit("log", "INFO", `Ruas dipilih: ${selected.properties.nama_ruas}`);
-      } else {
-        emit("select", null);
-      }
-      vectorTileLayer.changed();
-    });
-
-    mapLoaded.value = true;
-    emit("loaded");
-    emit("log", "INFO", "Peta dimuat via PostGIS MVT.");
-
-    if (props.bbox) {
-      fitBounds();
-    }
-  } catch (err: any) {
-    emit("log", "ERROR", `Gagal inisialisasi peta: ${err?.message}`);
   }
-}
 
-watch(
-  () => props.basemap,
-  (newBm) => {
-    if (tileLayer && olModules) {
-      tileLayer.setSource(getBasemapSource(newBm));
+  // 3. Check nearby road edges
+  let bestEdgeDist = EDGE_TOLERANCE_PX;
+  let bestEdgeCoord: LngLat | null = null;
+
+  for (const road of snapCandidateRoads.value) {
+    if (road.length < 2) continue;
+    const proj = projectPointOntoRoad(rawLngLat, road);
+    if (!proj || !Number.isFinite(proj.point[0]) || !Number.isFinite(proj.point[1])) continue;
+    const px = mapInstance.project(proj.point);
+    const d = Math.hypot(px.x - cursorPx.x, px.y - cursorPx.y);
+    if (d < bestEdgeDist) {
+      bestEdgeDist = d;
+      bestEdgeCoord = proj.point;
     }
   }
-);
 
-watch(
-  () => props.layerVisible,
-  (visible) => {
-    if (vectorTileLayer) {
-      vectorTileLayer.setVisible(visible);
-    }
-  }
-);
-
-watch(
-  () => props.layerOpacity,
-  (opacity) => {
-    if (vectorTileLayer) {
-      vectorTileLayer.setOpacity(opacity);
-    }
-  }
-);
-
-watch(
-  () => props.clickedCoordinate,
-  (val) => {
-    if (!val) {
-      if (pulseOverlay) pulseOverlay.setPosition(undefined);
-      isPulseVisible.value = false;
-    } else if (pulseOverlay && olModules?.fromLonLat) {
-      pulseOverlay.setPosition(olModules.fromLonLat(val));
-      isPulseVisible.value = true;
-    }
-  }
-);
-
-watch(
-  () => props.selectedFeature,
-  () => {
-    if (vectorTileLayer) {
-      vectorTileLayer.changed();
-    }
-  }
-);
-
-watch(
-  () => props.symbology,
-  () => {
-    clearStyleCache();
-    if (vectorTileLayer) {
-      vectorTileLayer.changed();
-    }
-  },
-  { deep: true }
-);
-
-watch(colorMode, () => {
-  clearStyleCache();
-  if (vectorTileLayer) {
-    vectorTileLayer.changed();
-  }
-});
-
-let resizeObserver: ResizeObserver | null = null;
-let resizeRaf: number | null = null;
-let pointerRafId: number | null = null;
-
-onMounted(() => {
-  initMap();
-
-  if (mapContainer.value && typeof ResizeObserver !== "undefined") {
-    resizeObserver = new ResizeObserver(() => {
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(() => {
-        mapInstance?.updateSize();
-      });
-    });
-    resizeObserver.observe(mapContainer.value);
-  }
-});
-
-// ─── Snapping Operations (Self-Snapping & Existing Network Snapping) ────────
-
-function updateSnapInteractions() {
-  if (!mapInstance || !olModules) return;
-  const { Snap } = olModules;
-
-  if (drawSnapInteraction) {
-    mapInstance.removeInteraction(drawSnapInteraction);
-    drawSnapInteraction = null;
-  }
-  if (networkSnapInteraction) {
-    mapInstance.removeInteraction(networkSnapInteraction);
-    networkSnapInteraction = null;
+  if (bestEdgeCoord) {
+    return {
+      coord: bestEdgeCoord,
+      snapped: { coord: bestEdgeCoord, kind: "edge" },
+    };
   }
 
-  if (!isSnappingEnabled.value || !isDrawing.value) return;
-
-  // 1. Self-snapping to the line being drawn/edited
-  if (drawSource) {
-    drawSnapInteraction = new Snap({
-      source: drawSource,
-      edge: true,
-      vertex: true,
-      pixelTolerance: 12,
-    });
-    mapInstance.addInteraction(drawSnapInteraction);
-  }
-
-  // 2. Network snapping to other existing road features in area
-  if (snapSource) {
-    networkSnapInteraction = new Snap({
-      source: snapSource,
-      edge: true,
-      vertex: true,
-      pixelTolerance: 14,
-    });
-    mapInstance.addInteraction(networkSnapInteraction);
-  }
+  return { coord: rawLngLat, snapped: null };
 }
 
 async function loadSnapFeatures() {
-  if (!mapInstance || !olModules || !isDrawing.value) return;
+  if (!mapInstance || !isDrawing.value || !isSnappingEnabled.value) return;
 
   try {
-    const size = mapInstance.getSize();
-    if (!size || size[0] === 0 || size[1] === 0) return;
-
-    const extent = mapInstance.getView().calculateExtent(size);
-    if (!extent || extent.some((n: number) => isNaN(n) || !isFinite(n))) return;
-
-    const [minX, minY, maxX, maxY] = olModules.transformExtent(extent, "EPSG:3857", "EPSG:4326");
+    const b = mapInstance.getBounds();
+    if (!b) return;
+    const minX = b.getWest();
+    const minY = b.getSouth();
+    const maxX = b.getEast();
+    const maxY = b.getNorth();
     const dx = (maxX - minX) * 0.2;
     const dy = (maxY - minY) * 0.2;
     const bboxParam = `${(minX - dx).toFixed(5)},${(minY - dy).toFixed(5)},${(maxX + dx).toFixed(5)},${(maxY + dy).toFixed(5)}`;
@@ -1166,19 +1192,14 @@ async function loadSnapFeatures() {
 
     isSnapLoading.value = true;
     const res = await $http<any>("admin/jalan-poros-desa", {
-      query: {
-        format: "geojson",
-        bbox: bboxParam,
-      },
+      query: { format: "geojson", bbox: bboxParam },
       signal: snapFetchAbort.signal,
-    });
+      silent: true,
+    } as any);
 
     if (res?.features && Array.isArray(res.features)) {
-      if (!snapSource) return;
-      snapSource.clear();
-
       let featuresToSnap = res.features;
-      if (editingRuasId.value) {
+      if (editingRuasId.value != null) {
         featuresToSnap = featuresToSnap.filter(
           (f: any) =>
             String(f.id) !== String(editingRuasId.value) &&
@@ -1186,22 +1207,17 @@ async function loadSnapFeatures() {
         );
       }
 
-      const format = new olModules.GeoJSON();
-      const olFeatures = format.readFeatures(
-        {
-          type: "FeatureCollection",
-          features: featuresToSnap,
-        },
-        {
-          dataProjection: "EPSG:4326",
-          featureProjection: "EPSG:3857",
+      const chains: LngLat[][] = [];
+      for (const feat of featuresToSnap) {
+        const coords = extractMergedRoadCoordinates(feat);
+        if (coords.length >= 2) {
+          chains.push(coords);
         }
-      );
+      }
 
-      snapSource.addFeatures(olFeatures);
-      snapRoadCount.value = olFeatures.length;
-      updateSnapInteractions();
-      emit("log", "INFO", `Snapping aktif ke ${olFeatures.length} ruas jalan sekitar.`);
+      snapCandidateRoads.value = chains;
+      snapRoadCount.value = chains.length;
+      emit("log", "INFO", `Snapping magnet aktif ke ${chains.length} ruas jalan sekitar.`);
     }
   } catch (err: any) {
     if (
@@ -1211,239 +1227,374 @@ async function loadSnapFeatures() {
     ) {
       return;
     }
-    console.error("Gagal memuat snap features:", err);
   } finally {
     isSnapLoading.value = false;
   }
 }
 
-function onMapMoveEndDuringDraw() {
-  if (!isDrawing.value || !isSnappingEnabled.value) return;
-  clearTimeout(snapMoveEndTimer);
-  snapMoveEndTimer = setTimeout(() => {
-    loadSnapFeatures();
-  }, 400);
-}
-
 function toggleSnapping() {
   isSnappingEnabled.value = !isSnappingEnabled.value;
-  updateSnapInteractions();
-  if (isSnappingEnabled.value && (!snapSource || snapSource.getFeatures().length === 0)) {
-    loadSnapFeatures();
+  if (!isSnappingEnabled.value) {
+    activeSnapPoint.value = null;
+    syncDrawSources();
+  } else if (snapCandidateRoads.value.length === 0) {
+    void loadSnapFeatures();
   }
-  emit("log", "INFO", isSnappingEnabled.value ? "Snapping persimpangan dan ruas jalan diaktifkan." : "Snapping dinonaktifkan.");
+  void syncGeomanSnapping();
+  emit(
+    "log",
+    "INFO",
+    isSnappingEnabled.value
+      ? "Snapping persimpangan dan ruas jalan diaktifkan."
+      : "Snapping dinonaktifkan."
+  );
 }
 
-// ─── Split Road Geometry Feature ─────────────────────────────────────────────
+// ─── Geoman MapLibre GL JS Integration ───────────────────────────────────────
+function extractGeomanFirstLineCoords(): LngLat[] {
+  if (!gmInstance?.loaded) return [];
+  try {
+    const fc = gmInstance.features.exportGeoJson({ allowedShapes: ["line"] });
+    const first = fc?.features?.[0];
+    if (!first?.geometry) return [];
+    return extractMergedRoadCoordinates(first);
+  } catch {
+    return [];
+  }
+}
 
-function startSplitMode(roadData: any) {
-  if (!mapInstance || !olModules) return;
-  stopDrawing(false);
-  cancelSplitMode();
+async function syncGeomanSnapping() {
+  if (!gmInstance?.loaded) return;
+  try {
+    if (isSnappingEnabled.value && isDrawing.value) {
+      if (!gmInstance.isModeEnabled("helper", "snapping")) {
+        await gmInstance.enableMode("helper", "snapping");
+      }
+      const snapHelper = gmInstance.actionInstances?.helper__snapping;
+      if (snapHelper && !snapHelper.__melarosaSnapHooked) {
+        snapHelper.__melarosaSnapHooked = true;
+        snapHelper.getCustomLngLatsSnapping = (screenPoint: [number, number]) => {
+          if (!isSnappingEnabled.value || !mapInstance) {
+            activeSnapPoint.value = null;
+            return null;
+          }
+          const raw = mapInstance.unproject(screenPoint);
+          const rawTuple: LngLat = [Number(raw.lng), Number(raw.lat)];
+          const { snapped } = resolveSnappedCoord(rawTuple);
+          activeSnapPoint.value = snapped;
+          syncDrawSources();
+          return snapped ? [Number(snapped.coord[0]), Number(snapped.coord[1])] : null;
+        };
+      }
+    } else {
+      if (gmInstance.isModeEnabled("helper", "snapping")) {
+        await gmInstance.disableMode("helper", "snapping");
+      }
+      activeSnapPoint.value = null;
+      syncDrawSources();
+    }
+  } catch (err) {
+    console.warn("[Geoman] syncGeomanSnapping warning:", err);
+  }
+}
 
-  isSplitMode.value = true;
-  splitRoadData.value = roadData;
+async function importCoordsIntoGeomanEdit(coords: LngLat[]) {
+  if (!gmInstance?.loaded || coords.length < 2) return;
+  isRestoringGeomanState = true;
+  try {
+    await gmInstance.disableAllModes();
+    await gmInstance.features.deleteAll();
+    await gmInstance.features.importGeoJsonFeature({
+      type: "Feature",
+      properties: { shape: "line" },
+      geometry: {
+        type: "LineString",
+        coordinates: cloneCoords(coords),
+      },
+    });
+    await syncGeomanSnapping();
+    await gmInstance.enableMode("edit", "change");
+  } catch (err) {
+    console.warn("[Geoman] importCoordsIntoGeomanEdit warning:", err);
+  } finally {
+    isRestoringGeomanState = false;
+  }
+}
 
-  const rawGeom = roadData.geometry || roadData.properties?.geometry || roadData.geojson || roadData.properties?.geojson;
-  if (!rawGeom) {
-    emit("log", "WARN", "Geometri ruas jalan tidak ditemukan untuk split.");
+async function handleGeomanEvent(event: any) {
+  if (!gmInstance?.loaded || isRestoringGeomanState) return;
+  const eventName = String(event?.name || "");
+
+  // 1. Live Draw Vertex Added / Removed
+  if (eventName === "gm:drawupdate" || eventName === "_gm:draw") {
+    const draft = gmInstance.draw?.getDraft?.();
+    if (draft && Array.isArray(draft.coordinates)) {
+      const next = cloneCoords(draft.coordinates as LngLat[]);
+      if (next.length !== drawnCoords.value.length) {
+        if (next.length > drawnCoords.value.length && drawnCoords.value.length > 0) {
+          pushUndoSnapshot();
+        }
+        drawnCoords.value = next;
+        syncDrawSources();
+      }
+    }
     return;
   }
 
+  // 2. Draw Completed (gm:create) -> Switch to Geoman Vertex Edit Mode (change)
+  if (eventName === "gm:create") {
+    const coords = extractGeomanFirstLineCoords();
+    if (coords.length >= 2) {
+      pushUndoSnapshot();
+      drawnCoords.value = cloneCoords(coords);
+      hasCompletedLine.value = true;
+      previewCursorCoord.value = null;
+      activeSnapPoint.value = null;
+      syncDrawSources();
+      try {
+        await gmInstance.disableDraw();
+        await syncGeomanSnapping();
+        await gmInstance.enableMode("edit", "change");
+      } catch {
+        // ignore transition error
+      }
+      emit(
+        "log",
+        "INFO",
+        `Garis Geoman selesai (${drawnPointCount.value} titik, ${drawnLengthMeters.value} m). Geser vertex, tarik titik tengah untuk sisip, atau klik Simpan.`
+      );
+    }
+    return;
+  }
+
+  // 3. Vertex Edit Start -> Save snapshot for Undo
+  if (eventName === "gm:editstart" || (eventName === "_gm:edit" && event?.action === "feature_edit_start")) {
+    dragSnapshotBefore = cloneCoords(drawnCoords.value);
+    return;
+  }
+
+  // 4. Live Vertex Drag / Edge Midpoint Insert / Right-Click Vertex Delete
+  if (
+    eventName === "gm:edit" ||
+    eventName === "gm:editend" ||
+    (eventName === "_gm:edit" &&
+      (event?.action === "marker_move" ||
+        event?.action === "feature_updated" ||
+        event?.action === "feature_edit_end" ||
+        event?.action === "marker_right_click"))
+  ) {
+    const coords = extractGeomanFirstLineCoords();
+    if (coords.length >= 2) {
+      if (
+        (eventName === "gm:editend" || event?.action === "feature_edit_end") &&
+        dragSnapshotBefore
+      ) {
+        const nextUndo = [...undoStack.value, dragSnapshotBefore];
+        if (nextUndo.length > 80) nextUndo.shift();
+        undoStack.value = nextUndo;
+        redoStack.value = [];
+        dragSnapshotBefore = null;
+      }
+      drawnCoords.value = cloneCoords(coords);
+      syncDrawSources();
+    }
+  }
+}
+
+async function initGeoman() {
+  if (!mapInstance || !GeomanClass || gmInstance) return;
   try {
-    const parsedGeom = typeof rawGeom === "string" ? JSON.parse(rawGeom) : rawGeom;
-    const format = new olModules.GeoJSON();
-    const olGeom = format.readGeometry(parsedGeom, {
-      dataProjection: "EPSG:4326",
-      featureProjection: "EPSG:3857",
+    gmInstance = new GeomanClass(mapInstance, {
+      settings: {
+        useControlsUi: false,
+        controlsUiEnabledByDefault: false,
+        snapDistance: 16,
+        awaitDataUpdatesOnEvents: true,
+      },
     });
-
-    const roadFeat = new olModules.Feature({ geometry: olGeom });
-    splitSource.addFeature(roadFeat);
-
-    const extent = olGeom.getExtent();
-    mapInstance.getView().fit(extent, {
-      padding: [100, 100, 100, 100],
-      maxZoom: 17,
-      duration: 600,
+    gmInstance.setGlobalEventsListener((evt: any) => {
+      void handleGeomanEvent(evt);
     });
-
-    const { Snap } = olModules;
-    splitSnapInteraction = new Snap({
-      source: splitSource,
-      edge: true,
-      vertex: true,
-      pixelTolerance: 15,
-    });
-    mapInstance.addInteraction(splitSnapInteraction);
-
-    splitClickListener = (evt: any) => {
-      if (!isSplitMode.value) return;
-      const rawCoord = evt.coordinate;
-      // Snap click point precisely to the closest position on the road geometry
-      const snappedCoord = olGeom?.getClosestPoint ? olGeom.getClosestPoint(rawCoord) : rawCoord;
-      const [lon, lat] = olModules.toLonLat(snappedCoord);
-      splitSelectedCoord.value = [lon, lat];
-
-      const existingMarkers = splitSource.getFeatures().filter((f: any) => f.get("isMarker"));
-      existingMarkers.forEach((m: any) => splitSource.removeFeature(m));
-
-      const marker = new olModules.Feature({
-        geometry: new olModules.Point(snappedCoord),
-      });
-      marker.set("isMarker", true);
-      splitSource.addFeature(marker);
-
-      emit("splitPointSelected", {
-        road: roadData,
-        coordinate: [lon, lat],
-      });
-    };
-    mapInstance.on("singleclick", splitClickListener);
-    emit("log", "INFO", `Mode split aktif untuk ruas: "${roadData.nama_ruas || roadData.properties?.nama_ruas}". Klik pada badan jalan di lokasi pemotongan.`);
-  } catch (err: any) {
-    emit("log", "ERROR", `Gagal memuat ruas untuk split: ${err?.message}`);
+    // Wait up to 3.5s for Geoman internal sources/marker image so it never blocks forever
+    await Promise.race([
+      gmInstance.waitForGeomanLoaded(),
+      new Promise<void>((resolve) => setTimeout(resolve, 3500)),
+    ]);
+  } catch (err) {
+    console.warn("[Geoman] initGeoman warning:", err);
+    gmInstance = null;
   }
 }
 
-function cancelSplitMode() {
-  if (splitClickListener && mapInstance) {
-    mapInstance.un("singleclick", splitClickListener);
-    splitClickListener = null;
+async function ensureGeomanLoaded(): Promise<boolean> {
+  if (!gmInstance && mapInstance && GeomanClass) {
+    await initGeoman();
   }
-  if (splitSnapInteraction && mapInstance) {
-    mapInstance.removeInteraction(splitSnapInteraction);
-    splitSnapInteraction = null;
+  if (gmInstance && !gmInstance.loaded) {
+    try {
+      await Promise.race([
+        gmInstance.waitForGeomanLoaded(),
+        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    } catch {
+      // ignore
+    }
   }
-  if (splitSource) {
-    splitSource.clear();
-  }
-  isSplitMode.value = false;
-  splitRoadData.value = null;
-  splitSelectedCoord.value = null;
+  return Boolean(gmInstance?.loaded);
 }
 
-// ─── Drawing Feature Operations (Draw, Redraw, Undo, Redo, Simpan) ───────────
-
+// ─── Draw / Redraw / Vertex Edit / Undo / Redo Operations ────────────────────
 function startDrawing() {
-  if (!mapInstance || !olModules) return;
+  if (!mapInstance || !mapLoaded.value) {
+    pendingEditorAction = () => startDrawing();
+    return;
+  }
+  pendingEditorAction = null;
+  cancelSplitMode();
   stopDrawing(false);
   clearDraw();
-  redoStack.value = [];
 
   isDrawing.value = true;
+  isEditingExisting.value = false;
   hasCompletedLine.value = false;
-  drawnPointCount.value = 0;
-  drawnLengthMeters.value = 0;
-  drawnFeature.value = null;
 
-  const { Draw, sphere, Style, Stroke, Circle, Fill } = olModules;
-
-  drawInteraction = new Draw({
-    source: drawSource,
-    type: "LineString",
-    style: [
-      new Style({
-        stroke: new Stroke({
-          color: "rgba(16, 185, 129, 0.4)",
-          width: 7,
-        }),
-      }),
-      new Style({
-        stroke: new Stroke({
-          color: "#059669",
-          width: 3,
-          lineDash: [6, 6],
-        }),
-        image: new Circle({
-          radius: 6,
-          fill: new Fill({ color: "#10b981" }),
-          stroke: new Stroke({ color: "#ffffff", width: 2 }),
-        }),
-      }),
-    ],
-  });
-
-  drawInteraction.on("drawstart", (evt: any) => {
-    drawnFeature.value = evt.feature;
-    hasCompletedLine.value = false;
-    redoStack.value = [];
-
-    const geom = evt.feature.getGeometry();
-    activeGeomListener = () => {
-      const coords = geom.getCoordinates();
-      if (coords && coords.length > 0) {
-        drawnPointCount.value = Math.max(1, coords.length - 1);
-        if (coords.length >= 2) {
-          drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-        }
+  void (async () => {
+    const ready = await ensureGeomanLoaded();
+    if (!isDrawing.value) return;
+    if (ready && gmInstance?.loaded) {
+      isRestoringGeomanState = true;
+      try {
+        await gmInstance.disableAllModes();
+        await gmInstance.features.deleteAll();
+      } finally {
+        isRestoringGeomanState = false;
       }
-    };
-    geom.on("change", activeGeomListener);
-  });
-
-  drawInteraction.on("drawend", (evt: any) => {
-    hasCompletedLine.value = true;
-    drawnFeature.value = evt.feature;
-    const geom = evt.feature.getGeometry();
-    if (geom) {
-      drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-      drawnPointCount.value = geom.getCoordinates()?.length || 0;
-      if (activeGeomListener) {
-        geom.un("change", activeGeomListener);
-        activeGeomListener = null;
-      }
-      // Posisikan geometri tepat di tengah map canvas setelah selesai menggambar
-      fitGeometryToCenter(geom, 600);
+      await syncGeomanSnapping();
+      await gmInstance.enableDraw("line");
+    } else if (mapInstance) {
+      mapInstance.doubleClickZoom?.disable();
+      mapInstance.getCanvas().style.cursor = "crosshair";
     }
-    if (drawInteraction && mapInstance) {
-      mapInstance.removeInteraction(drawInteraction);
-      drawInteraction = null;
+  })();
+
+  void loadSnapFeatures();
+  emit(
+    "log",
+    "INFO",
+    "Mode gambar Geoman MapLibre aktif. Klik bebas di peta untuk menambah titik, klik titik terakhir atau tekan Enter untuk selesai."
+  );
+}
+
+function finishActiveDraw() {
+  if (!isDrawInteracting.value) return;
+  if (gmInstance?.loaded && gmInstance.drawEnabled("line")) {
+    const draft = gmInstance.draw?.getDraft?.();
+    const draftCount = draft?.coordinates?.length ?? drawnCoords.value.length;
+    if (draftCount < 2) {
+      emit("log", "WARN", "Minimal 2 titik diperlukan untuk membentuk garis ruas jalan.");
+      return;
     }
-
-    // Pasang modify interaction agar titik dapat disesuaikan kembali sebelum disimpan
-    const { Modify, Style, Circle, Fill, Stroke } = olModules;
-    modifyInteraction = new Modify({
-      source: drawSource,
-      style: new Style({
-        image: new Circle({
-          radius: 6,
-          fill: new Fill({ color: "#10b981" }),
-          stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
-        }),
-      }),
-    });
-    modifyInteraction.on("modifystart", () => {
-      redoStack.value = [];
-    });
-    activeGeomListener = () => {
-      const coords = geom?.getCoordinates();
-      if (Array.isArray(coords)) {
-        drawnPointCount.value = coords.length;
-        if (coords.length >= 2) {
-          drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-        }
+    void (async () => {
+      const res = await gmInstance.draw.finish();
+      if (!res?.ok && drawnCoords.value.length >= 2) {
+        hasCompletedLine.value = true;
+        await importCoordsIntoGeomanEdit(drawnCoords.value);
       }
-    };
-    geom?.on("change", activeGeomListener);
-    mapInstance.addInteraction(modifyInteraction);
-    updateSnapInteractions();
-  });
+      syncDrawSources();
+    })();
+    return;
+  }
 
-  mapInstance.addInteraction(drawInteraction);
-  updateSnapInteractions();
-  mapInstance.on("moveend", onMapMoveEndDuringDraw);
-  loadSnapFeatures();
-  emit("log", "INFO", "Mode gambar aktif. Klik pada peta untuk menggambar garis ruas jalan.");
+  if (drawnCoords.value.length < 2) {
+    emit("log", "WARN", "Minimal 2 titik diperlukan untuk membentuk garis ruas jalan.");
+    return;
+  }
+  hasCompletedLine.value = true;
+  previewCursorCoord.value = null;
+  activeSnapPoint.value = null;
+  mapInstance?.doubleClickZoom?.enable();
+  if (mapInstance) {
+    mapInstance.getCanvas().style.cursor = "";
+  }
+  syncDrawSources();
+  zoomToGeometry({ type: "LineString", coordinates: cloneCoords(drawnCoords.value) });
+  emit(
+    "log",
+    "INFO",
+    `Garis selesai (${drawnPointCount.value} titik, ${drawnLengthMeters.value} m). Geser vertex, klik titik tengah untuk sisip, atau klik Simpan.`
+  );
+}
+
+function startEditingGeometry(geomData: any, id?: string | number) {
+  if (!mapInstance || !mapLoaded.value) {
+    pendingEditorAction = () => startEditingGeometry(geomData, id);
+    return;
+  }
+  pendingEditorAction = null;
+  cancelSplitMode();
+  stopDrawing(false);
+  clearDraw();
+
+  const coords = extractMergedRoadCoordinates(geomData);
+  if (coords.length < 2) {
+    emit("log", "WARN", "Geometri tidak memiliki koordinat garis yang valid untuk diedit.");
+    startDrawing();
+    return;
+  }
+
+  isDrawing.value = true;
+  isEditingExisting.value = true;
+  hasCompletedLine.value = true;
+  editingRuasId.value = id ?? null;
+  drawnCoords.value = cloneCoords(coords);
+  undoStack.value = [];
+  redoStack.value = [];
+
+  void (async () => {
+    const ready = await ensureGeomanLoaded();
+    if (ready && isDrawing.value) {
+      await importCoordsIntoGeomanEdit(coords);
+    }
+  })();
+  syncDrawSources();
+  zoomToGeometry({ type: "LineString", coordinates: cloneCoords(coords) });
+  setTimeout(() => {
+    void loadSnapFeatures();
+  }, 450);
+
+  emit(
+    "log",
+    "INFO",
+    `Mode edit vertex Geoman aktif (${coords.length} titik, ${drawnLengthMeters.value} m). Geser titik vertex, tarik titik tengah untuk menyisipkan, atau klik kanan vertex untuk menghapus.`
+  );
 }
 
 function handleDrawClick() {
   if (!isDrawing.value) {
     startDrawing();
   } else if (hasCompletedLine.value) {
-    emit("log", "INFO", "Garis sudah selesai digambar. Gunakan Redraw untuk mengulang dari awal, atau Simpan untuk membuka form.");
+    if (gmInstance?.loaded) {
+      void (async () => {
+        if (!gmInstance.isModeEnabled("edit", "change")) {
+          await importCoordsIntoGeomanEdit(drawnCoords.value);
+        }
+      })();
+      emit(
+        "log",
+        "INFO",
+        "Mode edit vertex Geoman aktif. Tarik titik tengah atau ujung garis untuk menambah/menggeser titik, atau klik Redraw untuk gambar baru."
+      );
+      return;
+    }
+    hasCompletedLine.value = false;
+    mapInstance?.doubleClickZoom?.disable();
+    if (mapInstance) {
+      mapInstance.getCanvas().style.cursor = "crosshair";
+    }
+    syncDrawSources();
+    emit("log", "INFO", "Lanjutkan klik peta untuk menambah titik di ujung garis.");
   } else {
-    emit("log", "INFO", "Mode gambar sedang aktif. Silakan lanjutkan klik pada peta.");
+    finishActiveDraw();
   }
 }
 
@@ -1453,326 +1604,925 @@ function handleRedraw() {
 }
 
 function handleUndo() {
-  if (!olModules) return;
-  const { sphere } = olModules;
-
-  // Case A: Drawing is actively in-progress with Draw interaction
-  if (drawInteraction) {
-    const sketchCoords = drawInteraction.sketchCoords_;
-    if (sketchCoords && sketchCoords.length > 1) {
-      const fixedIndex = sketchCoords.length - 2;
-      const popped = sketchCoords[fixedIndex]?.slice();
-      if (popped) {
-        redoStack.value.push(popped);
-      }
-      drawInteraction.removeLastPoint();
-      const updatedCoords = drawInteraction.sketchCoords_ || [];
-      drawnPointCount.value = Math.max(0, updatedCoords.length - 1);
-      if (drawnFeature.value) {
-        const geom = drawnFeature.value.getGeometry();
-        if (geom && drawnPointCount.value >= 2) {
-          drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-        } else {
-          drawnLengthMeters.value = 0;
+  if (gmInstance?.loaded && isDrawInteracting.value && gmInstance.drawEnabled("line")) {
+    void (async () => {
+      const currentSnapshot = cloneCoords(drawnCoords.value);
+      const removed = await gmInstance.draw.removeLastVertex();
+      if (removed) {
+        const draft = gmInstance.draw.getDraft();
+        const nextCoords = draft?.coordinates ? cloneCoords(draft.coordinates as LngLat[]) : [];
+        if (undoStack.value.length > 0) {
+          const nextUndo = [...undoStack.value];
+          nextUndo.pop();
+          undoStack.value = nextUndo;
         }
+        redoStack.value = [...redoStack.value, currentSnapshot];
+        drawnCoords.value = nextCoords;
+        syncDrawSources();
       }
-    }
+    })();
     return;
   }
 
-  // Case B: Completed line
-  if (drawnFeature.value) {
-    const geom = drawnFeature.value.getGeometry();
-    if (!geom) return;
-    const coords = geom.getCoordinates()?.slice() || [];
-    if (coords.length > 0) {
-      const popped = coords.pop();
-      redoStack.value.push(popped);
-      if (coords.length >= 2) {
-        geom.setCoordinates(coords);
-        drawnPointCount.value = coords.length;
-        drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-        hasCompletedLine.value = true;
-      } else if (coords.length === 1) {
-        geom.setCoordinates(coords);
-        drawnPointCount.value = 1;
-        drawnLengthMeters.value = 0;
-        hasCompletedLine.value = false;
-      } else {
-        clearDraw();
-      }
-    }
+  if (undoStack.value.length === 0) return;
+  const currentSnapshot = cloneCoords(drawnCoords.value);
+  const nextUndo = [...undoStack.value];
+  const prev = nextUndo.pop()!;
+  undoStack.value = nextUndo;
+  redoStack.value = [...redoStack.value, currentSnapshot];
+  drawnCoords.value = prev;
+  if (gmInstance?.loaded && prev.length >= 2) {
+    hasCompletedLine.value = true;
+    void importCoordsIntoGeomanEdit(prev);
+  } else if (drawnCoords.value.length < 2) {
+    hasCompletedLine.value = false;
+    mapInstance?.doubleClickZoom?.disable();
   }
+  syncDrawSources();
 }
 
 function handleRedo() {
-  if (redoStack.value.length === 0 || !olModules) return;
-  const { sphere } = olModules;
-  const nextPoint = redoStack.value.pop();
-  if (!nextPoint) return;
-
-  // Case A: Drawing is active with Draw interaction
-  if (drawInteraction) {
-    drawInteraction.appendCoordinates([nextPoint]);
-    const updatedCoords = drawInteraction.sketchCoords_ || [];
-    drawnPointCount.value = Math.max(0, updatedCoords.length - 1);
-    if (drawnFeature.value) {
-      const geom = drawnFeature.value.getGeometry();
-      if (geom && drawnPointCount.value >= 2) {
-        drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-      }
-    }
-    return;
+  if (redoStack.value.length === 0) return;
+  const currentSnapshot = cloneCoords(drawnCoords.value);
+  const nextRedo = [...redoStack.value];
+  const next = nextRedo.pop()!;
+  redoStack.value = nextRedo;
+  undoStack.value = [...undoStack.value, currentSnapshot];
+  drawnCoords.value = next;
+  if (gmInstance?.loaded && next.length >= 2) {
+    hasCompletedLine.value = true;
+    void importCoordsIntoGeomanEdit(next);
   }
-
-  // Case B: Completed feature exists
-  if (drawnFeature.value) {
-    const geom = drawnFeature.value.getGeometry();
-    if (geom) {
-      const coords = geom.getCoordinates()?.slice() || [];
-      coords.push(nextPoint);
-      geom.setCoordinates(coords);
-      drawnPointCount.value = coords.length;
-      drawnLengthMeters.value = Math.round(sphere.getLength(geom));
-      if (coords.length >= 2) {
-        hasCompletedLine.value = true;
-      }
-      return;
-    }
-  }
-
-  // Case C: Restart drawing and append coordinate
-  startDrawing();
-  if (drawInteraction) {
-    drawInteraction.appendCoordinates([nextPoint]);
-  }
+  syncDrawSources();
 }
 
-function startEditingGeometry(geomData: any, id?: string | number) {
-  if (!mapInstance || !olModules) return;
-  stopDrawing(false);
-  clearDraw();
+function clearDraw() {
+  drawnCoords.value = [];
+  previewCursorCoord.value = null;
+  activeSnapPoint.value = null;
+  undoStack.value = [];
   redoStack.value = [];
-
-  isDrawing.value = true;
-  isEditingExisting.value = true;
-  hasCompletedLine.value = true;
-  editingRuasId.value = id || null;
-
-  const { GeoJSON, Feature, Modify, Style, Stroke, Circle, Fill, sphere } = olModules;
-  const format = new GeoJSON();
-
-  try {
-    const rawGeom = typeof geomData === "string" ? JSON.parse(geomData) : geomData;
-    // Flatten 1-part MultiLineString into standard LineString for seamless vertex editing and undo/redo
-    let editGeom = rawGeom;
-    if (rawGeom?.type === "MultiLineString" && Array.isArray(rawGeom.coordinates) && rawGeom.coordinates.length === 1) {
-      editGeom = {
-        type: "LineString",
-        coordinates: rawGeom.coordinates[0],
-      };
-    }
-
-    const olGeom = format.readGeometry(editGeom, {
-      dataProjection: "EPSG:4326",
-      featureProjection: "EPSG:3857",
-    });
-
-    const feat = new Feature({ geometry: olGeom });
-    drawSource.addFeature(feat);
-    drawnFeature.value = feat;
-
-    const countPts = () => {
-      const g = feat.getGeometry();
-      if (!g) return 0;
-      const t = g.getType();
-      const c = g.getCoordinates();
-      if (!Array.isArray(c)) return 0;
-      if (t === "MultiLineString") {
-        return c.reduce((sum: number, line: any[]) => sum + (Array.isArray(line) ? line.length : 0), 0);
+  hasCompletedLine.value = false;
+  isEditingExisting.value = false;
+  draggingVertexIndex = null;
+  dragSnapshotBefore = null;
+  suppressNextClickAfterDrag = false;
+  if (gmInstance?.loaded) {
+    void (async () => {
+      isRestoringGeomanState = true;
+      try {
+        await gmInstance.features.deleteAll();
+      } catch {
+        // ignore
+      } finally {
+        isRestoringGeomanState = false;
       }
-      return c.length;
-    };
-
-    drawnPointCount.value = countPts();
-    drawnLengthMeters.value = Math.round(sphere.getLength(olGeom));
-
-    // Smoothly zoom/fit to the road segment at center of map canvas
-    fitGeometryToCenter(olGeom, 600, () => {
-      loadSnapFeatures();
-    });
-
-    // Attach Modify interaction
-    modifyInteraction = new Modify({
-      source: drawSource,
-      style: new Style({
-        image: new Circle({
-          radius: 6,
-          fill: new Fill({ color: "#10b981" }),
-          stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
-        }),
-      }),
-    });
-
-    modifyInteraction.on("modifystart", () => {
-      redoStack.value = [];
-    });
-
-    activeGeomListener = () => {
-      const totalPoints = countPts();
-      drawnPointCount.value = totalPoints;
-      if (totalPoints >= 2) {
-        drawnLengthMeters.value = Math.round(sphere.getLength(olGeom));
-      }
-    };
-    olGeom.on("change", activeGeomListener);
-
-    mapInstance.addInteraction(modifyInteraction);
-    updateSnapInteractions();
-    mapInstance.on("moveend", onMapMoveEndDuringDraw);
-    emit("log", "INFO", `Mode edit geometri aktif (${drawnPointCount.value} titik, ${drawnLengthMeters.value} m). Geser titik koordinat untuk mengubah bentuk garis.`);
-  } catch (err: any) {
-    emit("log", "ERROR", `Gagal memuat geometri untuk diedit: ${err?.message}`);
+    })();
   }
+  syncDrawSources();
 }
 
 function stopDrawing(emitCancel = true) {
-  clearTimeout(snapMoveEndTimer);
-  if (mapInstance) {
-    mapInstance.un("moveend", onMapMoveEndDuringDraw);
+  pendingEditorAction = null;
+  if (snapMoveEndTimer) {
+    clearTimeout(snapMoveEndTimer);
+    snapMoveEndTimer = null;
   }
   if (snapFetchAbort) {
     snapFetchAbort.abort();
     snapFetchAbort = null;
   }
-  if (drawSnapInteraction && mapInstance) {
-    mapInstance.removeInteraction(drawSnapInteraction);
-    drawSnapInteraction = null;
+  if (gmInstance?.loaded) {
+    void (async () => {
+      isRestoringGeomanState = true;
+      try {
+        await gmInstance.disableAllModes();
+        await gmInstance.features.deleteAll();
+      } catch {
+        // ignore
+      } finally {
+        isRestoringGeomanState = false;
+      }
+    })();
   }
-  if (networkSnapInteraction && mapInstance) {
-    mapInstance.removeInteraction(networkSnapInteraction);
-    networkSnapInteraction = null;
-  }
-  if (snapSource) {
-    snapSource.clear();
+  if (mapInstance) {
+    mapInstance.doubleClickZoom?.enable();
+    mapInstance.dragPan?.enable();
+    mapInstance.getCanvas().style.cursor = "";
   }
   lastSnapBbox = "";
   editingRuasId.value = null;
+  snapCandidateRoads.value = [];
   snapRoadCount.value = 0;
-
-  if (drawInteraction && mapInstance) {
-    mapInstance.removeInteraction(drawInteraction);
-    drawInteraction = null;
-  }
-  if (modifyInteraction && mapInstance) {
-    mapInstance.removeInteraction(modifyInteraction);
-    modifyInteraction = null;
-  }
-  if (activeGeomListener && drawnFeature.value) {
-    drawnFeature.value.getGeometry()?.un("change", activeGeomListener);
-    activeGeomListener = null;
-  }
   isDrawing.value = false;
   isEditingExisting.value = false;
   hasCompletedLine.value = false;
-  drawnPointCount.value = 0;
-  drawnLengthMeters.value = 0;
-  redoStack.value = [];
+  previewCursorCoord.value = null;
+  activeSnapPoint.value = null;
+  draggingVertexIndex = null;
+  dragSnapshotBefore = null;
+  suppressNextClickAfterDrag = false;
+
   if (emitCancel) {
     clearDraw();
     emit("drawCanceled");
     emit("log", "INFO", "Mode gambar/edit dibatalkan.");
+  } else {
+    syncDrawSources();
   }
-}
-
-function clearDraw() {
-  if (drawSource) {
-    drawSource.clear();
-  }
-  drawnFeature.value = null;
-  hasCompletedLine.value = false;
-  isEditingExisting.value = false;
-  drawnPointCount.value = 0;
-  drawnLengthMeters.value = 0;
-  redoStack.value = [];
 }
 
 function confirmDraw() {
-  if (!drawnFeature.value || !olModules) return;
-  const geom = drawnFeature.value.getGeometry();
-  if (!geom) return;
+  if (gmInstance?.loaded && gmInstance.drawEnabled("line")) {
+    const draft = gmInstance.draw?.getDraft?.();
+    if (draft?.coordinates && draft.coordinates.length >= 2) {
+      drawnCoords.value = cloneCoords(draft.coordinates as LngLat[]);
+    }
+  }
+  if (drawnCoords.value.length < 2) {
+    const gmCoords = extractGeomanFirstLineCoords();
+    if (gmCoords.length >= 2) {
+      drawnCoords.value = cloneCoords(gmCoords);
+    }
+  }
+  if (drawnCoords.value.length < 2) return;
+  const geojson = {
+    type: "LineString",
+    coordinates: cloneCoords(drawnCoords.value),
+  };
+  const length = drawnLengthMeters.value;
 
-  const t = geom.getType();
-  const coords = geom.getCoordinates();
-  if (!Array.isArray(coords)) return;
-  const totalPoints = t === "MultiLineString"
-    ? coords.reduce((sum: number, line: any[]) => sum + (Array.isArray(line) ? line.length : 0), 0)
-    : coords.length;
-
-  if (totalPoints < 2) return;
-
-  // Pastikan geometri berada tepat di tengah map canvas saat dikonfirmasi
-  fitGeometryToCenter(geom, 400);
-
-  const geojsonFormat = new olModules.GeoJSON();
-  const geojsonObj = geojsonFormat.writeGeometryObject(geom, {
-    featureProjection: "EPSG:3857",
-    dataProjection: "EPSG:4326",
-  });
-
-  const length = Math.round(olModules.sphere.getLength(geom));
+  hasCompletedLine.value = true;
+  previewCursorCoord.value = null;
+  activeSnapPoint.value = null;
+  if (gmInstance?.loaded && gmInstance.drawEnabled("line")) {
+    void (async () => {
+      await gmInstance.draw.finish();
+      await importCoordsIntoGeomanEdit(drawnCoords.value);
+    })();
+  }
+  mapInstance?.doubleClickZoom?.enable();
+  syncDrawSources();
+  zoomToGeometry(geojson);
 
   emit("drawSaved", {
-    geojson: geojsonObj,
+    geojson,
     lengthMeters: length,
   });
-
   emit("log", "INFO", `Garis ruas berhasil dikonfirmasi (${length} m). Membuka form.`);
 }
 
-onUnmounted(() => {
+// ─── Split Road Mode ─────────────────────────────────────────────────────────
+function startSplitMode(roadData: any) {
+  if (!mapInstance || !mapLoaded.value) {
+    pendingEditorAction = () => startSplitMode(roadData);
+    return;
+  }
+  pendingEditorAction = null;
+  stopDrawing(false);
   cancelSplitMode();
-  clearTimeout(snapMoveEndTimer);
-  if (snapFetchAbort) {
-    snapFetchAbort.abort();
-    snapFetchAbort = null;
+
+  const rawGeom =
+    roadData?.geometry ||
+    roadData?.properties?.geometry ||
+    roadData?.geojson ||
+    roadData?.properties?.geojson;
+
+  const coords = extractMergedRoadCoordinates(rawGeom);
+  if (coords.length < 2) {
+    emit("log", "WARN", "Geometri ruas jalan tidak ditemukan untuk split.");
+    return;
   }
-  if (drawInteraction && mapInstance) {
-    mapInstance.removeInteraction(drawInteraction);
-    drawInteraction = null;
-  }
-  if (modifyInteraction && mapInstance) {
-    mapInstance.removeInteraction(modifyInteraction);
-    modifyInteraction = null;
-  }
-  if (drawLayer && mapInstance) {
-    mapInstance.removeLayer(drawLayer);
-    drawLayer = null;
-    drawSource = null;
-  }
-  if (mvtSafetyTimeout) {
-    clearTimeout(mvtSafetyTimeout);
-    mvtSafetyTimeout = null;
-  }
-  if (pointerRafId !== null) {
-    cancelAnimationFrame(pointerRafId);
-    pointerRafId = null;
-  }
-  if (resizeRaf) {
-    cancelAnimationFrame(resizeRaf);
-    resizeRaf = null;
-  }
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
-  }
+
+  isSplitMode.value = true;
+  splitRoadData.value = roadData;
+  splitRoadCoords.value = cloneCoords(coords);
+  splitPreviewPoint.value = null;
+  splitSelectedCoord.value = null;
+
+  syncSplitSource();
+  zoomToGeometry({ type: "LineString", coordinates: cloneCoords(coords) });
+  mapInstance.getCanvas().style.cursor = "crosshair";
+
+  emit(
+    "log",
+    "INFO",
+    `Mode split aktif untuk ruas "${roadData.nama_ruas || roadData.properties?.nama_ruas || "jalan"}". Klik pada badan jalan di titik pemotongan.`
+  );
+}
+
+function cancelSplitMode() {
+  isSplitMode.value = false;
+  splitRoadData.value = null;
+  splitRoadCoords.value = [];
+  splitPreviewPoint.value = null;
+  splitSelectedCoord.value = null;
   if (mapInstance) {
-    mapInstance.setTarget(null as any);
+    mapInstance.getCanvas().style.cursor = "";
+  }
+  syncSplitSource();
+}
+
+// ─── Interactive Tooltip & Map Events ────────────────────────────────────────
+function getKondisiBadgeColor(kondisi: string) {
+  const k = (kondisi || "").toLowerCase();
+  if (k.includes("baik")) return "success";
+  if (k.includes("sedang")) return "warning";
+  if (k.includes("rusak berat")) return "error";
+  if (k.includes("rusak")) return "warning";
+  return "neutral";
+}
+
+function getTooltipStyle() {
+  if (!hoverTooltip.value) return {};
+  const width = mapContainer.value?.clientWidth ?? 800;
+  const height = mapContainer.value?.clientHeight ?? 600;
+  const left = Math.min(Math.max(12, hoverTooltip.value.x + 14), Math.max(12, width - 252));
+  const top = Math.min(Math.max(12, hoverTooltip.value.y - 108), Math.max(12, height - 120));
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+  };
+}
+
+function queryDrawHandleAtPoint(point: { x: number; y: number }, layers: string[]) {
+  if (!mapInstance) return [];
+  const activeLayers = layers.filter((lid) => mapInstance.getLayer(lid));
+  if (activeLayers.length === 0) return [];
+  const pad = 8;
+  return mapInstance.queryRenderedFeatures(
+    [
+      [point.x - pad, point.y - pad],
+      [point.x + pad, point.y + pad],
+    ],
+    { layers: activeLayers }
+  );
+}
+
+function bindMapEvents() {
+  if (!mapInstance) return;
+
+  // Vertex Drag Start (Fallback only when Geoman is not loaded)
+  const beginVertexDrag = (e: any) => {
+    if (gmInstance?.loaded) return;
+    if (!isDrawing.value || drawnCoords.value.length === 0) return;
+    if (e.originalEvent && typeof e.originalEvent.button === "number" && e.originalEvent.button !== 0) {
+      return;
+    }
+
+    const hitVertices = queryDrawHandleAtPoint(e.point, ["layer-draw-vertices"]);
+    if (hitVertices && hitVertices.length > 0) {
+      const idx = Number(hitVertices[0].properties?.index);
+      if (Number.isFinite(idx) && idx >= 0 && idx < drawnCoords.value.length) {
+        e.preventDefault();
+        draggingVertexIndex = idx;
+        dragSnapshotBefore = cloneCoords(drawnCoords.value);
+        suppressNextClickAfterDrag = false;
+        mapInstance.dragPan.disable();
+        mapInstance.getCanvas().style.cursor = "grabbing";
+        return;
+      }
+    }
+
+    // Midpoint click/drag inserts a new vertex immediately
+    const hitMidpoints = queryDrawHandleAtPoint(e.point, ["layer-draw-midpoints"]);
+    if (hitMidpoints && hitMidpoints.length > 0) {
+      const afterIdx = Number(hitMidpoints[0].properties?.insertAfterIndex);
+      if (Number.isFinite(afterIdx) && afterIdx >= 0 && afterIdx < drawnCoords.value.length - 1) {
+        e.preventDefault();
+        dragSnapshotBefore = cloneCoords(drawnCoords.value);
+        suppressNextClickAfterDrag = true;
+        const newCoord: LngLat = [Number(e.lngLat.lng), Number(e.lngLat.lat)];
+        const next = cloneCoords(drawnCoords.value);
+        next.splice(afterIdx + 1, 0, newCoord);
+        drawnCoords.value = next;
+        draggingVertexIndex = afterIdx + 1;
+        mapInstance.dragPan.disable();
+        mapInstance.getCanvas().style.cursor = "grabbing";
+        syncDrawSources();
+      }
+    }
+  };
+
+  mapInstance.on("mousedown", beginVertexDrag);
+  mapInstance.on("touchstart", beginVertexDrag);
+
+  // Vertex Delete on Right-Click (Fallback only when Geoman is not loaded)
+  mapInstance.on("contextmenu", (e: any) => {
+    if (gmInstance?.loaded) return;
+    if (!isDrawing.value || drawnCoords.value.length <= 2) return;
+    const hitVertices = queryDrawHandleAtPoint(e.point, ["layer-draw-vertices"]);
+    if (hitVertices && hitVertices.length > 0) {
+      const idx = Number(hitVertices[0].properties?.index);
+      if (Number.isFinite(idx) && idx >= 0 && idx < drawnCoords.value.length) {
+        e.preventDefault();
+        pushUndoSnapshot();
+        const next = cloneCoords(drawnCoords.value);
+        next.splice(idx, 1);
+        drawnCoords.value = next;
+        syncDrawSources();
+        emit("log", "INFO", `Vertex #${idx + 1} dihapus (${next.length} titik tersisa).`);
+      }
+    }
+  });
+
+  // Pointer Move: Coordinates, Snap Indicator, Split Preview, Hover Tooltip
+  mapInstance.on("mousemove", (e: any) => {
+    const lngLat: LngLat = [Number(e.lngLat.lng), Number(e.lngLat.lat)];
+    cursorCoord.value = {
+      lng: Number(lngLat[0].toFixed(5)),
+      lat: Number(lngLat[1].toFixed(5)),
+    };
+    const formatted = `${lngLat[1].toFixed(5)}, ${lngLat[0].toFixed(5)}`;
+    mouseCoords.value = formatted;
+    emit("update:mouseCoords", formatted);
+
+    // 1. Active Vertex Dragging (Fallback when Geoman not loaded)
+    if (!gmInstance?.loaded && draggingVertexIndex !== null) {
+      suppressNextClickAfterDrag = true;
+      const { coord, snapped } = resolveSnappedCoord(lngLat, draggingVertexIndex);
+      activeSnapPoint.value = snapped;
+      const next = cloneCoords(drawnCoords.value);
+      next[draggingVertexIndex] = toPlainCoord(coord);
+      drawnCoords.value = next;
+      syncDrawSources();
+      return;
+    }
+
+    // 2. Active Drawing & Snap Indicator
+    if (isDrawing.value) {
+      hoverTooltip.value = null;
+      if (gmInstance?.loaded) {
+        // When Geoman is active, update magnetic snap ring visual indicator
+        if (isSnappingEnabled.value) {
+          const { snapped } = resolveSnappedCoord(lngLat);
+          if (
+            (snapped && !activeSnapPoint.value) ||
+            (!snapped && activeSnapPoint.value) ||
+            (snapped &&
+              activeSnapPoint.value &&
+              (snapped.coord[0] !== activeSnapPoint.value.coord[0] ||
+                snapped.coord[1] !== activeSnapPoint.value.coord[1]))
+          ) {
+            activeSnapPoint.value = snapped;
+            syncDrawSources();
+          }
+        }
+        return;
+      }
+
+      const hitHandle = queryDrawHandleAtPoint(e.point, [
+        "layer-draw-vertices",
+        "layer-draw-midpoints",
+      ]);
+
+      if (isDrawInteracting.value) {
+        const { coord, snapped } = resolveSnappedCoord(lngLat);
+        previewCursorCoord.value = toPlainCoord(coord);
+        activeSnapPoint.value = snapped;
+        mapInstance.getCanvas().style.cursor = hitHandle.length > 0 ? "grab" : "crosshair";
+        syncDrawSources();
+      } else {
+        mapInstance.getCanvas().style.cursor = hitHandle.length > 0 ? "grab" : "";
+      }
+      return;
+    }
+
+    // 3. Split Mode Live Projection
+    if (isSplitMode.value && splitRoadCoords.value.length >= 2) {
+      hoverTooltip.value = null;
+      const proj = projectPointOntoRoad(lngLat, splitRoadCoords.value);
+      if (proj && Number.isFinite(proj.point[0]) && Number.isFinite(proj.point[1])) {
+        splitPreviewPoint.value = {
+          coord: toPlainCoord(proj.point),
+          alongMeters: Math.round(proj.alongMeters),
+        };
+        syncSplitSource();
+      }
+      mapInstance.getCanvas().style.cursor = "crosshair";
+      return;
+    }
+
+    // 4. Normal Inspection Hover
+    if (!mapInstance.getLayer("layer-poros-lines")) return;
+    const hitTolerance = 6;
+    const features = mapInstance.queryRenderedFeatures(
+      [
+        [e.point.x - hitTolerance, e.point.y - hitTolerance],
+        [e.point.x + hitTolerance, e.point.y + hitTolerance],
+      ],
+      { layers: ["layer-poros-lines"] }
+    );
+
+    if (!features || features.length === 0) {
+      mapInstance.getCanvas().style.cursor = "";
+      hoverTooltip.value = null;
+      return;
+    }
+
+    mapInstance.getCanvas().style.cursor = "pointer";
+    const p = features[0].properties || {};
+    hoverTooltip.value = {
+      x: e.point.x,
+      y: e.point.y,
+      nama_ruas: String(p.nama_ruas || "Ruas Jalan"),
+      kondisi: String(p.kondisi || "-"),
+      panjang_meter: Number(p.panjang_meter ?? p.panjang ?? 0),
+      desa: String(p.desa || p.nama_desa || "-"),
+      kecamatan: String(p.kecamatan || p.nama_kecamatan || "-"),
+    };
+  });
+
+  // End Vertex Drag (Fallback when Geoman not loaded)
+  const endVertexDrag = () => {
+    if (gmInstance?.loaded) return;
+    if (draggingVertexIndex === null) return;
+    if (dragSnapshotBefore && suppressNextClickAfterDrag) {
+      const nextUndo = [...undoStack.value, dragSnapshotBefore];
+      if (nextUndo.length > 80) nextUndo.shift();
+      undoStack.value = nextUndo;
+      redoStack.value = [];
+    }
+    dragSnapshotBefore = null;
+    draggingVertexIndex = null;
+    activeSnapPoint.value = null;
+    mapInstance?.dragPan?.enable();
+    if (mapInstance) {
+      mapInstance.getCanvas().style.cursor = isDrawInteracting.value ? "crosshair" : "";
+    }
+    syncDrawSources();
+  };
+
+  mapInstance.on("mouseup", endVertexDrag);
+  mapInstance.on("touchend", endVertexDrag);
+
+  mapInstance.on("dragstart", (e: any) => {
+    hoverTooltip.value = null;
+    if (e?.originalEvent) {
+      hasUserInteractedWithCamera = true;
+    }
+  });
+
+  mapInstance.on("wheel", () => {
+    hasUserInteractedWithCamera = true;
+  });
+
+  mapInstance.on("mouseleave", () => {
+    if (draggingVertexIndex === null && !isDrawing.value && !isSplitMode.value && mapInstance) {
+      mapInstance.getCanvas().style.cursor = "";
+    }
+    hoverTooltip.value = null;
+  });
+
+  mapInstance.on("moveend", () => {
+    if (isDrawing.value && isSnappingEnabled.value) {
+      if (snapMoveEndTimer) clearTimeout(snapMoveEndTimer);
+      snapMoveEndTimer = setTimeout(() => {
+        void loadSnapFeatures();
+      }, 380);
+    }
+  });
+
+  // Click Handler: Draw Vertex / Split Pin / Road Feature Selection
+  mapInstance.on("click", (e: any) => {
+    showMartinPopover.value = false;
+    if (suppressNextClickAfterDrag) {
+      suppressNextClickAfterDrag = false;
+      return;
+    }
+
+    // When Geoman is active in draw/edit mode, let Geoman handle pointer clicks cleanly
+    if (isDrawing.value && gmInstance?.loaded) {
+      return;
+    }
+
+    const rawLngLat: LngLat = [Number(e.lngLat.lng), Number(e.lngLat.lat)];
+
+    // 1. Drawing click (Fallback when Geoman not loaded) -> add vertex
+    if (isDrawInteracting.value) {
+      const { coord } = resolveSnappedCoord(rawLngLat);
+      const plainCoord = toPlainCoord(coord);
+      const last = drawnCoords.value[drawnCoords.value.length - 1];
+      if (last && haversineDistanceMeters(last, plainCoord) < 0.25) {
+        return;
+      }
+      pushUndoSnapshot();
+      drawnCoords.value = [...cloneCoords(drawnCoords.value), plainCoord];
+      syncDrawSources();
+      return;
+    }
+
+    // 2. Ignore map click when editing completed line vertices
+    if (isDrawing.value && hasCompletedLine.value) {
+      return;
+    }
+
+    // 3. Split mode click -> project point onto road and emit
+    if (isSplitMode.value && splitRoadCoords.value.length >= 2) {
+      const proj = projectPointOntoRoad(rawLngLat, splitRoadCoords.value);
+      const cutCoord: LngLat = toPlainCoord(
+        proj && Number.isFinite(proj.point[0]) && Number.isFinite(proj.point[1])
+          ? proj.point
+          : rawLngLat
+      );
+      splitSelectedCoord.value = cutCoord;
+      syncSplitSource();
+      emit("splitPointSelected", {
+        road: splitRoadData.value,
+        coordinate: cutCoord,
+      });
+      return;
+    }
+
+    // 4. Normal Inspection Click
+    emit("mapClick", rawLngLat);
+
+    if (!mapInstance.getLayer("layer-poros-lines")) return;
+    const hitTolerance = 7;
+    const features = mapInstance.queryRenderedFeatures(
+      [
+        [e.point.x - hitTolerance, e.point.y - hitTolerance],
+        [e.point.x + hitTolerance, e.point.y + hitTolerance],
+      ],
+      { layers: ["layer-poros-lines"] }
+    );
+
+    if (!features || features.length === 0) {
+      emit("select", null);
+      return;
+    }
+
+    const top = features[0];
+    const p = top.properties || {};
+    const id = String(p.id ?? top.id ?? "");
+    if (!id) return;
+
+    const propsNormalized: RuasProperties = {
+      id,
+      kode_ruas: p.kode_ruas != null && p.kode_ruas !== "" ? Number(p.kode_ruas) : null,
+      nama_ruas: String(p.nama_ruas || "-"),
+      desa: p.desa || p.nama_desa || null,
+      kecamatan: p.kecamatan || p.nama_kecamatan || null,
+      panjang: p.panjang != null ? Number(p.panjang) : Number(p.panjang_meter ?? 0),
+      panjang_meter: p.panjang_meter != null ? Number(p.panjang_meter) : Number(p.panjang ?? 0),
+      lebar: p.lebar != null ? Number(p.lebar) : null,
+      perkerasan: p.perkerasan || null,
+      kondisi: p.kondisi || null,
+      status_awal: p.status_awal || null,
+      status_eksisting: p.status_eksisting || null,
+      sumber_data: p.sumber_data || null,
+      id_desa: p.id_desa != null ? Number(p.id_desa) : null,
+      id_kecamatan: p.id_kecamatan != null ? Number(p.id_kecamatan) : null,
+    };
+
+    // Pass geometry: null so parent always fetches complete unclipped PostGIS geometry
+    emit("select", {
+      id,
+      properties: propsNormalized,
+      geometry: null,
+    });
+  });
+
+  // Double-click finishes active Draw LineString
+  mapInstance.on("dblclick", (e: any) => {
+    if (isDrawInteracting.value && drawnCoords.value.length >= 2) {
+      e.preventDefault();
+      finishActiveDraw();
+    }
+  });
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    if (showMartinPopover.value) {
+      showMartinPopover.value = false;
+      return;
+    }
+    if (isSplitMode.value) {
+      cancelSplitMode();
+      return;
+    }
+    if (isDrawing.value) {
+      stopDrawing(true);
+      return;
+    }
+  }
+
+  if (isDrawing.value) {
+    if (e.key === "Enter" && isDrawInteracting.value && drawnCoords.value.length >= 2) {
+      e.preventDefault();
+      finishActiveDraw();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      handleRedo();
+    }
+  }
+}
+
+async function initMap() {
+  if (!import.meta.client || !mapContainer.value || mapInstance) return;
+
+  try {
+    const [mod, workerMod, geomanMod] = await Promise.all([
+      import("maplibre-gl"),
+      import("maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"),
+      import("@geoman-io/maplibre-geoman-free"),
+    ]);
+    await Promise.all([
+      import("maplibre-gl/dist/maplibre-gl.css"),
+      import("@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css"),
+    ]);
+    maplibregl = mod;
+    GeomanClass = geomanMod?.Geoman ?? null;
+
+    if (workerMod?.default && typeof maplibregl.setWorkerUrl === "function") {
+      maplibregl.setWorkerUrl(workerMod.default);
+    }
+
+    await basemapStore.ensureLoaded();
+    if (!mapContainer.value) return;
+
+    lastAppliedLineDash = props.symbology?.lineDash || "solid";
+    mapInstance = new maplibregl.Map({
+      container: mapContainer.value,
+      style: buildMapStyle(props.basemap),
+      center: [111.88, -7.2],
+      zoom: 10.5,
+      minZoom: 8,
+      maxZoom: 19,
+      maxPitch: 60,
+      fadeDuration: 0,
+      trackResize: false,
+      canvasContextAttributes: {
+        preserveDrawingBuffer: true,
+        antialias: true,
+      },
+      attributionControl: false,
+    });
+
+    mapInstance.addControl(
+      new maplibregl.AttributionControl({ compact: true }),
+      "bottom-right"
+    );
+    mapInstance.addControl(
+      new maplibregl.ScaleControl({ maxWidth: 110, unit: "metric" }),
+      "bottom-right"
+    );
+
+    const markCanvasReady = () => {
+      if (mapLoaded.value) return;
+      if (canvasReadyFallbackTimer) {
+        clearTimeout(canvasReadyFallbackTimer);
+        canvasReadyFallbackTimer = null;
+      }
+      mapLoaded.value = true;
+      if (martinStatusState.value === "loading") {
+        martinStatusState.value = "ready";
+      }
+      isMvtLoading.value = false;
+      emit("mvtLoading", false);
+      emit("loaded");
+
+      const el = mapContainer.value;
+      lastObservedW = Math.round(el?.clientWidth ?? 0);
+      lastObservedH = Math.round(el?.clientHeight ?? 0);
+      mapInstance?.resize();
+      // Instant initial fitBounds (0ms) so the user immediately sees the target extent
+      fitBounds(0);
+      // Re-verify fitBounds after splitter/layout settles on initial open
+      setTimeout(() => {
+        if (
+          mapInstance &&
+          !hasUserInteractedWithCamera &&
+          !isDrawing.value &&
+          !isSplitMode.value &&
+          !props.selectedFeature
+        ) {
+          resizeMap();
+          fitBounds(0);
+        }
+      }, 140);
+      syncPorosStylingAndFilters();
+      syncSelectedRoadSource();
+      syncDrawSources();
+      syncSplitSource();
+      syncPulseMarker();
+      void initGeoman().then(() => {
+        if (pendingEditorAction) {
+          const act = pendingEditorAction;
+          pendingEditorAction = null;
+          act();
+        }
+      });
+      if (typeof mapInstance?.redraw === "function") {
+        mapInstance.redraw();
+      }
+    };
+
+    mapInstance.on("style.load", () => {
+      markCanvasReady();
+    });
+
+    mapInstance.on("load", () => {
+      markCanvasReady();
+    });
+
+    // Fallback safety timer so loading overlay never hangs if a remote tile times out
+    canvasReadyFallbackTimer = setTimeout(() => {
+      markCanvasReady();
+    }, 1800);
+
+    mapInstance.on("zoom", () => {
+      const z = mapInstance?.getZoom();
+      if (typeof z === "number") {
+        currentZoom.value = Number(z.toFixed(1));
+      }
+    });
+
+    mapInstance.on("pitch", () => {
+      const p = mapInstance?.getPitch();
+      if (typeof p === "number") {
+        currentPitch.value = Math.round(p);
+      }
+    });
+
+    mapInstance.on("rotate", () => {
+      const b = mapInstance?.getBearing();
+      if (typeof b === "number") {
+        currentBearing.value = Math.round(b);
+      }
+    });
+
+    mapInstance.on("sourcedataloading", (e: any) => {
+      if (e?.sourceId === "martin-poros") {
+        isMvtLoading.value = true;
+        emit("mvtLoading", true);
+      }
+    });
+
+    mapInstance.on("sourcedata", (e: any) => {
+      if (e?.sourceId === "martin-poros" && e?.isSourceLoaded) {
+        isMvtLoading.value = false;
+        emit("mvtLoading", false);
+        if (martinStatusState.value !== "ready") {
+          martinStatusState.value = "ready";
+          martinWarningDetail.value = null;
+        }
+      }
+    });
+
+    mapInstance.on("error", (e: any) => {
+      const sid = String(e?.sourceId || "");
+      if (sid.startsWith("martin-")) {
+        tileErrorCount++;
+        if (tileErrorCount >= 3) {
+          martinStatusState.value = "warning";
+          martinWarningDetail.value =
+            "Sebagian vector tile Martin belum merespons. Pastikan layanan tile server Martin (port 9090) aktif.";
+        }
+      }
+    });
+
+    bindMapEvents();
+
+    if (typeof ResizeObserver !== "undefined" && mapContainer.value) {
+      resizeObserver = new ResizeObserver(() => {
+        resizeMap();
+      });
+      resizeObserver.observe(mapContainer.value);
+    }
+  } catch (err: any) {
+    if (canvasReadyFallbackTimer) {
+      clearTimeout(canvasReadyFallbackTimer);
+      canvasReadyFallbackTimer = null;
+    }
+    mapLoaded.value = true;
+    isMvtLoading.value = false;
+    emit("mvtLoading", false);
+    martinStatusState.value = "warning";
+    martinWarningDetail.value = err?.message || "Gagal memuat MapLibre GL JS.";
+    emit("log", "ERROR", `Gagal memuat MapLibre GL JS: ${err?.message || "Unknown error"}`);
+  }
+}
+
+// ─── Reactive Watchers ───────────────────────────────────────────────────────
+watch(
+  () => props.bbox,
+  (newBbox) => {
+    if (!mapInstance || !mapLoaded.value) return;
+    if (!isValidBounds(newBbox)) return;
+    if (isDrawing.value || isSplitMode.value || props.selectedFeature) return;
+
+    const nextKey = formatBboxKey(newBbox);
+    if (!hasFittedToSummaryBbox || nextKey !== lastFittedBboxKey) {
+      const isInitialArrival = !hasFittedToSummaryBbox;
+      hasFittedToSummaryBbox = true;
+      lastFittedBboxKey = nextKey;
+      mapInstance.resize();
+      safeFitBounds(newBbox, 52, 16, isInitialArrival ? 360 : 480);
+    }
+  }
+);
+
+watch(
+  () => [
+    props.layerVisible,
+    props.layerOpacity,
+    props.kecamatanFilter,
+    props.desaFilter,
+    props.kondisiFilter,
+    props.perkerasanFilter,
+    props.symbology,
+  ],
+  () => {
+    syncPorosStylingAndFilters();
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.selectedFeature,
+  () => {
+    syncSelectedRoadSource();
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.clickedCoordinate,
+  () => {
+    syncPulseMarker();
+  }
+);
+
+watch(
+  () => props.basemap,
+  (code) => {
+    if (mapInstance && mapLoaded.value) {
+      applyMapStyle(code);
+    }
+  }
+);
+
+watch(
+  () => basemapStore.items,
+  () => {
+    if (mapInstance && mapLoaded.value && props.basemap !== "none") {
+      applyMapStyle(props.basemap);
+    }
+  }
+);
+
+watch(
+  () => colorMode.value,
+  () => {
+    if (mapInstance && mapLoaded.value) {
+      applyMapStyle(props.basemap);
+    }
+  }
+);
+
+onMounted(() => {
+  initMap();
+  window.addEventListener("keydown", handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+  if (canvasReadyFallbackTimer) {
+    clearTimeout(canvasReadyFallbackTimer);
+    canvasReadyFallbackTimer = null;
+  }
+  cancelSplitMode();
+  stopDrawing(false);
+  if (gmInstance) {
+    try {
+      void gmInstance.destroy({ removeSources: false });
+    } catch {
+      // ignore
+    }
+    gmInstance = null;
+  }
+  if (pulseMarker) {
+    pulseMarker.remove();
+    pulseMarker = null;
+  }
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  if (mapInstance) {
+    mapInstance.remove();
     mapInstance = null;
-    vectorTileSource = null;
-    vectorTileLayer = null;
-    tileLayer = null;
-    tooltipOverlay = null;
   }
 });
 
@@ -1783,6 +2533,7 @@ defineExpose({
   zoomToCentroid,
   zoomToGeometry,
   refreshVectorTiles,
+  resizeMap,
   setBasemap,
   isMvtLoading,
   startDrawing,
@@ -1802,39 +2553,86 @@ defineExpose({
 <template>
   <div
     class="relative w-full h-full overflow-hidden select-none transition-colors duration-200"
-    :class="basemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+    :class="basemap === 'none' ? 'bg-white' : 'bg-slate-100 dark:bg-[#070b14]'"
   >
-    <!-- Map Canvas Element -->
+    <!-- MapLibre WebGL Canvas -->
     <div
       ref="mapContainer"
-      class="absolute inset-0 w-full h-full transition-colors duration-200"
-      :class="basemap === 'none' ? 'bg-white' : 'bg-gray-100 dark:bg-[#070b14]'"
+      class="absolute inset-0 w-full h-full"
     />
 
-    <!-- Floating MVT Loading Indicator Badge (Top Left) -->
-    <Transition
-      enter-active-class="transition-all duration-200 ease-out"
-      enter-from-class="opacity-0 -translate-y-1.5 scale-95"
-      enter-to-class="opacity-100 translate-y-0 scale-100"
-      leave-active-class="transition-all duration-150 ease-in"
-      leave-from-class="opacity-100 translate-y-0 scale-100"
-      leave-to-class="opacity-0 -translate-y-1.5 scale-95"
+    <!-- Top-Left: Martin Vector Tile Telemetry Pill (when not drawing or splitting) -->
+    <div
+      v-if="!isDrawing && !isSplitMode"
+      class="absolute top-3 left-3 z-20 flex flex-wrap items-center gap-2 pointer-events-none max-w-[calc(100%-6.5rem)]"
     >
-      <div
-        v-if="isMvtLoading && mapLoaded && !isDrawing && !isSplitMode"
-        class="absolute top-3 left-3 z-20 flex items-center gap-2 px-2.5 py-1.5 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-blue-500/30 dark:border-blue-500/30 rounded-lg shadow-sm pointer-events-none"
-      >
-        <UIcon
-          name="i-lucide-loader-2"
-          class="size-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0"
-        />
-        <span class="text-xs font-medium text-gray-700 dark:text-gray-200">
-          Memuat tile MVT...
-        </span>
-      </div>
-    </Transition>
+      <div class="relative pointer-events-auto">
+        <button
+          type="button"
+          :aria-expanded="showMartinPopover"
+          :aria-label="
+            martinStatusState === 'warning'
+              ? 'Peringatan koneksi vector tile Martin, klik untuk detail'
+              : 'Status koneksi vector tile Martin'
+          "
+          :class="[
+            'inline-flex items-center gap-2 rounded-lg border px-2.5 shadow-sm backdrop-blur-md transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+            'min-h-[44px] lg:min-h-[32px] lg:py-1',
+            martinStatusState === 'warning'
+              ? 'border-amber-300 bg-amber-50/95 text-amber-900 dark:border-amber-700 dark:bg-amber-950/95 dark:text-amber-100'
+              : 'border-gray-200/90 bg-white/92 text-gray-800 dark:border-gray-700/90 dark:bg-[#0e1424]/92 dark:text-gray-200',
+          ]"
+          @click="showMartinPopover = !showMartinPopover"
+        >
+          <span
+            :class="[
+              'size-2 rounded-full shrink-0',
+              martinStatusState === 'warning'
+                ? 'bg-amber-600'
+                : isMvtLoading || martinStatusState === 'loading'
+                  ? 'bg-blue-600 animate-pulse'
+                  : 'bg-emerald-600',
+            ]"
+          />
+          <span class="text-xs font-medium whitespace-nowrap">
+            {{
+              martinStatusState === "warning"
+                ? "Tile Server Terkendala"
+                : isMvtLoading
+                  ? "Memuat Vector Tile..."
+                  : "Vector Tile Aktif"
+            }}
+          </span>
+        </button>
 
-    <!-- Floating Split Mode Banner -->
+        <div
+          v-if="showMartinPopover"
+          class="absolute left-0 top-full mt-1.5 w-72 rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-lg dark:border-gray-700 dark:bg-[#0e1424] dark:text-gray-200"
+        >
+          <p class="font-semibold text-gray-900 dark:text-white">
+            Telemetri Peta Vektor MapLibre
+          </p>
+          <p class="mt-1 leading-relaxed text-gray-600 dark:text-gray-300">
+            {{
+              martinWarningDetail ||
+              "Peta merender vector tile MVT jalan_porosdesa secara langsung melalui WebGL MapLibre GL JS."
+            }}
+          </p>
+          <div class="mt-2 flex items-center justify-between text-[11px] text-gray-600 dark:text-gray-400">
+            <span class="tabular-nums">Zoom {{ currentZoom }}x · Pitch {{ currentPitch }}°</span>
+            <button
+              type="button"
+              class="min-h-[32px] px-2 font-medium text-blue-700 hover:underline dark:text-blue-400 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600 rounded"
+              @click="showMartinPopover = false"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Split Mode Banner (Top-Left) -->
     <Transition
       enter-active-class="transition-all duration-200 ease-out"
       enter-from-class="opacity-0 -translate-y-2 scale-95"
@@ -1845,17 +2643,23 @@ defineExpose({
     >
       <div
         v-if="isSplitMode"
-        class="absolute top-3 left-3 z-30 flex items-center gap-2 px-3 py-2 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-xs border border-amber-500/50 rounded-lg shadow-md text-xs select-none max-w-sm sm:max-w-md"
+        class="absolute top-3 left-3 z-30 flex items-center gap-2.5 px-3 py-2 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-amber-500/60 rounded-xl shadow-lg text-xs select-none max-w-sm sm:max-w-md"
       >
-        <div class="size-6 rounded-md bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-          <UIcon name="i-lucide-scissors" class="size-4 animate-pulse" />
+        <div class="size-7 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+          <UIcon name="i-lucide-scissors" class="size-4" />
         </div>
         <div class="flex flex-col min-w-0">
           <span class="font-semibold text-gray-900 dark:text-white leading-tight truncate">
             Mode Split Ruas Jalan
           </span>
-          <span class="text-[11px] text-gray-500 dark:text-gray-400 leading-tight truncate">
-            Klik pada badan ruas <span class="font-medium text-amber-600 dark:text-amber-400">"{{ splitRoadData?.nama_ruas || splitRoadData?.properties?.nama_ruas || 'jalan' }}"</span> untuk memotong.
+          <span class="text-[11px] text-gray-600 dark:text-gray-300 leading-tight truncate">
+            Klik badan ruas
+            <span class="font-semibold text-amber-700 dark:text-amber-400">
+              "{{ splitRoadData?.nama_ruas || splitRoadData?.properties?.nama_ruas || "jalan" }}"
+            </span>
+            <template v-if="splitPreviewPoint">
+              · STA {{ splitPreviewPoint.alongMeters.toLocaleString("id-ID") }} m
+            </template>
           </span>
         </div>
         <UButton
@@ -1863,14 +2667,15 @@ defineExpose({
           size="xs"
           color="neutral"
           variant="ghost"
-          class="ml-auto text-gray-400 hover:text-red-500 dark:hover:text-red-400 shrink-0"
-          title="Batal Split"
+          class="ml-auto text-gray-500 hover:text-red-600 dark:hover:text-red-400 shrink-0"
+          aria-label="Batal mode split"
+          title="Batal Split (Esc)"
           @click="cancelSplitMode"
         />
       </div>
     </Transition>
 
-    <!-- ═══ FLOATING DRAW CONTROL (Vertical Toolbar on Left Side, UI/UX like MapControl) ═══ -->
+    <!-- Floating Vertical Draw / Vertex Edit Control Toolbar (Top-Left) -->
     <Transition
       enter-active-class="transition-all duration-200 ease-out"
       enter-from-class="opacity-0 -translate-x-2 scale-95"
@@ -1883,15 +2688,15 @@ defineExpose({
         v-if="isDrawing"
         class="absolute top-3 left-3 z-30 flex flex-col gap-1.5 items-start"
       >
-        <!-- Vertical Toolbar Box (Identical aesthetic to MapControl) -->
-        <div class="flex flex-col gap-0.5 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-          <!-- 1. Draw -->
-          <UTooltip text="Mode Gambar Garis (Draw)">
+        <div class="flex flex-col gap-0.5 p-1 bg-white/95 dark:bg-[#0b0f19]/95 backdrop-blur-md border border-gray-200 dark:border-gray-800 rounded-xl shadow-md">
+          <!-- 1. Draw / Finish -->
+          <UTooltip :text="isDrawInteracting ? 'Selesai Gambar (Enter)' : 'Lanjut Tambah Titik (Draw)'">
             <UButton
-              icon="i-lucide-pencil"
+              :icon="isDrawInteracting ? 'i-lucide-pencil' : 'i-lucide-pen-tool'"
               size="xs"
               :color="isDrawInteracting ? 'primary' : 'neutral'"
               :variant="isDrawInteracting ? 'solid' : 'ghost'"
+              aria-label="Mode gambar garis"
               @click="handleDrawClick"
             />
           </UTooltip>
@@ -1903,93 +2708,103 @@ defineExpose({
               size="xs"
               color="neutral"
               variant="ghost"
+              aria-label="Gambar ulang dari awal"
               @click="handleRedraw"
             />
           </UTooltip>
 
           <!-- 3. Undo -->
-          <UTooltip text="Undo (Batalkan Titik)">
+          <UTooltip text="Undo (Ctrl+Z)">
             <UButton
               icon="i-lucide-undo-2"
               size="xs"
               color="neutral"
               variant="ghost"
               :disabled="!canUndo"
+              aria-label="Undo perubahan terakhir"
               @click="handleUndo"
             />
           </UTooltip>
 
           <!-- 4. Redo -->
-          <UTooltip text="Redo (Kembalikan Titik)">
+          <UTooltip text="Redo (Ctrl+Y)">
             <UButton
               icon="i-lucide-redo-2"
               size="xs"
               color="neutral"
               variant="ghost"
               :disabled="!canRedo"
+              aria-label="Redo perubahan"
               @click="handleRedo"
             />
           </UTooltip>
 
           <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
 
-          <!-- Snapping Toggle Row with Status Indicator to the Right -->
+          <!-- 5. Magnetic Snapping Toggle + Live Count Pill -->
           <div class="relative flex items-center">
-            <UTooltip :text="isSnappingEnabled ? 'Snapping Aktif: Magnet Ruas & Titik' : 'Snapping Nonaktif (Klik untuk Aktifkan)'">
+            <UTooltip
+              :text="
+                isSnappingEnabled
+                  ? 'Snapping Aktif: Magnet Ruas & Titik'
+                  : 'Snapping Nonaktif (Klik untuk Aktifkan)'
+              "
+            >
               <UButton
                 icon="i-lucide-magnet"
                 size="xs"
                 :color="isSnappingEnabled ? 'primary' : 'neutral'"
                 :variant="isSnappingEnabled ? 'solid' : 'ghost'"
+                aria-label="Toggle snapping magnet ruas jalan"
                 @click="toggleSnapping"
               />
             </UTooltip>
 
-            <!-- Indikator Snapping Aktif / Non Aktif di samping kanan toggle -->
-            <div
+            <button
+              type="button"
               class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-medium select-none whitespace-nowrap shadow-xs transition-all cursor-pointer"
-              :class="isSnappingEnabled
-                ? 'bg-blue-50/95 dark:bg-blue-950/80 border-blue-200 dark:border-blue-800/80 text-blue-700 dark:text-blue-300'
-                : 'bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400'"
-              :title="isSnappingEnabled ? 'Klik untuk menonaktifkan snapping' : 'Klik untuk mengaktifkan snapping'"
+              :class="
+                isSnappingEnabled
+                  ? 'bg-blue-50/95 dark:bg-blue-950/85 border-blue-200 dark:border-blue-800/80 text-blue-700 dark:text-blue-300'
+                  : 'bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400'
+              "
               @click="toggleSnapping"
             >
               <span
                 class="size-1.5 rounded-full shrink-0"
-                :class="isSnappingEnabled ? 'bg-blue-500 animate-pulse' : 'bg-gray-400 dark:bg-gray-500'"
+                :class="isSnappingEnabled ? 'bg-blue-600' : 'bg-gray-400 dark:bg-gray-500'"
               />
-              <span>{{ isSnappingEnabled ? 'Aktif' : 'Non Aktif' }}</span>
-              <span
+              <span>{{ isSnappingEnabled ? "Snap Aktif" : "Snap Mati" }}</span>
+              <UIcon
                 v-if="isSnappingEnabled && isSnapLoading"
-                class="flex items-center gap-0.5 text-[9px] text-blue-600/70"
-              >
-                <UIcon name="i-lucide-loader-2" class="size-2 animate-spin" />
-              </span>
+                name="i-lucide-loader-2"
+                class="size-2.5 animate-spin text-blue-600"
+              />
               <span
                 v-else-if="isSnappingEnabled && snapRoadCount > 0"
-                class="text-[9px] font-mono text-blue-600/80 dark:text-blue-400/80"
+                class="text-[10px] font-mono text-blue-700 dark:text-blue-300 tabular-nums"
               >
                 ({{ snapRoadCount }})
               </span>
-            </div>
+            </button>
           </div>
 
           <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
 
-          <!-- 5. Simpan Row with Length & Vertex Calculation Indicator to the Right -->
+          <!-- 6. Save Geometry + Live Length & Vertex Pill -->
           <div class="relative flex items-center">
-            <UTooltip text="Simpan Garis (Buka Form)">
+            <UTooltip text="Simpan Garis & Buka Form">
               <UButton
                 icon="i-lucide-check"
                 size="xs"
                 color="primary"
                 variant="solid"
                 :disabled="!canSave"
+                aria-label="Simpan geometri garis"
                 @click="confirmDraw"
               />
             </UTooltip>
 
-            <!-- Indikator Kalkulasi Panjang & Vertex disamping kanan tombol simpan -->
             <Transition
               enter-active-class="transition-all duration-200 ease-out"
               enter-from-class="opacity-0 translate-x-1"
@@ -2000,225 +2815,202 @@ defineExpose({
             >
               <div
                 v-if="drawnPointCount > 0"
-                class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] select-none whitespace-nowrap shadow-xs backdrop-blur-xs bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800"
+                class="absolute left-full ml-1.5 flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] select-none whitespace-nowrap shadow-sm backdrop-blur-md bg-white/95 dark:bg-[#0b0f19]/95 border-gray-200 dark:border-gray-800"
               >
-                <!-- Panjang (Meter) -->
-                <div class="flex items-center gap-1 font-mono font-semibold text-blue-600 dark:text-blue-400">
+                <div class="flex items-center gap-1 font-mono font-semibold text-blue-600 dark:text-blue-400 tabular-nums">
                   <UIcon name="i-lucide-route" class="size-3 shrink-0" />
-                  <span>{{ drawnLengthMeters.toLocaleString('id-ID') }} m</span>
+                  <span>{{ drawnLengthMeters.toLocaleString("id-ID") }} m</span>
                 </div>
-
                 <div class="w-px h-3 bg-gray-200 dark:bg-gray-800 shrink-0" />
-
-                <!-- Titik / Vertex -->
-                <div class="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-mono">
-                  <span>{{ drawnPointCount }} vertex</span>
+                <div class="flex items-center gap-1 text-gray-600 dark:text-gray-300 font-mono tabular-nums">
+                  <span>{{ drawnPointCount }} titik</span>
                   <span
                     v-if="isEditingExisting"
-                    class="text-[9px] font-sans font-medium text-amber-500"
+                    class="text-[10px] font-sans font-semibold text-amber-600 dark:text-amber-400"
                   >
                     (Edit)
                   </span>
                   <span
                     v-else-if="hasCompletedLine"
-                    class="text-[9px] font-sans font-medium text-blue-500"
+                    class="text-[10px] font-sans font-semibold text-emerald-600 dark:text-emerald-400"
                   >
-                    (Selesai)
+                    (Siap)
                   </span>
                 </div>
               </div>
             </Transition>
           </div>
 
-          <!-- 6. Batal / Tutup -->
-          <UTooltip text="Batal & Tutup Draw">
+          <!-- 7. Cancel Draw -->
+          <UTooltip text="Batal & Tutup Draw (Esc)">
             <UButton
               icon="i-lucide-x"
               size="xs"
               color="neutral"
               variant="ghost"
-              class="text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+              class="text-gray-500 hover:text-red-600 dark:hover:text-red-400"
+              aria-label="Batal mode gambar"
               @click="stopDrawing(true)"
             />
           </UTooltip>
         </div>
+
+        <!-- Compact Keyboard / Edit Hint Pill -->
+        <div
+          class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200/90 dark:border-gray-800 bg-white/92 dark:bg-[#0b0f19]/92 backdrop-blur-md shadow-xs text-[10px] text-gray-600 dark:text-gray-300"
+        >
+          <UIcon name="i-lucide-info" class="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span v-if="isDrawInteracting">
+            Klik peta tambah titik · Klik ganda / Enter selesai
+          </span>
+          <span v-else>
+            Geser vertex · Klik titik tengah sisip · Klik kanan hapus
+          </span>
+        </div>
       </div>
     </Transition>
 
-    <!-- Hover Tooltip & Callout Line Overlay -->
-    <div
-      ref="tooltipEl"
-      class="pointer-events-none transition-opacity duration-150 z-30 flex flex-col items-center"
-      :class="tooltipData ? 'opacity-100' : 'opacity-0'"
-    >
-      <div
-        v-if="tooltipData"
-        class="px-3 py-2 rounded-lg bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-xl min-w-[190px] max-w-[260px] space-y-1.5"
-      >
-        <div class="flex items-center gap-1.5">
-          <div class="size-1.5 rounded-full bg-blue-500 shrink-0" />
-          <p class="font-semibold text-gray-900 dark:text-gray-100 truncate text-xs">
-            {{ tooltipData.nama_ruas }}
-          </p>
-        </div>
-
-        <div class="flex items-center justify-between gap-2 pt-0.5">
-          <UBadge
-            :label="tooltipData.kondisi || '-'"
-            :color="getKondisiBadgeColor(tooltipData.kondisi)"
-            variant="subtle"
-            size="xs"
-          />
-          <span class="font-mono text-gray-700 dark:text-gray-300 text-[11px] font-semibold">
-            {{ Number(tooltipData.panjang_meter).toLocaleString('id-ID', { maximumFractionDigits: 1 }) }} m
-          </span>
-        </div>
-
-        <div class="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 truncate pt-0.5 border-t border-gray-100 dark:border-gray-800/80">
-          <UIcon name="i-lucide-map-pin" class="size-3 shrink-0 text-blue-500" />
-          <span class="truncate">{{ tooltipData.desa }}, Kec. {{ tooltipData.kecamatan }}</span>
-        </div>
-      </div>
-
-      <!-- Garis Callout (Leader Stem & Target Anchor Pin) -->
-      <div v-if="tooltipData" class="flex flex-col items-center -mt-[1px]">
-        <!-- Segitiga penunjuk kecil -->
-        <div class="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-200 dark:border-t-gray-800" />
-        <!-- Batang Garis Callout (Lebih Tinggi untuk visibilitas optimal) -->
-        <div class="w-[2px] h-9 bg-blue-500 dark:bg-blue-400 shadow-xs -mt-[1px]" />
-        <!-- Pin Target Anchor Dot di Titik Vektor -->
-        <div class="relative flex items-center justify-center -mt-[2px]">
-          <span class="size-3.5 rounded-full bg-blue-500/40 animate-ping absolute" />
-          <span class="size-2 rounded-full bg-blue-500 dark:bg-blue-400 ring-2 ring-white dark:ring-[#070b14] shadow-sm" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Clicked Coordinate Pulse Marker Overlay -->
-    <div
-      ref="pulseEl"
-      class="pointer-events-none z-20 flex items-center justify-center size-8"
-      :class="isPulseVisible ? 'block' : 'hidden'"
-    >
-      <span class="absolute size-8 rounded-full bg-blue-500/40 animate-ping" />
-      <span class="absolute size-5 rounded-full bg-blue-500/25" />
-      <span class="relative size-3.5 rounded-full bg-blue-600 ring-2 ring-white dark:ring-gray-950 shadow-md flex items-center justify-center">
-        <span class="size-1 rounded-full bg-white" />
-      </span>
-    </div>
-
-    <!-- Floating Navigation Controls (Top Right, Clean Solid) -->
-    <div class="absolute top-3 right-3 z-20 flex flex-col gap-0.5 p-1 bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-      <UTooltip text="Perbesar (+)">
-        <UButton
-          icon="i-lucide-plus"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="zoomIn"
-        />
-      </UTooltip>
-
-      <UTooltip text="Perkecil (-)">
-        <UButton
-          icon="i-lucide-minus"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="zoomOut"
-        />
-      </UTooltip>
-
-      <div class="w-full h-px bg-gray-200 dark:bg-gray-800 my-0.5" />
-
-      <UTooltip text="Fokus Semua Ruas">
-        <UButton
-          icon="i-lucide-maximize-2"
-          size="xs"
-          color="primary"
-          variant="ghost"
-          @click="fitBounds"
-        />
-      </UTooltip>
-    </div>
-
-    <!-- Floating Basemap Selector (Bottom Left, Medium Basemap) -->
-    <div class="absolute bottom-16 sm:bottom-3 left-3 z-20">
+    <!-- Top-Right: Basemap Switcher + Vertical GIS Navigation Controls (Jaringan Jalan Reference) -->
+    <div class="absolute top-3 right-3 z-20 flex flex-col items-end gap-2">
       <BasemapSwitcher
         :model-value="basemap"
+        engine="maplibre"
         variant="medium"
-        engine="openlayers"
         :allow-none="true"
-        placement="bottom-left"
+        placement="top-right"
         @update:model-value="setBasemap($event as BasemapType)"
       />
+
+      <div
+        class="flex flex-col rounded-lg border border-gray-200/90 bg-white/95 shadow-sm backdrop-blur-md overflow-hidden dark:border-gray-700/90 dark:bg-[#0e1424]/95 divide-y divide-gray-200 dark:divide-gray-800"
+      >
+        <button
+          type="button"
+          aria-label="Perbesar Peta"
+          title="Perbesar (+)"
+          class="size-11 lg:size-8 flex items-center justify-center text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+          @click="zoomIn"
+        >
+          <UIcon name="i-lucide-plus" class="size-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Perkecil Peta"
+          title="Perkecil (-)"
+          class="size-11 lg:size-8 flex items-center justify-center text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+          @click="zoomOut"
+        >
+          <UIcon name="i-lucide-minus" class="size-4" />
+        </button>
+        <button
+          type="button"
+          :aria-pressed="is3DTiltActive"
+          aria-label="Ubah tampilan 2D dan 3D Tilt"
+          :title="is3DTiltActive ? 'Kembali ke 2D' : 'Tampilan 3D Tilt'"
+          :class="[
+            'size-11 lg:size-8 flex items-center justify-center text-[11px] font-bold transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600',
+            is3DTiltActive
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-800',
+          ]"
+          @click="toggle3DTilt"
+        >
+          3D
+        </button>
+        <button
+          type="button"
+          aria-label="Fokus semua ruas jalan"
+          title="Fokus Semua Ruas"
+          class="size-11 lg:size-8 flex items-center justify-center text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+          @click="fitBounds()"
+        >
+          <UIcon name="i-lucide-maximize-2" class="size-4" />
+        </button>
+        <button
+          v-if="currentBearing !== 0 || currentPitch !== 0"
+          type="button"
+          aria-label="Reset arah utara dan kemiringan"
+          title="Reset Utara & 2D"
+          class="size-11 lg:size-8 flex items-center justify-center text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/50 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600"
+          @click="resetNorthAndTilt"
+        >
+          <UIcon name="i-lucide-compass" class="size-4" />
+        </button>
+      </div>
     </div>
 
-    <!-- Floating Coordinates Pill (Desktop only, Bottom Center) -->
-    <div class="hidden md:flex absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-      <UBadge
-        :label="mouseCoords || '0.00000, 0.00000'"
-        color="neutral"
-        variant="subtle"
-        size="xs"
-        class="font-mono shadow-sm px-2.5 py-0.5"
-      />
-    </div>
-
-    <!-- Floating Scale Line Container (Bottom Right, Clean Glassmorphic) -->
+    <!-- Interactive Map Hover Tooltip (Clamped inside Canvas) -->
     <div
-      ref="scaleLineTarget"
-      class="absolute bottom-16 sm:bottom-3 right-3 z-20 pointer-events-none select-none"
-    />
+      v-if="hoverTooltip"
+      :style="getTooltipStyle()"
+      class="pointer-events-none absolute z-20 w-60 rounded-xl border border-gray-200 bg-white/95 p-2.5 text-xs shadow-xl backdrop-blur-md dark:border-gray-700 dark:bg-[#0e1424]/95 space-y-1.5"
+    >
+      <div class="flex items-center gap-1.5">
+        <span class="size-2 rounded-full bg-blue-500 shrink-0" />
+        <p class="font-semibold text-gray-900 dark:text-white truncate">
+          {{ hoverTooltip.nama_ruas }}
+        </p>
+      </div>
+      <div class="flex items-center justify-between gap-2">
+        <UBadge
+          :label="hoverTooltip.kondisi || '-'"
+          :color="getKondisiBadgeColor(hoverTooltip.kondisi)"
+          variant="subtle"
+          size="xs"
+        />
+        <span class="font-mono text-gray-800 dark:text-gray-200 text-[11px] font-semibold tabular-nums">
+          {{ Number(hoverTooltip.panjang_meter).toLocaleString("id-ID", { maximumFractionDigits: 1 }) }} m
+        </span>
+      </div>
+      <div class="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300 truncate pt-1 border-t border-gray-100 dark:border-gray-800">
+        <UIcon name="i-lucide-map-pin" class="size-3 shrink-0 text-blue-500" />
+        <span class="truncate">{{ hoverTooltip.desa }}, Kec. {{ hoverTooltip.kecamatan }}</span>
+      </div>
+    </div>
+
+    <!-- Bottom-Left Live WGS84 Coordinate & Zoom Telemetry HUD -->
+    <div
+      class="pointer-events-none absolute left-3 bottom-[4.75rem] lg:bottom-2.5 z-10 hidden sm:flex items-center gap-2 rounded-md border border-gray-200/90 bg-white/92 px-2.5 py-1 text-[11px] font-medium text-gray-700 shadow-xs backdrop-blur-md tabular-nums dark:border-gray-700/90 dark:bg-[#0e1424]/92 dark:text-gray-200"
+    >
+      <span>Zoom {{ currentZoom }}x</span>
+      <template v-if="currentPitch > 0">
+        <span class="text-gray-400">·</span>
+        <span>Tilt {{ currentPitch }}°</span>
+      </template>
+      <template v-if="cursorCoord">
+        <span class="text-gray-400">|</span>
+        <span>{{ cursorCoord.lat.toFixed(5) }}, {{ cursorCoord.lng.toFixed(5) }}</span>
+      </template>
+    </div>
 
     <!-- Loading Overlay -->
     <div
       v-if="!mapLoaded"
       class="absolute inset-0 flex items-center justify-center bg-gray-100/90 dark:bg-[#070b14]/90 z-30"
     >
-      <div class="flex flex-col items-center gap-2">
-        <UIcon name="i-lucide-loader-2" class="size-6 text-blue-600 dark:text-blue-400 animate-spin" />
-        <span class="text-xs text-gray-500 font-medium">Memuat peta spasial...</span>
+      <div class="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white dark:bg-[#0b0f19] border border-gray-200 dark:border-gray-800 shadow-lg text-xs font-medium text-gray-700 dark:text-gray-200">
+        <UIcon name="i-lucide-loader-2" class="size-4 text-blue-600 dark:text-blue-400 animate-spin" />
+        <span>Memuat kanvas MapLibre GL JS...</span>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-:deep(.ol-scale-line) {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(229, 231, 235, 1);
-  border-radius: 0.5rem;
-  padding: 3px 8px 3px 8px;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  display: inline-block;
-  position: relative;
-  bottom: auto;
-  left: auto;
-  right: auto;
+:deep(.maplibregl-ctrl-bottom-right) {
+  margin-bottom: 4.75rem;
 }
 
-:global(.dark) :deep(.ol-scale-line) {
-  background: rgba(11, 15, 25, 0.92);
-  border-color: rgba(31, 41, 55, 1);
+@media (min-width: 1024px) {
+  :deep(.maplibregl-ctrl-bottom-right) {
+    margin-bottom: 0.5rem;
+  }
 }
 
-:deep(.ol-scale-line-inner) {
-  border: 2px solid #059669;
-  border-top: none;
-  color: #111827;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
-  font-weight: 600;
-  text-align: center;
-  line-height: 1.2;
-  margin: 0 auto;
-  padding: 0 4px;
-}
-
-:global(.dark) :deep(.ol-scale-line-inner) {
-  border-color: #10b981;
-  color: #f3f4f6;
+@media (prefers-reduced-motion: reduce) {
+  .transition-all,
+  .transition-colors {
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>

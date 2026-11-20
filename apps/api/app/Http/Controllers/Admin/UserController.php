@@ -225,6 +225,24 @@ class UserController extends Controller
             'roles.min' => 'Pilih setidaknya satu role untuk pengguna.',
         ]);
 
+        $actor = $request->user();
+
+        if (!$actor->hasRole('admin') && in_array('admin', $validated['roles'], true)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hanya Super Admin yang dapat memberikan role admin.',
+            ], 403);
+        }
+
+        if (!$actor->hasRole('admin')) {
+            if ($actor->id_kecamatan) {
+                $validated['id_kecamatan'] = $actor->id_kecamatan;
+            }
+            if ($actor->id_desa) {
+                $validated['id_desa'] = $actor->id_desa;
+            }
+        }
+
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
@@ -267,12 +285,32 @@ class UserController extends Controller
             'roles.min' => 'Pilih setidaknya satu role untuk pengguna.',
         ]);
 
+        $actor = $request->user();
+
+        // Cegah non-admin memberikan role admin
+        if (!$actor->hasRole('admin') && in_array('admin', $validated['roles'], true)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hanya Super Admin yang dapat memberikan role admin.',
+            ], 403);
+        }
+
         // Cegah admin mencabut role admin dari akunnya sendiri
-        if ($request->user()->id === $user->id && $request->user()->hasRole('admin') && !in_array('admin', $validated['roles'], true)) {
+        if ($actor->id === $user->id && $actor->hasRole('admin') && !in_array('admin', $validated['roles'], true)) {
             return response()->json([
                 'ok' => false,
                 'message' => 'Anda tidak dapat mencabut role admin dari akun Anda sendiri.',
             ], 422);
+        }
+
+        // Kunci wilayah bagi aktor yang dibatasi wilayahnya
+        if (!$actor->hasRole('admin')) {
+            if ($actor->id_kecamatan) {
+                $validated['id_kecamatan'] = $actor->id_kecamatan;
+            }
+            if ($actor->id_desa) {
+                $validated['id_desa'] = $actor->id_desa;
+            }
         }
 
         $statusBefore = (bool) $user->status;
@@ -307,6 +345,10 @@ class UserController extends Controller
         $auditLog = app(AuditLogService::class);
 
         if (array_key_exists('status', $userData) && $statusBefore !== (bool) $userData['status']) {
+            if (!(bool) $userData['status']) {
+                $user->sessions()->delete();
+            }
+
             $auditLog->log(
                 event: 'user.status.changed',
                 module: 'security',
@@ -319,6 +361,8 @@ class UserController extends Controller
         }
 
         if (!empty($validated['password'])) {
+            $user->sessions()->delete();
+
             $auditLog->log(
                 event: 'user.password.reset.admin',
                 module: 'security',
@@ -383,7 +427,16 @@ class UserController extends Controller
             'roles.min' => 'Pilih setidaknya satu role untuk pengguna.',
         ]);
 
-        if ($request->user()->id === $user->id && $request->user()->hasRole('admin') && !in_array('admin', $validated['roles'], true)) {
+        $actor = $request->user();
+
+        if (!$actor->hasRole('admin') && in_array('admin', $validated['roles'], true)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hanya Super Admin yang dapat memberikan role admin.',
+            ], 403);
+        }
+
+        if ($actor->id === $user->id && $actor->hasRole('admin') && !in_array('admin', $validated['roles'], true)) {
             return response()->json([
                 'ok' => false,
                 'message' => 'Anda tidak dapat mencabut role admin dari akun Anda sendiri.',

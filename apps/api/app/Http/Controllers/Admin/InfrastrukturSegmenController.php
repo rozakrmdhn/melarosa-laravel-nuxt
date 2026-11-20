@@ -486,11 +486,20 @@ class InfrastrukturSegmenController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
+        $isRestricted = $user && !$user->isAdminOrBappeda();
+        if ($isRestricted) {
+            if ($user->id_desa) {
+                $validated['id_desa'] = (int) $user->id_desa;
+                $validated['id_kecamatan'] = (int) $user->id_kecamatan;
+            } elseif ($user->id_kecamatan) {
+                $validated['id_kecamatan'] = (int) $user->id_kecamatan;
+            }
+        }
+
         if (array_key_exists('parent_id', $validated)) {
             $parentRuas = !empty($validated['parent_id'])
                 ? JalanPorosDesa::find($validated['parent_id'])
                 : null;
-            $isRestricted = $user && !$user->isAdminOrBappeda();
 
             if ($parentRuas && $isRestricted) {
                 if ($user->id_desa && (int) $parentRuas->id_desa !== (int) $user->id_desa) {

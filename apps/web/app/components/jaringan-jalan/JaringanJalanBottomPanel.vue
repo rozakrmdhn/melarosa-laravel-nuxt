@@ -259,7 +259,8 @@ function isRowSelected(kind: 'rtrw' | 'poros' | 'kabupaten', id: string | number
     </div>
 
     <!-- Drawer Body -->
-    <div v-if="isMobileDrawer || !collapsed" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <Transition name="drawer-fade">
+      <div v-if="isMobileDrawer || !collapsed" class="flex-1 min-h-0 flex flex-col overflow-hidden">
       <!-- Filter & Batch Strip -->
       <div
         v-if="activeTab === 'analisa'"
@@ -1042,6 +1043,27 @@ function isRowSelected(kind: 'rtrw' | 'poros' | 'kabupaten', id: string | number
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </Transition>
   </section>
 </template>
+
+<style scoped>
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-fade-enter-active,
+  .drawer-fade-leave-active {
+    transition: none;
+  }
+}
+</style>

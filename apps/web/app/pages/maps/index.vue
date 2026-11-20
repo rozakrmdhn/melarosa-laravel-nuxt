@@ -11,7 +11,7 @@ import { useBasemapStore } from "~/stores/basemap";
 import { useGeoparkSites, type GeoparkSite } from "~/composables/useGeoparkSites";
 import type { RekapRuasItem } from "~/types/rekap-jalan";
 import { parseCoordinateString } from "~/utils/gis-helpers";
-import { normalizeWilayahKey } from "~/composables/useMapRekapOverview";
+import { normalizeWilayahKey, useMapRekapOverview } from "~/composables/useMapRekapOverview";
 import { useRekapJalanApi } from "~/composables/useRekapJalanApi";
 import { $http } from "~/utils/helpers";
 
@@ -170,6 +170,52 @@ const locationBarOpen = ref(hasExplicitSearchOrPin);
 const selectedKecamatanFilter = ref<string | null>(null);
 const selectedDesaFilter = ref<string | null>(null);
 const selectedStatusFilter = ref<string | null>(null);
+const { kecamatanStats, findKecamatanStatByName } = useMapRekapOverview();
+const kecamatanIdDirectory = ref<Record<string, number>>({});
+let kecamatanDirectoryPromise: Promise<void> | null = null;
+
+function resolveKecamatanFilterId(kecamatanName?: string | null): number | null {
+  const cleanKey = normalizeWilayahKey(kecamatanName);
+  if (!cleanKey) return null;
+  const dirId = kecamatanIdDirectory.value[cleanKey];
+  if (typeof dirId === "number" && Number.isFinite(dirId)) return dirId;
+  const stat = findKecamatanStatByName(kecamatanName);
+  if (stat && Number.isFinite(Number(stat.id_kecamatan))) {
+    return Number(stat.id_kecamatan);
+  }
+  return null;
+}
+
+async function ensureKecamatanIdDirectory(): Promise<void> {
+  if (!import.meta.client) return;
+  if (Object.keys(kecamatanIdDirectory.value).length > 0) return;
+  if (kecamatanDirectoryPromise) return kecamatanDirectoryPromise;
+
+  kecamatanDirectoryPromise = (async () => {
+    try {
+      const res: any = await $http("publikasi-peta/wilayah-options");
+      const list = Array.isArray(res?.kecamatan) ? res.kecamatan : [];
+      if (list.length > 0) {
+        const nextMap: Record<string, number> = {};
+        for (const item of list) {
+          const key = normalizeWilayahKey(item?.nama_kecamatan);
+          const idNum = Number(item?.id);
+          if (key && Number.isFinite(idNum)) {
+            nextMap[key] = idNum;
+          }
+        }
+        kecamatanIdDirectory.value = nextMap;
+      }
+    } catch {
+      // Fallback via useMapRekapOverview tetap diperiksa bila wilayah-options belum terjangkau
+    } finally {
+      kecamatanDirectoryPromise = null;
+    }
+  })();
+
+  return kecamatanDirectoryPromise;
+}
+
 const isBasemapBottomSheetOpen = ref(false);
 
 // ─── OpenGraph & Social Share Dynamic Metadata (16:9 Thumbnail Banner) ─────────
@@ -239,7 +285,7 @@ function startLoadingSimulation() {
     tick++;
     if (tick === 1) {
       loadingProgress.value = 48;
-      loadingStageText.value = "Mengunduh modul kartografi OpenLayers...";
+      loadingStageText.value = "Mengunduh modul kartografi MapLibre GL JS...";
     } else if (tick === 2) {
       loadingProgress.value = 76;
       loadingStageText.value = "Menyiapkan layer tematik & batas wilayah...";
@@ -875,7 +921,18 @@ function mapLayerItemToActive(item: any): ActiveLayerItem {
     (item.protocol || "").toUpperCase() === "MVT" ||
     item.source_type === "martin" ||
     (item.url && item.url.includes("/martin/")) ||
-    (item.layer_name && ["infrastruktur_segmen", "jalan_porosdesa", "jalan_kabupaten_luarkota", "bataswilayah_kabupaten"].includes(item.layer_name));
+    (!item.wmsUrl &&
+      item.source_type !== "geoportal" &&
+      item.source_type !== "external" &&
+      Boolean(item.layer_name) &&
+      [
+        "infrastruktur_segmen",
+        "jalan_porosdesa",
+        "jalan_kabupaten_luarkota",
+        "bataswilayah_kabupaten",
+        "bataswilayah_kecamatan",
+        "bataswilayah_desa",
+      ].includes(item.layer_name));
 
   const isSegmen = item.layer_name === "infrastruktur_segmen" || item.id === "01a1589c-8c15-70b6-a4fe-35517f888b36";
   const isKabupaten =
@@ -1118,6 +1175,9 @@ function applyDatasetQueryToMap() {
       { ...existing, visible: true, expanded: true },
       ...rest,
     ]);
+    if (selectedKecamatanFilter.value || selectedDesaFilter.value || selectedStatusFilter.value) {
+      applyMvtFiltersToActiveLayers();
+    }
     appliedDatasetQueryKey.value = targetKey;
     handleOpenLayersMenu();
     fitDatasetBboxIfAvailable(targetKey, geoCandidate || matchedFromApi || existing);
@@ -1267,6 +1327,10 @@ watch(
   { immediate: true }
 );
 
+function isValidMaplibreBasemap(code: string) {
+  return code === "none" || basemapStore.listForEngine("maplibre").some((item) => item.kode === code);
+}
+
 // Tangani navigasi riwayat browser (tombol Back / Forward)
 function handlePopState() {
   if (!import.meta.client) return;
@@ -1276,7 +1340,7 @@ function handlePopState() {
 
   if (basemapParam) {
     const normalized = normalizeBasemapAlias(basemapParam);
-    if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+    if (isValidMaplibreBasemap(normalized)) {
       currentBasemap.value = normalized as BasemapKey;
     }
   }
@@ -1372,7 +1436,7 @@ watch(
     const basemapParam = urlParams.get("basemap") || (route.query.basemap as string);
     if (basemapParam) {
       const normalized = normalizeBasemapAlias(basemapParam);
-      if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+      if (isValidMaplibreBasemap(normalized)) {
         currentBasemap.value = normalized as BasemapKey;
       }
     }
@@ -1412,11 +1476,12 @@ onMounted(() => {
     leftPanelOpen.value = true;
     syncSidebarWidth();
   }
+  void ensureKecamatanIdDirectory();
   void basemapStore.ensureLoaded().then(() => {
     const queryParam = typeof route.query.basemap === "string" ? route.query.basemap.trim() : null;
     if (queryParam) {
       const normalized = normalizeBasemapAlias(queryParam);
-      if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+      if (isValidMaplibreBasemap(normalized)) {
         currentBasemap.value = normalized as BasemapKey;
         return;
       }
@@ -1425,13 +1490,13 @@ onMounted(() => {
       const saved = localStorage.getItem("melarosa_active_basemap");
       if (saved && saved.trim()) {
         const normalized = normalizeBasemapAlias(saved.trim());
-        if (normalized === "none" || basemapStore.isValidCode(normalized, "openlayers")) {
+        if (isValidMaplibreBasemap(normalized)) {
           currentBasemap.value = normalized as BasemapKey;
           return;
         }
       }
     } catch {}
-    if (currentBasemap.value !== "none" && !basemapStore.isValidCode(currentBasemap.value, "openlayers")) {
+    if (!isValidMaplibreBasemap(currentBasemap.value)) {
       currentBasemap.value = (basemapStore.defaultKode || "esri") as BasemapKey;
     }
   });
@@ -2165,11 +2230,14 @@ function applyRouteQueryToViews() {
   const rawKec = q.wilayah || q.kecamatan;
   const rawDesa = q.desa;
   if (rawKec) {
+    let filterDirty = false;
+    const cleanRawKec = normalizeWilayahKey(String(rawKec));
     const matchedKec = KECAMATAN_ENTRIES.find(
-      (k) => k.name.toLowerCase() === String(rawKec).toLowerCase()
+      (k) => normalizeWilayahKey(k.name) === cleanRawKec
     );
     if (matchedKec && selectedKecamatanFilter.value !== matchedKec.name) {
       selectedKecamatanFilter.value = matchedKec.name;
+      filterDirty = true;
       if (isMobileScreen.value) {
         mobileSheetSnap.value = "peek";
         mobileDrawerOpen.value = true;
@@ -2177,8 +2245,14 @@ function applyRouteQueryToViews() {
     }
     if (!rawDesa && selectedDesaFilter.value) {
       selectedDesaFilter.value = null;
+      filterDirty = true;
     } else if (rawDesa && typeof rawDesa === "string" && selectedDesaFilter.value !== rawDesa) {
       selectedDesaFilter.value = rawDesa;
+      filterDirty = true;
+    }
+    if (filterDirty) {
+      void ensureKecamatanIdDirectory();
+      applyMvtFiltersToActiveLayers();
     }
   } else if (!rawKec && (selectedKecamatanFilter.value || selectedDesaFilter.value)) {
     selectedKecamatanFilter.value = null;
@@ -2262,13 +2336,32 @@ function handleUpdateLayerOpacity(payload: { layerId: string; opacity: number })
   }
 }
 
+function resolveKecamatanFilterExtent3857(kecamatanName?: string | null): [number, number, number, number] | null {
+  if (!kecamatanName) return null;
+  const cleanKec = normalizeWilayahKey(kecamatanName);
+  const matchedKec = KECAMATAN_ENTRIES.find((k) => normalizeWilayahKey(k.name) === cleanKec);
+  if (matchedKec?.bbox && matchedKec.bbox.length === 4) {
+    return convertBbox4326To3857(matchedKec.bbox);
+  }
+  return null;
+}
+
 function handleUpdateLayerFilter(payload: { layerId: string; kecamatan: string | null; status: string | null }) {
+  const nextKec = payload.kecamatan && payload.kecamatan !== "ALL" ? payload.kecamatan : payload.kecamatan;
+  if (nextKec && nextKec !== "ALL" && resolveKecamatanFilterId(nextKec) === null) {
+    void ensureKecamatanIdDirectory();
+  }
+  const nextKecId = nextKec && nextKec !== "ALL" ? resolveKecamatanFilterId(nextKec) : null;
+  const nextExtent = nextKec && nextKec !== "ALL" ? resolveKecamatanFilterExtent3857(nextKec) : null;
+
   activeLayers.value = activeLayers.value.map((layer) => {
     if (layer.id === payload.layerId) {
       return {
         ...layer,
-        filterKecamatan: payload.kecamatan,
+        filterKecamatan: nextKec,
+        filterKecamatanId: nextKecId,
         filterStatus: payload.status,
+        filterExtent: nextExtent,
       };
     }
     return layer;
@@ -2315,13 +2408,10 @@ function isMvtLayerItem(layer: ActiveLayerItem): boolean {
 }
 
 function applyMvtFiltersToActiveLayers(customExtent3857?: [number, number, number, number] | null) {
-  let filterExtent3857 = customExtent3857 ?? null;
-  if (!filterExtent3857 && selectedKecamatanFilter.value) {
-    const cleanKec = selectedKecamatanFilter.value.replace(/^Kecamatan\s+/i, "").trim().toLowerCase();
-    const matchedKec = KECAMATAN_ENTRIES.find((k) => k.name.toLowerCase() === cleanKec);
-    if (matchedKec?.bbox && matchedKec.bbox.length === 4) {
-      filterExtent3857 = convertBbox4326To3857(matchedKec.bbox);
-    }
+  const filterExtent3857 = customExtent3857 ?? resolveKecamatanFilterExtent3857(selectedKecamatanFilter.value);
+  const filterKecamatanId = resolveKecamatanFilterId(selectedKecamatanFilter.value);
+  if (selectedKecamatanFilter.value && filterKecamatanId === null) {
+    void ensureKecamatanIdDirectory();
   }
 
   activeLayers.value = activeLayers.value.map((layer) => {
@@ -2329,6 +2419,7 @@ function applyMvtFiltersToActiveLayers(customExtent3857?: [number, number, numbe
       return {
         ...layer,
         filterKecamatan: selectedKecamatanFilter.value,
+        filterKecamatanId,
         filterDesa: selectedDesaFilter.value,
         filterStatus: selectedStatusFilter.value,
         filterExtent: filterExtent3857,
@@ -2337,6 +2428,32 @@ function applyMvtFiltersToActiveLayers(customExtent3857?: [number, number, numbe
     return layer;
   });
 }
+
+watch(
+  [kecamatanIdDirectory, kecamatanStats],
+  () => {
+    let changed = false;
+    const nextLayers = activeLayers.value.map((layer) => {
+      if (!isMvtLayerItem(layer)) return layer;
+      const targetKec = layer.filterKecamatan || selectedKecamatanFilter.value;
+      if (!targetKec || targetKec === "ALL") return layer;
+      const resolvedId = resolveKecamatanFilterId(targetKec);
+      if (resolvedId !== null && layer.filterKecamatanId !== resolvedId) {
+        changed = true;
+        return {
+          ...layer,
+          filterKecamatan: targetKec,
+          filterKecamatanId: resolvedId,
+        };
+      }
+      return layer;
+    });
+    if (changed) {
+      activeLayers.value = nextLayers;
+    }
+  },
+  { deep: false }
+);
 
 function fitMapToDesaFilter(desaName: string, kecamatanName?: string | null, attempt = 0) {
   if (!import.meta.client) return;

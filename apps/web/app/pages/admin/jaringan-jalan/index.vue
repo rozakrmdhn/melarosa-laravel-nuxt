@@ -445,6 +445,10 @@ async function loadSummary() {
     if (res.desa_coverage) {
       cakupanSummary.value = res.desa_coverage;
     }
+    if (res.dataset_overview) {
+      if (dirtyTabs.master) masterMeta.value.total = res.dataset_overview.jalan_poros_ruas ?? masterMeta.value.total;
+      if (dirtyTabs.kabupaten) kabupatenMeta.value.total = res.dataset_overview.jalan_kabupaten_ruas ?? kabupatenMeta.value.total;
+    }
   } catch (err: any) {
     pushConsoleLog('error', err?.data?.message || 'Gagal memuat ringkasan analisa spasial.');
   } finally {
@@ -550,30 +554,102 @@ async function loadKabupatenList() {
   }
 }
 
-async function refreshAllData() {
+const dirtyTabs = reactive({
+  analisa: true,
+  cakupan: true,
+  master: true,
+  kabupaten: true,
+});
+
+const rtrwDetailCache = new Map<number, RtrwAnalisaDetail>();
+const porosDetailCache = new Map<string, JaringanJalanRuasFeature>();
+const kabDetailCache = new Map<number, JalanKabupatenItem>();
+let inspectSeq = 0;
+
+function clearDetailCaches() {
+  rtrwDetailCache.clear();
+  porosDetailCache.clear();
+  kabDetailCache.clear();
+}
+
+async function ensureTabLoaded(tab: JaringanWorkspaceTab) {
+  if (tab === 'analisa' && dirtyTabs.analisa) {
+    dirtyTabs.analisa = false;
+    await loadAnalisaList();
+  } else if (tab === 'cakupan' && dirtyTabs.cakupan) {
+    dirtyTabs.cakupan = false;
+    await loadCakupanDesa();
+  } else if (tab === 'master' && dirtyTabs.master) {
+    dirtyTabs.master = false;
+    await loadMasterList();
+  } else if (tab === 'kabupaten' && dirtyTabs.kabupaten) {
+    dirtyTabs.kabupaten = false;
+    await loadKabupatenList();
+  }
+}
+
+async function refreshAllData(invalidateCache = false) {
+  if (invalidateCache) {
+    clearDetailCaches();
+  }
+  dirtyTabs.analisa = true;
+  dirtyTabs.cakupan = true;
+  dirtyTabs.master = true;
+  dirtyTabs.kabupaten = true;
+
+  const activeDataTab: JaringanWorkspaceTab =
+    activeTab.value === 'cakupan' || activeTab.value === 'master' || activeTab.value === 'kabupaten'
+      ? activeTab.value
+      : 'analisa';
+
   await Promise.all([
     loadSummary(),
     loadMapIndex(),
-    loadAnalisaList(),
-    loadCakupanDesa(),
-    loadMasterList(),
-    loadKabupatenList(),
+    ensureTabLoaded(activeDataTab),
   ]);
 }
 
 // ─── Map & Inspector Actions ──────────────────────────────────────────────────
-async function inspectRtrwSegment(rtrwId: number, focusUi = true) {
+async function inspectRtrwSegment(
+  rtrwId: number,
+  focusUi = true,
+  hintBbox?: [number, number, number, number] | null,
+) {
+  const seq = ++inspectSeq;
   inspectorMode.value = 'rtrw';
   selectedPoros.value = null;
   selectedKabupaten.value = null;
-  loadingDetail.value = true;
 
   if (focusUi && isDesktop.value) {
     expandRightPanel();
   }
+  if (hintBbox) {
+    mapRef.value?.fitToBbox(hintBbox, 16.5);
+  }
 
+  const cached = rtrwDetailCache.get(rtrwId);
+  if (cached) {
+    selectedRtrwDetail.value = cached;
+    loadingDetail.value = false;
+    mapSelection.value = {
+      kind: 'rtrw',
+      id: cached.segment.id,
+      title: cached.segment.display_name,
+      subtitle: `${cached.segment.orde02 || 'RTRW'} · ${cached.segment.nama_desa ? `Desa ${cached.segment.nama_desa}` : cached.segment.nama_kecamatan || 'Bojonegoro'}`,
+      badge: `${formatAngka(cached.segment.combined_overlap_pct, 0)}% Tercover`,
+      bbox: cached.segment.bbox,
+      geojson: cached.segment.geojson,
+      matchedPorosGeojson: cached.matched_poros.map((m) => m.geojson).filter(Boolean),
+      matchedKabupatenGeojson: cached.matched_kabupaten.map((m) => m.geojson).filter(Boolean),
+    };
+    return;
+  }
+
+  loadingDetail.value = true;
   try {
     const res = await jaringanApi.fetchAnalisaDetail(rtrwId);
+    if (seq !== inspectSeq) return;
+    rtrwDetailCache.set(rtrwId, res);
     selectedRtrwDetail.value = res;
     mapSelection.value = {
       kind: 'rtrw',
@@ -588,17 +664,21 @@ async function inspectRtrwSegment(rtrwId: number, focusUi = true) {
     };
     pushConsoleLog('info', `Inspeksi segmen RTRW #${res.segment.id}: ${res.segment.display_name}.`);
   } catch (err: any) {
+    if (seq !== inspectSeq) return;
     toast.add({
       title: 'Gagal Memuat Detail Segmen',
       description: err?.data?.message || 'Tidak dapat memuat detail irisan spasial segmen RTRW.',
       color: 'error',
     });
   } finally {
-    loadingDetail.value = false;
+    if (seq === inspectSeq) {
+      loadingDetail.value = false;
+    }
   }
 }
 
 async function inspectPorosFeature(featOrId: JaringanJalanRuasFeature | string, focusUi = true) {
+  const seq = ++inspectSeq;
   inspectorMode.value = 'poros';
   selectedRtrwDetail.value = null;
   selectedKabupaten.value = null;
@@ -610,10 +690,18 @@ async function inspectPorosFeature(featOrId: JaringanJalanRuasFeature | string, 
   try {
     let feat: JaringanJalanRuasFeature;
     if (typeof featOrId === 'string') {
-      const res = await jaringanApi.fetchRuasDetail(featOrId);
-      feat = res.data;
+      const cached = porosDetailCache.get(featOrId);
+      if (cached) {
+        feat = cached;
+      } else {
+        const res = await jaringanApi.fetchRuasDetail(featOrId);
+        if (seq !== inspectSeq) return;
+        feat = res.data;
+        porosDetailCache.set(featOrId, feat);
+      }
     } else {
       feat = featOrId;
+      porosDetailCache.set(feat.id, feat);
     }
     selectedPoros.value = feat;
     mapSelection.value = {
@@ -627,6 +715,7 @@ async function inspectPorosFeature(featOrId: JaringanJalanRuasFeature | string, 
     };
     pushConsoleLog('info', `Inspeksi Master Poros: ${feat.properties.nama_ruas}.`);
   } catch (err: any) {
+    if (seq !== inspectSeq) return;
     toast.add({
       title: 'Gagal Memuat Detail Ruas Poros',
       description: err?.data?.message || 'Detail ruas jalan poros tidak tersedia.',
@@ -636,6 +725,7 @@ async function inspectPorosFeature(featOrId: JaringanJalanRuasFeature | string, 
 }
 
 async function inspectKabupatenFeature(itemOrId: JalanKabupatenItem | number, focusUi = true) {
+  const seq = ++inspectSeq;
   inspectorMode.value = 'kabupaten';
   selectedRtrwDetail.value = null;
   selectedPoros.value = null;
@@ -647,10 +737,18 @@ async function inspectKabupatenFeature(itemOrId: JalanKabupatenItem | number, fo
   try {
     let item: JalanKabupatenItem;
     if (typeof itemOrId === 'number') {
-      const res = await jaringanApi.fetchKabupatenDetail(itemOrId);
-      item = res.data;
+      const cached = kabDetailCache.get(itemOrId);
+      if (cached) {
+        item = cached;
+      } else {
+        const res = await jaringanApi.fetchKabupatenDetail(itemOrId);
+        if (seq !== inspectSeq) return;
+        item = res.data;
+        kabDetailCache.set(itemOrId, item);
+      }
     } else {
       item = itemOrId;
+      kabDetailCache.set(item.id, item);
     }
     selectedKabupaten.value = item;
     mapSelection.value = {
@@ -664,6 +762,7 @@ async function inspectKabupatenFeature(itemOrId: JalanKabupatenItem | number, fo
     };
     pushConsoleLog('info', `Inspeksi Jalan Kabupaten: ${item.nama_ruas}.`);
   } catch (err: any) {
+    if (seq !== inspectSeq) return;
     toast.add({
       title: 'Gagal Memuat Detail Jalan Kabupaten',
       description: err?.data?.message || 'Detail ruas kabupaten tidak tersedia.',
@@ -718,7 +817,7 @@ async function handleRunFullAnalysis() {
       color: 'success',
     });
     pushConsoleLog('success', `Analisa spasial selesai: ${proc} segmen diproses (${dur} dtk).`);
-    await refreshAllData();
+    await refreshAllData(true);
   } catch (err: any) {
     const msg = err?.data?.message || 'Gagal menghitung ulang analisa spasial.';
     toast.add({ title: 'Analisa Spasial Gagal', description: msg, color: 'error' });
@@ -750,7 +849,8 @@ async function handleAdoptFromInspector(payload: {
       color: 'success',
     });
     pushConsoleLog('success', `Adopsi segmen RTRW #${payload.id} berhasil ke Master Poros.`);
-    await Promise.all([refreshAllData(), inspectRtrwSegment(payload.id, false)]);
+    clearDetailCaches();
+    await Promise.all([refreshAllData(true), inspectRtrwSegment(payload.id, false)]);
   } catch (err: any) {
     const msg = err?.data?.message || 'Tidak dapat mengadopsi segmen RTRW.';
     toast.add({ title: 'Gagal Adopsi Segmen', description: msg, color: 'error' });
@@ -776,7 +876,7 @@ async function handleBulkAdoptSelected() {
     });
     pushConsoleLog('success', `Adopsi massal selesai (${selectedRtrwIds.value.length} segmen diproses).`);
     selectedRtrwIds.value = [];
-    await refreshAllData();
+    await refreshAllData(true);
   } catch (err: any) {
     const msg = err?.data?.message || 'Gagal menjalankan adopsi massal segmen terpilih.';
     toast.add({ title: 'Gagal Adopsi Massal', description: msg, color: 'error' });
@@ -800,7 +900,7 @@ async function handleBatchAdoptVillage(desa: CakupanDesaItem) {
       color: 'success',
     });
     pushConsoleLog('success', `Adopsi segmen RTRW untuk Desa ${desa.nama_desa} selesai.`);
-    await refreshAllData();
+    await refreshAllData(true);
   } catch (err: any) {
     const msg = err?.data?.message || `Gagal adopsi RTRW Desa ${desa.nama_desa}.`;
     toast.add({ title: 'Gagal Adopsi Desa', description: msg, color: 'error' });
@@ -823,6 +923,7 @@ async function handleSavePoros(payload: {
   savingPoros.value = true;
   try {
     const res = await jaringanApi.updateRuas(payload.id, payload);
+    porosDetailCache.set(payload.id, res.data);
     selectedPoros.value = res.data;
     toast.add({
       title: 'Master Poros Diperbarui',
@@ -870,7 +971,7 @@ async function confirmDeletePoros() {
     pushConsoleLog('warn', `Ruas Master Poros "${target.properties.nama_ruas}" dihapus.`);
     closeDeleteDialog();
     clearSelection();
-    await refreshAllData();
+    await refreshAllData(true);
   } catch (err: any) {
     const msg = err?.data?.message || 'Gagal menghapus ruas.';
     toast.add({ title: 'Gagal Menghapus', description: msg, color: 'error' });
@@ -960,15 +1061,24 @@ watch(perPage, () => {
   refreshAllData();
 });
 
+watch(activeTab, (tab) => {
+  ensureTabLoaded(tab);
+});
+
 watch(cakupanStatusFilter, () => {
   filters.cakupanPage = 1;
+  dirtyTabs.cakupan = false;
   loadCakupanDesa();
 });
 
 function handleGlobalKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && confirmDeleteTarget.value) {
+  if (e.key !== 'Escape') return;
+  if (confirmDeleteTarget.value) {
     e.preventDefault();
     closeDeleteDialog();
+  } else if (!filterModalOpen.value && !mobileSheetOpen.value && mapSelection.value) {
+    e.preventDefault();
+    clearSelection();
   }
 }
 
@@ -1019,7 +1129,7 @@ onBeforeUnmount(() => {
       <!-- Left Title Group (Desktop aligned dynamically with LeftPanel width) -->
       <div class="flex items-center h-full min-w-0">
         <div
-          class="flex items-center gap-2 px-3 shrink-0"
+          class="flex items-center gap-2 px-3 shrink-0 transition-[width] duration-200 ease-out"
           :style="isDesktop && leftPanelActualWidth > 0 ? { width: `${leftPanelActualWidth}px` } : undefined"
         >
           <UIcon name="i-lucide-route" class="size-4 text-[#176B4D] dark:text-emerald-400 shrink-0" />
@@ -1138,7 +1248,7 @@ onBeforeUnmount(() => {
           class="w-full h-full"
           :ui="{
             root: 'h-full w-full',
-            panel: '',
+            panel: isDraggingVertical ? '' : 'panel-smooth-transition',
             handle: 'h-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-row-resize',
           }"
           @dragging="(_index: number, dragging: boolean) => handleSplitterDragging('vertical', dragging)"
@@ -1150,7 +1260,7 @@ onBeforeUnmount(() => {
               class="w-full h-full"
               :ui="{
                 root: 'h-full w-full',
-                panel: '',
+                panel: isDraggingHorizontal ? '' : 'panel-smooth-transition',
                 handle: 'w-1 bg-gray-200 dark:bg-gray-800 hover:bg-blue-500 active:bg-blue-600 transition-colors cursor-col-resize',
               }"
               @dragging="(_index: number, dragging: boolean) => handleSplitterDragging('horizontal', dragging)"
@@ -1288,7 +1398,7 @@ onBeforeUnmount(() => {
               @update:selected-rtrw-ids="(ids) => (selectedRtrwIds = ids)"
               @update:cakupan-status-filter="(st) => (cakupanStatusFilter = st)"
               @change-page="handlePageChange"
-              @inspect-rtrw="(item) => inspectRtrwSegment(item.id, true)"
+              @inspect-rtrw="(item) => inspectRtrwSegment(item.id, true, item.bbox)"
               @zoom-rtrw="(item) => zoomToBbox(item.bbox)"
               @bulk-adopt="handleBulkAdoptSelected"
               @adopt-desa="handleBatchAdoptVillage"
@@ -1543,7 +1653,7 @@ onBeforeUnmount(() => {
             @update:selected-rtrw-ids="(ids) => (selectedRtrwIds = ids)"
             @update:cakupan-status-filter="(st) => (cakupanStatusFilter = st)"
             @change-page="handlePageChange"
-            @inspect-rtrw="(item) => { inspectRtrwSegment(item.id, false); openMobileDock('detail', 'peek'); }"
+            @inspect-rtrw="(item) => { inspectRtrwSegment(item.id, false, item.bbox); openMobileDock('detail', 'peek'); }"
             @zoom-rtrw="(item) => zoomToBbox(item.bbox)"
             @bulk-adopt="handleBulkAdoptSelected"
             @adopt-desa="handleBatchAdoptVillage"
@@ -1701,6 +1811,19 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.panel-smooth-transition {
+  transition:
+    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-smooth-transition {
+    transition: none;
+  }
+}
+
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

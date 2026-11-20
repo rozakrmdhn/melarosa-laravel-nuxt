@@ -237,29 +237,31 @@ function toggleToolDrawer(key: JaringanLayerKey, tool: 'opacity' | 'info') {
       </UTooltip>
     </div>
 
-    <!-- Desktop Collapsed Vertical Rail -->
-    <button
-      v-if="!isMobileDrawer && collapsed"
-      type="button"
-      :aria-expanded="false"
-      aria-label="Buka panel daftar layer dan legenda peta"
-      class="flex flex-col items-center pt-3 gap-3 flex-1 w-full cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-600"
-      title="Klik untuk membuka panel layer"
-      @click="emit('update:collapsed', false)"
-    >
-      <span class="p-1.5 rounded-md bg-emerald-50 text-[#176B4D] dark:bg-emerald-950/60 dark:text-emerald-400">
-        <UIcon name="i-lucide-layers" class="size-4" />
-      </span>
-      <span
-        class="text-xs font-medium text-gray-600 dark:text-gray-300 tracking-wide whitespace-nowrap"
-        style="writing-mode: vertical-rl;"
+    <!-- Desktop Collapsed Vertical Rail / Expanded Body -->
+    <Transition name="panel-fade" mode="out-in">
+      <button
+        v-if="!isMobileDrawer && collapsed"
+        key="rail"
+        type="button"
+        :aria-expanded="false"
+        aria-label="Buka panel daftar layer dan legenda peta"
+        class="flex flex-col items-center pt-3 gap-3 flex-1 w-full cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-600"
+        title="Klik untuk membuka panel layer"
+        @click="emit('update:collapsed', false)"
       >
-        Daftar Layer
-      </span>
-    </button>
+        <span class="p-1.5 rounded-md bg-emerald-50 text-[#176B4D] dark:bg-emerald-950/60 dark:text-emerald-400">
+          <UIcon name="i-lucide-layers" class="size-4" />
+        </span>
+        <span
+          class="text-xs font-medium text-gray-600 dark:text-gray-300 tracking-wide whitespace-nowrap"
+          style="writing-mode: vertical-rl;"
+        >
+          Daftar Layer
+        </span>
+      </button>
 
-    <!-- Scrollable Body Content -->
-    <div v-else class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+      <!-- Scrollable Body Content -->
+      <div v-else key="body" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
       <h2 v-if="isMobileDrawer" class="sr-only">Daftar Layer dan Legenda Peta</h2>
       <!-- 1. Wilayah Kerja Card -->
       <section
@@ -379,11 +381,11 @@ function toggleToolDrawer(key: JaringanLayerKey, tool: 'opacity' | 'info') {
         </div>
       </section>
 
-      <!-- 3. Stack Layer Vektor Martin -->
+      <!-- 3. Stack Layer Peta -->
       <section class="space-y-2" aria-labelledby="heading-layer-stack">
         <div class="flex items-center justify-between px-0.5">
           <h3 id="heading-layer-stack" class="text-xs font-semibold text-gray-800 dark:text-gray-200">
-            Layer Peta Vektor (Martin)
+            Layer Peta
           </h3>
           <span class="text-[11px] text-gray-600 dark:text-gray-400 tabular-nums">
             {{ Object.values(layers).filter(Boolean).length }}/5 aktif
@@ -661,6 +663,27 @@ function toggleToolDrawer(key: JaringanLayerKey, tool: 'opacity' | 'info') {
           </div>
         </div>
       </section>
-    </div>
+      </div>
+    </Transition>
   </component>
 </template>
+
+<style scoped>
+.panel-fade-enter-active,
+.panel-fade-leave-active {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.panel-fade-enter-from,
+.panel-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-fade-enter-active,
+  .panel-fade-leave-active {
+    transition: none;
+  }
+}
+</style>

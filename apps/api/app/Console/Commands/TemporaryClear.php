@@ -30,7 +30,11 @@ class TemporaryClear extends Command
         $uploads = TemporaryUpload::where('created_at', '<', now()->subHour())->get();
 
         foreach ($uploads as $upload) {
-            Storage::disk('public')->delete($upload->path);
+            if (str_starts_with((string) $upload->path, 'temporary/')) {
+                Storage::disk('local')->delete($upload->path);
+            } else {
+                Storage::disk('public')->delete($upload->path);
+            }
             $upload->delete();
         }
     }
